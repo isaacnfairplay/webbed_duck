@@ -2,7 +2,10 @@
 
 ## Unreleased
 
-- No changes yet.
+- Added extensive plugin registry tests that verify custom image getters,
+  fallback behaviour, and chart renderer edge cases.
+- Documented the plugin architecture with a standalone demo script and guide
+  under `docs/demos/`.
 
 ## MVP 0.3
 

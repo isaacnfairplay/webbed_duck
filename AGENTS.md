@@ -541,7 +541,7 @@ webbed_duck run-incremental <route> [--start --end]  # iterate batches
 * `core.config`: loading, env overrides, validation.
 * `server.auth`: sessions, cookie flags by transport mode, domain allowlist, basic password path (if enabled).
 * Preprocessors: coercions, range checks, path guards.
-* Postprocessors: HTML_T/C snapshots, chart SVG, image getter fallback.
+* Postprocessors & plugins: HTML_T/C snapshots, chart SVG, image getter fallback, registry demos (`tests/test_plugins.py`, `examples/plugin_registry_demo.py`).
 * Share tokens: hashing, TTL, single-use, bindings.
 
 **Integration**
@@ -588,7 +588,7 @@ webbed_duck run-incremental <route> [--start --end]  # iterate batches
 * [ ] Auth: `pseudo` + sessions (SQLite)
 * [ ] Share link (hash+TTL+UA/IP bind)
 * [ ] Introspection: `/routes`, `/routes/{id}/schema`
-* [ ] Tests: unit + integration basics
+* [x] Tests: unit + integration basics
 * [ ] HTTP banner toggle (`ui.show_http_warning`)
 
 **Beta 0.2.x**
@@ -596,8 +596,8 @@ webbed_duck run-incremental <route> [--start --end]  # iterate batches
 * [ ] `html_c` cards + `feed` virtual view
 * [ ] Arrow RPC slices for virtual viewers
 * [ ] Email shares (inline + attachments)
-* [ ] Image getter plugin (localize/cache assets)
-* [ ] Charts (SVG) + renderer registry
+* [x] Image getter plugin (localize/cache assets)
+* [x] Charts (SVG) + renderer registry
 * [ ] Popularity analytics + folder indexes
 * [ ] Error taxonomy surfaced in UI
 
