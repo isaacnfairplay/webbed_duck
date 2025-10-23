@@ -2,7 +2,22 @@
 
 ## Unreleased
 
-- No changes yet.
+- Added a pseudo-authentication adapter with SQLite-backed session storage and
+  login/logout endpoints plus `/auth/me` for session introspection.
+- Added extensive plugin registry tests that verify custom image getters,
+  fallback behaviour, and chart renderer edge cases.
+- Documented the plugin architecture with a standalone demo script and guide
+  under `docs/demos/`.
+- Corrected the plugin registry demo module docstring and ensured the new test
+  suite isolates registry state with pytest fixtures.
+- Implemented hashed share tokens with TTL/binding controls, new `/shares`
+  endpoints, configuration knobs, and regression tests for the SQLite store
+  plus the FastAPI flow.
+
+- Added CSV and Parquet response formats alongside CSV download tests for the compiler integration suite.
+- Enabled share emails with configurable adapters, zipped CSV/Parquet attachments, and guardrails for attachment sizing.
+- Introduced proxy header authentication and external adapter loading so deployments can bridge to upstream identity providers.
+- Shipped a perf harness script (`examples/perf_harness.py`) and documentation for benchmarking compiled routes without HTTP overhead.
 
 ## MVP 0.3
 

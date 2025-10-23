@@ -6,6 +6,10 @@
 - CSV append workflows, schema introspection, and auto-form metadata surfaced via `/routes/{id}/append` and `/routes/{id}/schema`.
 - Local execution helpers (`webbed_duck.core.local.run_route`) and the `run-incremental` CLI command support cursor-driven workloads while recording checkpoints under `runtime/checkpoints.json`.
 - Configuration expanded with auth adapter selection, sample route metadata refreshed for overrides and append targets, and documentation updated to describe the new surface area.
+- CSV and Parquet downloads are now first-class response formats, complementing the HTML viewers and Arrow streams.
+- Share links can be emailed via configurable adapters that zip CSV/Parquet attachments with watermark metadata.
+- Proxy header and external auth adapters round out the authentication story ahead of GA.
+- A perf harness script and demo document enable repeatable route timing outside the HTTP server.
 
 ## Storage Layout Additions
 

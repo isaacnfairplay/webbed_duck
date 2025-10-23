@@ -2,16 +2,18 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pathlib import Path
+
 import pytest
 
+from webbed_duck.config import load_config
 from webbed_duck.core.compiler import RouteCompilationError, compile_route_file, compile_routes
 from webbed_duck.core.routes import load_compiled_routes
 from webbed_duck.server.app import create_app
-from webbed_duck.config import load_config
 
 try:
     from fastapi.testclient import TestClient
-except ModuleNotFoundError:  # pragma: no cover - allow import error during type checking
+except (ModuleNotFoundError, RuntimeError):  # pragma: no cover - allow missing optional deps
     TestClient = None  # type: ignore
 
 
@@ -26,6 +28,13 @@ def test_compile_route(tmp_path: Path) -> None:
         "+++\n"
         "id = \"sample\"\n"
         "path = \"/sample\"\n"
+        "preprocess = [\"sanitize\"]\n"
+        "postprocess = [\"csv\"]\n"
+        "[assets]\n"
+        "hero = \"hero.png\"\n"
+        "[[charts]]\n"
+        "id = \"trend\"\n"
+        "type = \"line\"\n"
         "[params.name]\n"
         "type = \"str\"\n"
         "required = true\n"
@@ -36,6 +45,12 @@ def test_compile_route(tmp_path: Path) -> None:
     definition = compile_route_file(route_path)
     assert definition.param_order == ["name"]
     assert definition.prepared_sql == "SELECT ? as value"
+    assert definition.metadata.get("preprocess") == ["sanitize"]
+    assert definition.metadata.get("postprocess") == ["csv"]
+    assert definition.metadata.get("assets") == {"hero": "hero.png"}
+    charts_meta = definition.metadata.get("charts")
+    assert isinstance(charts_meta, list)
+    assert charts_meta and charts_meta[0].get("id") == "trend"
 
     build_dir = tmp_path / "build"
     compiled = compile_routes(tmp_path, build_dir)
@@ -94,6 +109,16 @@ def test_server_returns_rows(tmp_path: Path) -> None:
     feed_response = client.get("/hello", params={"name": "DuckDB", "format": "feed"})
     assert feed_response.status_code == 200
     assert "<section" in feed_response.text
+
+    csv_response = client.get("/hello", params={"name": "DuckDB", "format": "csv"})
+    assert csv_response.status_code == 200
+    assert "text/csv" in csv_response.headers["content-type"].lower()
+    assert "Hello, DuckDB!" in csv_response.text
+
+    parquet_response = client.get("/hello", params={"name": "DuckDB", "format": "parquet"})
+    assert parquet_response.status_code == 200
+    assert parquet_response.headers["content-type"].startswith("application/x-parquet")
+    assert parquet_response.content
 
     analytics = client.get("/routes")
     assert analytics.status_code == 200

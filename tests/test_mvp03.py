@@ -4,6 +4,10 @@ import datetime as dt
 from pathlib import Path
 
 import pyarrow as pa
+import datetime as dt
+from pathlib import Path
+
+import pyarrow as pa
 import pytest
 
 from webbed_duck.config import Config, load_config
@@ -15,7 +19,7 @@ from webbed_duck.server.app import create_app
 
 try:
     from fastapi.testclient import TestClient
-except ModuleNotFoundError:  # pragma: no cover - optional dependency
+except (ModuleNotFoundError, RuntimeError):  # pragma: no cover - optional dependency
     TestClient = None  # type: ignore
 
 
