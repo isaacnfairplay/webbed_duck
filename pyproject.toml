@@ -1,6 +1,6 @@
 [project]
 name = "webbed-duck"
-version = "0.1.1"
+version = "0.2.0"
 description = "A parameterized SQL web server for DuckDB routes compiled from Markdown"
 authors = [
   { name = "webbed_duck maintainers" }
@@ -10,6 +10,7 @@ requires-python = ">=3.11"
 dependencies = [
   "duckdb>=0.9.2",
   "fastapi>=0.104.1",
+  "httpx>=0.25",
   "uvicorn>=0.23.2",
   "pyarrow>=14.0.1"
 ]

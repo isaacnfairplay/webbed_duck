@@ -78,3 +78,24 @@ def test_server_returns_rows(tmp_path: Path) -> None:
     data = response.json()
     assert response.status_code == 200
     assert data["rows"][0]["greeting"] == "Hello, DuckDB!"
+
+    html_response = client.get("/hello", params={"name": "DuckDB", "format": "html_t"})
+    assert html_response.status_code == 200
+    assert "Hello, DuckDB!" in html_response.text
+
+    cards_response = client.get("/hello", params={"name": "DuckDB", "format": "html_c"})
+    assert cards_response.status_code == 200
+    assert "Hello, DuckDB!" in cards_response.text
+
+    arrow_response = client.get("/hello", params={"name": "DuckDB", "format": "arrow", "limit": 1})
+    assert arrow_response.status_code == 200
+    assert arrow_response.headers["content-type"].startswith("application/vnd.apache.arrow.stream")
+
+    feed_response = client.get("/hello", params={"name": "DuckDB", "format": "feed"})
+    assert feed_response.status_code == 200
+    assert "<section" in feed_response.text
+
+    analytics = client.get("/routes")
+    assert analytics.status_code == 200
+    payload = analytics.json()
+    assert payload["routes"][0]["id"] == "hello"
