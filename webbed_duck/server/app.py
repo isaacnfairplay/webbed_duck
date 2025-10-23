@@ -196,7 +196,10 @@ def _parse_optional_int(value: str | None) -> int | None:
     value = value.strip()
     if not value:
         return None
-    return int(value)
+    try:
+        return int(value)
+    except ValueError as exc:
+        raise _http_error("invalid_parameter", f"Expected an integer but received '{value}'") from exc
 
 
 def _http_error(code: str, message: str) -> HTTPException:
