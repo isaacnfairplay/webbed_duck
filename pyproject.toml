@@ -1,0 +1,25 @@
+[project]
+name = "webbed-duck"
+version = "0.1.0"
+description = "A parameterized SQL web server for DuckDB routes compiled from Markdown"
+authors = [
+  { name = "webbed_duck maintainers" }
+]
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "duckdb>=0.9.2",
+  "fastapi>=0.104.1",
+  "uvicorn>=0.23.2",
+  "pyarrow>=14.0.1"
+]
+
+[project.scripts]
+webbed-duck = "webbed_duck.cli:main"
+
+[build-system]
+requires = ["setuptools>=67", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["webbed_duck"]
