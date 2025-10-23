@@ -10,7 +10,11 @@ from ..config import Config
 
 
 def table_to_records(table: pa.Table) -> list[dict[str, object]]:
-    return table.to_pylist()
+    records: list[dict[str, object]] = []
+    for row in table.to_pylist():
+        converted = {key: _json_friendly(value) for key, value in row.items()}
+        records.append(converted)
+    return records
 
 
 def render_table_html(
@@ -162,6 +166,12 @@ def render_feed_html(table: pa.Table, route_metadata: Mapping[str, object] | Non
         + "".join(sections)
         + "</body></html>"
     )
+
+
+def _json_friendly(value: object) -> object:
+    if isinstance(value, (dt.date, dt.datetime)):
+        return value.isoformat()
+    return value
 
 
 __all__ = [

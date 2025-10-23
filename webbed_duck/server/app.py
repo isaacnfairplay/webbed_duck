@@ -13,6 +13,13 @@ from ..config import Config
 from ..core.routes import RouteDefinition
 from ..plugins.charts import render_route_charts
 from .analytics import AnalyticsStore
+from .csv import append_record
+from .auth import resolve_auth_adapter
+from .overlay import (
+    OverlayStore,
+    apply_overrides,
+    compute_row_key_from_values,
+)
 from .postprocess import render_cards_html, render_feed_html, render_table_html, table_to_records
 
 _ERROR_TAXONOMY = {
@@ -35,10 +42,12 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
     if not routes:
         raise ValueError("At least one route must be provided to create the application")
 
-    app = FastAPI(title="webbed_duck", version="0.2.0")
+    app = FastAPI(title="webbed_duck", version="0.3.0")
     app.state.config = config
     app.state.analytics = AnalyticsStore(weight=config.analytics.weight_interactions)
     app.state.routes = list(routes)
+    app.state.overlays = OverlayStore(config.server.storage_root)
+    app.state.auth_adapter = resolve_auth_adapter(config.auth.mode)
 
     for route in routes:
         app.add_api_route(
@@ -69,6 +78,99 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
         subset.sort(key=lambda item: (-item["popularity"], item["path"]))
         return {"folder": prefix or "/", "routes": subset}
 
+    @app.get("/routes/{route_id}/schema")
+    async def describe_route(route_id: str, request: Request) -> Mapping[str, object]:
+        route = _get_route(app.state.routes, route_id)
+        params = _collect_params(route, request)
+        ordered = [_value_for_name(params, name, route) for name in route.param_order]
+        table = _execute_sql(_limit_zero(route.prepared_sql), ordered)
+        schema = [
+            {"name": field.name, "type": str(field.type)}
+            for field in table.schema
+        ]
+        form = [
+            {
+                "name": spec.name,
+                "type": spec.type.value,
+                "required": spec.required,
+                "default": spec.default,
+                "description": spec.description,
+            }
+            for spec in route.params
+        ]
+        metadata = route.metadata if isinstance(route.metadata, Mapping) else {}
+        return {
+            "route_id": route.id,
+            "path": route.path,
+            "schema": schema,
+            "form": form,
+            "overrides": metadata.get("overrides", {}),
+            "append": metadata.get("append", {}),
+        }
+
+    @app.get("/routes/{route_id}/overrides")
+    async def list_overrides(route_id: str) -> Mapping[str, object]:
+        route = _get_route(app.state.routes, route_id)
+        overrides = [record.to_dict() for record in app.state.overlays.list_for_route(route.id)]
+        return {"route_id": route.id, "overrides": overrides}
+
+    @app.post("/routes/{route_id}/overrides")
+    async def save_override(route_id: str, request: Request) -> Mapping[str, object]:
+        route = _get_route(app.state.routes, route_id)
+        metadata = route.metadata if isinstance(route.metadata, Mapping) else {}
+        override_meta = metadata.get("overrides", {}) if isinstance(metadata, Mapping) else {}
+        allowed = set(_coerce_sequence(override_meta.get("allowed")))
+        key_columns = _coerce_sequence(override_meta.get("key_columns"))
+        payload = await request.json()
+        if not isinstance(payload, Mapping):
+            raise _http_error("invalid_parameter", "Override payload must be an object")
+        column = str(payload.get("column", "")).strip()
+        if not column:
+            raise _http_error("invalid_parameter", "Override column is required")
+        if allowed and column not in allowed:
+            raise HTTPException(status_code=403, detail={"code": "forbidden_override", "message": "Column cannot be overridden"})
+        value = payload.get("value")
+        reason = payload.get("reason")
+        author = payload.get("author")
+        row_key = payload.get("row_key")
+        key_values = payload.get("key")
+        if row_key is None:
+            if not isinstance(key_values, Mapping):
+                raise _http_error("missing_parameter", "Provide either row_key or key mapping")
+            try:
+                row_key = compute_row_key_from_values(key_values, key_columns)
+            except KeyError as exc:
+                raise _http_error("missing_parameter", str(exc)) from exc
+        user = await app.state.auth_adapter.authenticate(request)
+        record = app.state.overlays.upsert(
+            route_id=route.id,
+            row_key=str(row_key),
+            column=column,
+            value=value,
+            reason=str(reason) if reason is not None else None,
+            author=str(author) if author is not None else None,
+            author_user_id=user.user_id if user else None,
+        )
+        return {"override": record.to_dict()}
+
+    @app.post("/routes/{route_id}/append")
+    async def append_route(route_id: str, request: Request) -> Mapping[str, object]:
+        route = _get_route(app.state.routes, route_id)
+        metadata = route.metadata if isinstance(route.metadata, Mapping) else {}
+        append_meta = metadata.get("append") if isinstance(metadata, Mapping) else None
+        if not isinstance(append_meta, Mapping):
+            raise HTTPException(status_code=404, detail={"code": "append_not_configured", "message": "Route does not allow CSV append"})
+        columns = _coerce_sequence(append_meta.get("columns"))
+        if not columns:
+            raise HTTPException(status_code=500, detail={"code": "append_misconfigured", "message": "Append metadata must declare columns"})
+        destination = str(append_meta.get("destination") or f"{route.id}.csv")
+        payload = await request.json()
+        if not isinstance(payload, Mapping):
+            raise _http_error("invalid_parameter", "Append payload must be an object")
+        record = {column: payload.get(column) for column in columns}
+        path = append_record(app.state.config.server.storage_root, destination=destination, columns=columns, record=record)
+        return {"appended": True, "path": str(path)}
+
     return app
 
 
@@ -87,6 +189,8 @@ def _make_endpoint(route: RouteDefinition):
         except duckdb.Error as exc:  # pragma: no cover - safety net
             raise HTTPException(status_code=500, detail={"code": "duckdb_error", "message": str(exc)}) from exc
         elapsed_ms = (time.perf_counter() - start) * 1000
+
+        table = apply_overrides(table, route.metadata, request.app.state.overlays.list_for_route(route.id))
 
         if columns:
             selectable = [col for col in columns if col in table.column_names]
@@ -182,6 +286,11 @@ def _execute_sql(sql: str, params: Iterable[object]) -> pa.Table:
         con.close()
 
 
+def _limit_zero(sql: str) -> str:
+    inner = sql.strip().rstrip(";")
+    return f"SELECT * FROM ({inner}) WHERE 1=0"
+
+
 def _arrow_stream_response(table: pa.Table) -> StreamingResponse:
     sink = io.BytesIO()
     with pa.ipc.new_stream(sink, table.schema) as writer:
@@ -200,6 +309,19 @@ def _parse_optional_int(value: str | None) -> int | None:
         return int(value)
     except ValueError as exc:
         raise _http_error("invalid_parameter", f"Expected an integer but received '{value}'") from exc
+
+
+def _coerce_sequence(value: object) -> list[str]:
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return [str(item) for item in value]
+    return []
+
+
+def _get_route(routes: Sequence[RouteDefinition], route_id: str) -> RouteDefinition:
+    for route in routes:
+        if route.id == route_id:
+            return route
+    raise HTTPException(status_code=404, detail={"code": "not_found", "message": f"Route '{route_id}' not found"})
 
 
 def _http_error(code: str, message: str) -> HTTPException:

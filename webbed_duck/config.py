@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Mapping, MutableMapping
+from typing import Any, Mapping, MutableMapping, Sequence
 
 try:
     import tomllib  # Python 3.11+
@@ -38,12 +38,24 @@ class AnalyticsConfig:
 
 
 @dataclass(slots=True)
+class AuthConfig:
+    """Authentication adapter selection and tunables."""
+
+    mode: str = "none"
+    external_adapter: str | None = None
+    allowed_domains: Sequence[str] = field(default_factory=list)
+    session_ttl_minutes: int = 45
+    remember_me_days: int = 7
+
+
+@dataclass(slots=True)
 class Config:
     """Top-level configuration container."""
 
     server: ServerConfig = field(default_factory=ServerConfig)
     ui: UIConfig = field(default_factory=UIConfig)
     analytics: AnalyticsConfig = field(default_factory=AnalyticsConfig)
+    auth: AuthConfig = field(default_factory=AuthConfig)
 
 
 def _as_path(value: Any) -> Path:
@@ -83,6 +95,9 @@ def load_config(path: str | Path | None = None) -> Config:
     analytics_data = data.get("analytics")
     if isinstance(analytics_data, Mapping):
         cfg.analytics = _parse_analytics(analytics_data, base=cfg.analytics)
+    auth_data = data.get("auth")
+    if isinstance(auth_data, Mapping):
+        cfg.auth = _parse_auth(auth_data, base=cfg.auth)
     return cfg
 
 
@@ -123,10 +138,28 @@ def _parse_analytics(data: Mapping[str, Any], base: AnalyticsConfig) -> Analytic
     return replace(base, **overrides)
 
 
+def _parse_auth(data: Mapping[str, Any], base: AuthConfig) -> AuthConfig:
+    overrides: MutableMapping[str, Any] = {}
+    if "mode" in data:
+        overrides["mode"] = str(data["mode"])
+    if "external_adapter" in data:
+        overrides["external_adapter"] = str(data["external_adapter"]) if data["external_adapter"] is not None else None
+    if "allowed_domains" in data and isinstance(data["allowed_domains"], Sequence):
+        overrides["allowed_domains"] = [str(item) for item in data["allowed_domains"]]
+    if "session_ttl_minutes" in data:
+        overrides["session_ttl_minutes"] = int(data["session_ttl_minutes"])
+    if "remember_me_days" in data:
+        overrides["remember_me_days"] = int(data["remember_me_days"])
+    if not overrides:
+        return base
+    return replace(base, **overrides)
+
+
 __all__ = [
     "AnalyticsConfig",
     "Config",
     "ServerConfig",
     "UIConfig",
+    "AuthConfig",
     "load_config",
 ]
