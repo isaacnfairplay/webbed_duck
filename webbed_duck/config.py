@@ -1,7 +1,7 @@
 """Configuration loading for webbed_duck."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Mapping, MutableMapping
 
@@ -72,7 +72,9 @@ def _parse_server(data: Mapping[str, Any], base: ServerConfig) -> ServerConfig:
         overrides["host"] = str(data["host"])
     if "port" in data:
         overrides["port"] = int(data["port"])
-    return ServerConfig(**{**base.__dict__, **overrides})
+    if not overrides:
+        return base
+    return replace(base, **overrides)
 
 
 __all__ = ["Config", "ServerConfig", "load_config"]
