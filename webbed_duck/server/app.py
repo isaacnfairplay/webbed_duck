@@ -168,7 +168,18 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
         if not isinstance(payload, Mapping):
             raise _http_error("invalid_parameter", "Append payload must be an object")
         record = {column: payload.get(column) for column in columns}
-        path = append_record(app.state.config.server.storage_root, destination=destination, columns=columns, record=record)
+        try:
+            path = append_record(
+                app.state.config.server.storage_root,
+                destination=destination,
+                columns=columns,
+                record=record,
+            )
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=500,
+                detail={"code": "append_misconfigured", "message": str(exc)},
+            ) from exc
         return {"appended": True, "path": str(path)}
 
     return app
