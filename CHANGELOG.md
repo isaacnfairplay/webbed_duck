@@ -4,6 +4,13 @@
 
 - No changes yet.
 
+## MVP 0.3
+
+- Added an overlay store with REST endpoints for listing and creating per-cell overrides, including author hashes and user identifiers resolved through the auth adapter.
+- Introduced CSV append workflows and auto-form metadata via new `/routes/{id}/schema` and `/routes/{id}/append` endpoints.
+- Added a local route runner (`webbed_duck.core.local.run_route`) and an incremental CLI command for iterating cursor-driven workloads while persisting checkpoints.
+- Upgraded configuration with auth adapter selection, refreshed the sample route metadata, and documented the new capabilities in the README.
+
 ## MVP 0.2
 
 - Upgraded the FastAPI application to deliver HTML tables, card grids, feed views, and Arrow RPC slices with error-taxonomy

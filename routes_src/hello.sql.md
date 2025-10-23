@@ -20,6 +20,14 @@ timestamp_col = "created_at"
 title_col = "greeting"
 summary_col = "note"
 
+[overrides]
+key_columns = ["greeting"]
+allowed = ["note"]
+
+[append]
+columns = ["greeting", "note", "created_at"]
+destination = "hello_appends.csv"
+
 [[charts]]
 id = "greeting_length"
 type = "line"
