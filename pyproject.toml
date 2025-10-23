@@ -3,7 +3,7 @@ name = "webbed-duck"
 version = "0.1.1"
 description = "A parameterized SQL web server for DuckDB routes compiled from Markdown"
 authors = [
-  { name = "webbed_duck maintainers" }
+  { name = "Isaac Moore" }
 ]
 readme = "README.md"
 requires-python = ">=3.11"
