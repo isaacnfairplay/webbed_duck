@@ -22,10 +22,28 @@ class ServerConfig:
 
 
 @dataclass(slots=True)
+class UIConfig:
+    """User interface toggles exposed to postprocessors."""
+
+    show_http_warning: bool = True
+    error_taxonomy_banner: bool = True
+
+
+@dataclass(slots=True)
+class AnalyticsConfig:
+    """Runtime analytics collection controls."""
+
+    enabled: bool = True
+    weight_interactions: int = 1
+
+
+@dataclass(slots=True)
 class Config:
     """Top-level configuration container."""
 
     server: ServerConfig = field(default_factory=ServerConfig)
+    ui: UIConfig = field(default_factory=UIConfig)
+    analytics: AnalyticsConfig = field(default_factory=AnalyticsConfig)
 
 
 def _as_path(value: Any) -> Path:
@@ -59,6 +77,12 @@ def load_config(path: str | Path | None = None) -> Config:
     server_data = data.get("server")
     if isinstance(server_data, Mapping):
         cfg.server = _parse_server(server_data, base=cfg.server)
+    ui_data = data.get("ui")
+    if isinstance(ui_data, Mapping):
+        cfg.ui = _parse_ui(ui_data, base=cfg.ui)
+    analytics_data = data.get("analytics")
+    if isinstance(analytics_data, Mapping):
+        cfg.analytics = _parse_analytics(analytics_data, base=cfg.analytics)
     return cfg
 
 
@@ -77,4 +101,32 @@ def _parse_server(data: Mapping[str, Any], base: ServerConfig) -> ServerConfig:
     return replace(base, **overrides)
 
 
-__all__ = ["Config", "ServerConfig", "load_config"]
+def _parse_ui(data: Mapping[str, Any], base: UIConfig) -> UIConfig:
+    overrides: MutableMapping[str, Any] = {}
+    if "show_http_warning" in data:
+        overrides["show_http_warning"] = bool(data["show_http_warning"])
+    if "error_taxonomy_banner" in data:
+        overrides["error_taxonomy_banner"] = bool(data["error_taxonomy_banner"])
+    if not overrides:
+        return base
+    return replace(base, **overrides)
+
+
+def _parse_analytics(data: Mapping[str, Any], base: AnalyticsConfig) -> AnalyticsConfig:
+    overrides: MutableMapping[str, Any] = {}
+    if "enabled" in data:
+        overrides["enabled"] = bool(data["enabled"])
+    if "weight_interactions" in data:
+        overrides["weight_interactions"] = int(data["weight_interactions"])
+    if not overrides:
+        return base
+    return replace(base, **overrides)
+
+
+__all__ = [
+    "AnalyticsConfig",
+    "Config",
+    "ServerConfig",
+    "UIConfig",
+    "load_config",
+]

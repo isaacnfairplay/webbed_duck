@@ -59,6 +59,7 @@ class RouteDefinition:
     params: Sequence[ParameterSpec]
     title: str | None = None
     description: str | None = None
+    metadata: Mapping[str, Any] | None = None
 
     def find_param(self, name: str) -> ParameterSpec | None:
         for param in self.params:
@@ -107,6 +108,10 @@ def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
         for item in route.get("params", [])
         if isinstance(item, Mapping)
     ]
+    metadata = route.get("metadata")
+    if not isinstance(metadata, Mapping):
+        metadata = {}
+
     return RouteDefinition(
         id=str(route["id"]),
         path=str(route["path"]),
@@ -117,6 +122,7 @@ def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
         params=params,
         title=route.get("title"),
         description=route.get("description"),
+        metadata=metadata,
     )
 
 
