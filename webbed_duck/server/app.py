@@ -5,6 +5,7 @@ import io
 import time
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Callable, Iterable, Mapping, MutableMapping, Sequence
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
@@ -79,14 +80,21 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
         raise ValueError("At least one route must be provided to create the application")
 
     app = FastAPI(title="webbed_duck", version="0.4.1")
+    storage_root = Path(config.server.storage_root)
+    try:
+        storage_root.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:  # pragma: no cover - filesystem failure safety
+        raise RuntimeError(f"Failed to prepare storage root '{storage_root}': {exc}") from exc
+
     app.state.config = config
+    app.state.storage_root = storage_root
     app.state.analytics = AnalyticsStore(
         weight=config.analytics.weight_interactions,
         enabled=config.analytics.enabled,
     )
     app.state.routes = list(routes)
-    app.state.overlays = OverlayStore(config.server.storage_root)
-    app.state.meta = MetaStore(config.server.storage_root)
+    app.state.overlays = OverlayStore(storage_root)
+    app.state.meta = MetaStore(storage_root)
     app.state.session_store = SessionStore(app.state.meta, config.auth)
     app.state.share_store = ShareStore(app.state.meta, config)
     app.state.email_sender = _load_email_sender(config.email.adapter)

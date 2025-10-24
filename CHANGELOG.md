@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-- Nothing yet.
+- Fixed storage-root handling so `[storage].root` in `config.toml` is honoured and
+  server startup now ensures the configured directory structure exists before
+  opening caches and metadata stores.
 
 ## 0.4.3 - 2025-03-08
 
