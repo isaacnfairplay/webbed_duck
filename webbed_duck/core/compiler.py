@@ -470,6 +470,7 @@ def _write_route_module(definition: RouteDefinition, source_path: Path, src_root
                 "required": spec.required,
                 "default": spec.default,
                 "description": spec.description,
+                **({"extra": dict(spec.extra)} if spec.extra else {}),
             }
             for spec in definition.params
         ],

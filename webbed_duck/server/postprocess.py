@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime as dt
 import html
+import json
 from typing import Iterable, Mapping, Sequence
 
 import pyarrow as pa
@@ -31,13 +32,25 @@ def render_table_html(
     params: Sequence[ParameterSpec] | None = None,
     param_values: Mapping[str, object] | None = None,
     format_hint: str | None = None,
+    pagination: Mapping[str, object] | None = None,
+    rpc_payload: Mapping[str, object] | None = None,
 ) -> str:
     headers = table.column_names
     records = table_to_records(table)
     table_meta = _merge_view_metadata(route_metadata, "html_t", postprocess)
     params_html = _render_params_ui(
-        table_meta, params, param_values, format_hint=format_hint
+        table_meta,
+        params,
+        param_values,
+        format_hint=format_hint,
+        pagination=pagination,
     )
+    summary_html = _render_summary_html(
+        len(records),
+        pagination,
+        rpc_payload,
+    )
+    rpc_html = _render_rpc_payload(rpc_payload)
     rows_html = "".join(
         "<tr>" + "".join(f"<td>{html.escape(str(row.get(col, '')))}</td>" for col in headers) + "</tr>"
         for row in records
@@ -72,7 +85,9 @@ def render_table_html(
         + "".join(banners)
         + chart_html
         + params_html
+        + summary_html
         + f"<table><thead><tr>{header_html}</tr></thead><tbody>{rows_html}</tbody></table>"
+        + rpc_html
         + "</body></html>"
     )
 
@@ -115,6 +130,8 @@ def render_cards_html_with_assets(
     params: Sequence[ParameterSpec] | None = None,
     param_values: Mapping[str, object] | None = None,
     format_hint: str | None = None,
+    pagination: Mapping[str, object] | None = None,
+    rpc_payload: Mapping[str, object] | None = None,
 ) -> str:
     metadata = route_metadata or {}
     cards_meta: dict[str, object] = {}
@@ -131,8 +148,18 @@ def render_cards_html_with_assets(
 
     records = table_to_records(table)
     params_html = _render_params_ui(
-        cards_meta, params, param_values, format_hint=format_hint
+        cards_meta,
+        params,
+        param_values,
+        format_hint=format_hint,
+        pagination=pagination,
     )
+    summary_html = _render_summary_html(
+        len(records),
+        pagination,
+        rpc_payload,
+    )
+    rpc_html = _render_rpc_payload(rpc_payload)
     getter_name = str(assets.get("image_getter")) if assets and assets.get("image_getter") else None
     base_path = str(assets.get("base_path")) if assets and assets.get("base_path") else None
     cards = []
@@ -183,7 +210,9 @@ def render_cards_html_with_assets(
         + banners
         + chart_html
         + params_html
+        + summary_html
         + f"<section class='cards'>{''.join(cards)}</section>"
+        + rpc_html
         + "</body></html>"
     )
 
@@ -204,6 +233,13 @@ _PARAMS_STYLES = (
     ".param-actions button:hover{background:#1d4ed8;border-color:#1d4ed8;}"
     ".param-actions .reset-link{color:#2563eb;text-decoration:none;font-size:0.9rem;}"
     ".param-actions .reset-link:hover{text-decoration:underline;}"
+    ".result-summary{margin:0.5rem 0 1rem 0;color:#374151;font-size:0.9rem;}"
+    ".rpc-actions{margin-top:1rem;display:flex;gap:1rem;align-items:center;}"
+    ".rpc-actions a{color:#2563eb;text-decoration:none;font-weight:600;}"
+    ".rpc-actions a:hover{text-decoration:underline;}"
+    ".pagination{margin-top:1rem;}"
+    ".pagination a{color:#2563eb;text-decoration:none;font-weight:600;}"
+    ".pagination a:hover{text-decoration:underline;}"
 )
 
 
@@ -226,6 +262,7 @@ def _render_params_ui(
     param_values: Mapping[str, object] | None,
     *,
     format_hint: str | None = None,
+    pagination: Mapping[str, object] | None = None,
 ) -> str:
     if not params:
         return ""
@@ -265,6 +302,18 @@ def _render_params_ui(
             + html.escape(_stringify_param_value(value))
             + "'/>"
         )
+    if pagination:
+        for key in ("limit", "offset"):
+            value = pagination.get(key)
+            if value in {None, ""}:
+                continue
+            hidden_inputs.append(
+                "<input type='hidden' name='"
+                + html.escape(str(key))
+                + "' value='"
+                + html.escape(_stringify_param_value(value))
+                + "'/>"
+            )
 
     fields: list[str] = []
     for spec in selected_specs:
@@ -391,6 +440,86 @@ def _stringify_param_value(value: object) -> str:
     if isinstance(value, bool):
         return "true" if value else "false"
     return str(value)
+
+
+def _render_summary_html(
+    row_count: int,
+    pagination: Mapping[str, object] | None,
+    rpc_payload: Mapping[str, object] | None,
+) -> str:
+    total_rows = None
+    offset_value = 0
+    limit_value = None
+    if rpc_payload:
+        total_rows = rpc_payload.get("total_rows")
+        offset_value = int(rpc_payload.get("offset", 0) or 0)
+        limit_raw = rpc_payload.get("limit")
+        if limit_raw not in (None, ""):
+            try:
+                limit_value = int(limit_raw)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                limit_value = None
+    if pagination:
+        offset_raw = pagination.get("offset")
+        limit_raw = pagination.get("limit")
+        if offset_raw not in (None, ""):
+            try:
+                offset_value = int(offset_raw)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                offset_value = offset_value
+        if limit_raw not in (None, "") and limit_value is None:
+            try:
+                limit_value = int(limit_raw)  # type: ignore[arg-type]
+            except (TypeError, ValueError):
+                limit_value = None
+    if total_rows in (None, ""):
+        return ""
+    start = offset_value + 1 if row_count else offset_value
+    end = offset_value + row_count
+    total = int(total_rows)
+    summary = f"Showing {start:,}–{end:,} of {total:,} rows"
+    next_link = None
+    if rpc_payload and rpc_payload.get("next_href"):
+        next_link = str(rpc_payload["next_href"])
+    pagination_html = (
+        f"<div class='pagination'><a href='{html.escape(next_link)}'>Next page</a></div>"
+        if next_link
+        else ""
+    )
+    return (
+        f"<p class='result-summary'>{html.escape(summary)}</p>"
+        + pagination_html
+    )
+
+
+def _render_rpc_payload(rpc_payload: Mapping[str, object] | None) -> str:
+    if not rpc_payload:
+        return ""
+    endpoint = rpc_payload.get("endpoint")
+    data = {key: value for key, value in rpc_payload.items() if key != "endpoint"}
+    if endpoint:
+        data["endpoint"] = endpoint
+    try:
+        payload_json = json.dumps(data, separators=(",", ":"))
+    except (TypeError, ValueError):  # pragma: no cover - defensive
+        payload_json = "{}"
+    link_html = (
+        f"<a class='rpc-download' href='{html.escape(str(endpoint))}'>"
+        "Download this slice (Arrow)</a>"
+        if endpoint
+        else ""
+    )
+    if not link_html and payload_json == "{}":
+        return ""
+    safe_json = payload_json.replace("</", "<\\/")
+    return (
+        "<div class='rpc-actions'>"
+        + link_html
+        + "</div>"
+        + "<script type='application/json' id='wd-rpc-config'>"
+        + safe_json
+        + "</script>"
+    )
 
 
 def render_feed_html(

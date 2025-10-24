@@ -204,6 +204,38 @@ curl "http://127.0.0.1:8000/ops/workstations?plant_day=2024-03-01&format=json"
 
 Routes can further customise behaviour via presentation metadata—e.g., `[html_c]` for card decks, `[feed]` for update feeds, or `[append]` to allow operators to push corrections into CSV append logs.
 
+### UI filters and Arrow RPC slices
+
+- Declare parameter controls in frontmatter so HTML responses surface filters:
+
+  ```toml
+  [params.name]
+  type = "str"
+  default = "world"
+  ui_control = "input"         # or "select"
+  ui_label = "Name"
+  ui_placeholder = "Your teammate"
+  ui_help = "Type a name and press Apply"
+
+  [html_t]
+  show_params = ["name"]
+  ```
+
+  The same `show_params` list works for `[html_c]` card views. Only parameters
+  listed there render controls; the rest are preserved as hidden inputs so
+  filter submissions keep pagination or additional query values intact.
+
+- Table (`html_t`) and card (`html_c`) responses now emit pagination metadata
+  and an embedded `<script id="wd-rpc-config">` block describing the current
+  slice (`offset`, `limit`, `total_rows`) plus a ready-to-use Arrow RPC
+  endpoint. Clients can call that URL with updated `offset` / `limit` values to
+  stream additional pages without re-rendering the HTML.
+
+- Every HTML response mirrors the RPC headers (`x-total-rows`, `x-offset`,
+  `x-limit`) and surfaces a convenience link labelled “Download this slice
+  (Arrow)” so operations teams can verify the dataset powering the view or hand
+  the slice to downstream tooling.
+
 ## MVP 0.4 — One-stop-shop data server
 
 > **Promise:** By 0.4, `webbed_duck` is the standalone app for data surfaces. Drop `.sql.md` files into a folder, start the server, and you get working web endpoints with HTML/CSV/Parquet/JSON output, parameter forms, lightweight auth, and optional cached snapshots. No hand-written FastAPI, no manual HTML, no bespoke export logic—just `.sql.md` contracts.

@@ -5,8 +5,8 @@ import io
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Callable, Iterable, Mapping, Sequence
-from urllib.parse import parse_qsl, urlsplit
+from typing import Callable, Iterable, Mapping, MutableMapping, Sequence
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import duckdb
 import pyarrow as pa
@@ -719,6 +719,10 @@ def _format_response(
 ) -> Response:
     metadata = route.metadata if isinstance(route.metadata, Mapping) else {}
     table = result.table
+    pagination_values = {
+        "offset": result.offset,
+        "limit": result.limit,
+    }
     if fmt in {"json", "table"}:
         records = table_to_records(table)
         payload = {
@@ -737,6 +741,7 @@ def _format_response(
         return JSONResponse(payload)
     if fmt == "html_t":
         post_opts = route.postprocess.get("html_t") if isinstance(route.postprocess, Mapping) else None
+        rpc_payload = _build_rpc_payload(request, fmt, result, table.num_rows)
         html = render_table_html(
             table,
             metadata,
@@ -747,10 +752,18 @@ def _format_response(
             params=route.params,
             param_values=result.params,
             format_hint=fmt,
+            pagination=pagination_values,
+            rpc_payload=rpc_payload,
         )
-        return HTMLResponse(html)
+        response = HTMLResponse(html)
+        _attach_rpc_headers(response, result)
+        if rpc_payload.get("endpoint"):
+            _add_vary_header(response.headers, "Accept")
+            response.headers["Link"] = f"<{rpc_payload['endpoint']}>; rel=\"data\""
+        return response
     if fmt == "html_c":
         post_opts = route.postprocess.get("html_c") if isinstance(route.postprocess, Mapping) else None
+        rpc_payload = _build_rpc_payload(request, fmt, result, table.num_rows)
         html = render_cards_html_with_assets(
             table,
             metadata,
@@ -763,8 +776,15 @@ def _format_response(
             params=route.params,
             param_values=result.params,
             format_hint=fmt,
+            pagination=pagination_values,
+            rpc_payload=rpc_payload,
         )
-        return HTMLResponse(html)
+        response = HTMLResponse(html)
+        _attach_rpc_headers(response, result)
+        if rpc_payload.get("endpoint"):
+            _add_vary_header(response.headers, "Accept")
+            response.headers["Link"] = f"<{rpc_payload['endpoint']}>; rel=\"data\""
+        return response
     if fmt == "feed":
         post_opts = route.postprocess.get("feed") if isinstance(route.postprocess, Mapping) else None
         html = render_feed_html(
@@ -778,9 +798,7 @@ def _format_response(
         return _arrow_stream_response(table)
     if fmt == "arrow_rpc":
         response = _arrow_stream_response(table)
-        response.headers["x-total-rows"] = str(result.total_rows)
-        response.headers["x-offset"] = str(result.offset)
-        response.headers["x-limit"] = str(result.limit if result.limit is not None else result.total_rows)
+        _attach_rpc_headers(response, result)
         return response
     if fmt == "csv":
         return _csv_response(route, table)
@@ -807,6 +825,76 @@ def _parquet_response(route: RouteDefinition, table: pa.Table) -> StreamingRespo
     response = StreamingResponse(stream, media_type="application/x-parquet")
     response.headers["content-disposition"] = f'attachment; filename="{route.id}.parquet"'
     return response
+
+
+def _build_rpc_payload(
+    request: Request,
+    fmt: str,
+    result: RouteExecutionResult,
+    page_rows: int,
+) -> dict[str, object]:
+    params = dict(request.query_params.items())
+    rpc_params = {key: value for key, value in params.items() if key != "format"}
+    rpc_params["format"] = "arrow_rpc"
+    if result.limit is not None:
+        rpc_params["limit"] = str(result.limit)
+    else:
+        rpc_params.pop("limit", None)
+    if result.offset:
+        rpc_params["offset"] = str(result.offset)
+    else:
+        rpc_params.pop("offset", None)
+    rpc_url = str(request.url.replace(query=urlencode(rpc_params)))
+
+    html_params = params.copy()
+    html_params["format"] = fmt
+    if result.limit is not None:
+        html_params["limit"] = str(result.limit)
+    else:
+        html_params.pop("limit", None)
+    if result.offset:
+        html_params["offset"] = str(result.offset)
+    else:
+        html_params.pop("offset", None)
+
+    payload: dict[str, object] = {
+        "endpoint": rpc_url,
+        "format": "arrow_rpc",
+        "total_rows": result.total_rows,
+        "offset": result.offset,
+        "limit": result.limit,
+        "page_rows": page_rows,
+    }
+    if result.limit is not None:
+        next_offset = (result.offset or 0) + page_rows
+        if next_offset < result.total_rows:
+            html_params_next = html_params.copy()
+            html_params_next["offset"] = str(next_offset)
+            next_href = str(request.url.replace(query=urlencode(html_params_next)))
+            payload["next_href"] = next_href
+            payload["next_offset"] = next_offset
+    return payload
+
+
+def _attach_rpc_headers(response: Response, result: RouteExecutionResult) -> None:
+    response.headers["x-total-rows"] = str(result.total_rows)
+    response.headers["x-offset"] = str(result.offset)
+    limit_value = (
+        result.limit if result.limit is not None else result.total_rows
+    )
+    response.headers["x-limit"] = str(limit_value)
+
+
+def _add_vary_header(headers: MutableMapping[str, str], value: str) -> None:
+    existing = headers.get("Vary")
+    if existing:
+        tokens = [item.strip() for item in existing.split(",") if item.strip()]
+        if value in tokens:
+            return
+        tokens.append(value)
+        headers["Vary"] = ", ".join(tokens)
+    else:
+        headers["Vary"] = value
 
 
 def _prepare_share_params(route: RouteDefinition, raw: Mapping[str, object]) -> Mapping[str, object]:
