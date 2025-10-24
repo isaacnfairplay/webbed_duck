@@ -19,26 +19,27 @@
 
 2. **Create your route source directory** (default is `routes_src/`) and add `.sql.md` contracts (see [Writing a `.sql.md` route](#writing-a-sqlmd-route)).
 
-3. **Compile the contracts into runnable manifests.**
+3. **Compile the contracts into runnable manifests (optional when auto-compile is enabled).**
    ```bash
    webbed-duck compile --source routes_src --build routes_build
    ```
 
-4. **Launch the server.** This compiles (when `--source` is supplied) and serves the routes over HTTP on the configured host/port.
+4. **Launch the server.** The CLI compiles using your configuration defaults and can hot-reload routes while you edit them.
    ```bash
-   webbed-duck serve --source routes_src --build routes_build --config config.toml --reload
+   webbed-duck serve --config config.toml --watch
    ```
-   - `--reload` enables Uvicorn’s development reloader.
-   - Omit `--source` to skip compilation when you already have `routes_build/` artifacts.
+   - `--watch` keeps the compiler running and reloads routes in-place when `.sql.md` files change.
+   - Pass `--no-auto-compile` to serve pre-built `routes_build/` artifacts without touching the source tree.
 
 5. **Browse the routes.** Open `http://127.0.0.1:8000/hello` (or your route path) in a browser, or request alternate formats with `?format=csv`, `?format=parquet`, etc.
 
-## How it works today (v0.3)
+## How it works today (v0.4)
 
 ### Runtime startup
 
-- `webbed-duck serve` loads configuration from `config.toml` (defaults to host `127.0.0.1`, port `8000`, storage under `./storage`).
-- If `--source` is provided, it calls the compiler before booting the FastAPI app so every `*.sql.md` file in that directory is fresh.
+- `webbed-duck serve` loads configuration from `config.toml` (defaults to host `127.0.0.1`, port `8000`, storage under `./storage`) and resolves `server.source_dir` / `server.build_dir`.
+- With `server.auto_compile = true` (the default) the CLI compiles every `*.sql.md` contract in the configured source directory before starting Uvicorn.
+- Enabling watch mode (`server.watch = true` or the `--watch` flag) keeps a background poller running so route edits trigger re-compilation and live reloading without restarting the process.
 - The server is a FastAPI application exposed via Uvicorn. No additional framework integration is necessary for development deployments.
 
 ### Route discovery and mapping
@@ -46,7 +47,7 @@
 - The compiler scans the source tree for `*.sql.md` files. Each file must begin with TOML frontmatter between `+++` delimiters.
 - Frontmatter declares the route `id`, HTTP `path`, optional `version`, default and allowed formats, parameters, and metadata.
 - Compiled artifacts are written to the `--build` directory, mirroring the source folder structure but with `.py` files. These contain serialised `ROUTE` dictionaries consumed at runtime.
-- At boot, the server imports every compiled module and registers the route path on the FastAPI app. The `id` doubles as the logical identifier for `/routes/{id}` helper endpoints.
+- At boot—and after each live reload triggered by the watcher—the server imports every compiled module and registers the route path on the FastAPI app. The `id` doubles as the logical identifier for `/routes/{id}` helper endpoints.
 
 ### Parameter binding
 
@@ -179,9 +180,9 @@ This single file defines documentation, parameter validation, output formatting,
 
 ## Auto-compile and serve model
 
-- **Today:** Run `webbed-duck compile` when contracts change. `webbed-duck serve --source …` performs a one-time compile before starting the server. Hot reloading of compiled routes requires manually rerunning the compile command or using an external file watcher.
-- **Configuration:** `config.toml` controls storage (`server.storage_root`), theming, analytics weights, auth mode, email adapter, and share behaviour.
-- **Roadmap:** Automatic compilation on startup and live reload of `.sql.md` changes are targeted for MVP 0.4. Expect a toggle to disable auto-compilation in production so you can ship vetted artifacts from `routes_build/`.
+- **Default behaviour:** `webbed-duck serve` compiles the configured source directory before launching so you always run with fresh artifacts.
+- **Configurable toggles:** Set `server.auto_compile = false` or pass `--no-auto-compile` to serve an existing `routes_build/` snapshot without touching the source tree. Enable `server.watch = true` (or `--watch`) to keep a background watcher running for instant reloads.
+- **Configuration surface:** `config.toml` still controls storage (`server.storage_root`), theming, analytics weights, auth mode, email adapter, and share behaviour alongside the new `source_dir` / `build_dir` settings.
 
 ## Formats and responses
 
@@ -207,22 +208,18 @@ Routes can further customise behaviour via presentation metadata—e.g., `[html_
 
 > **Promise:** By 0.4, `webbed_duck` is the standalone app for data surfaces. Drop `.sql.md` files into a folder, start the server, and you get working web endpoints with HTML/CSV/Parquet/JSON output, parameter forms, lightweight auth, and optional cached snapshots. No hand-written FastAPI, no manual HTML, no bespoke export logic—just `.sql.md` contracts.
 
-### Already delivered toward that vision
+### Highlights in 0.4
 
-- Markdown-to-Python compiler that enforces the `.sql.md` contract (parameters, metadata, directives).
-- FastAPI runtime that executes DuckDB queries per request and renders HTML tables, cards, and feeds.
-- CSV, Parquet, Arrow, and JSON exporters with format negotiation via `?format=`.
-- Route-level analytics, append workflows, overlay storage, chart hooks, and share/email pipelines.
-- CLI tooling (`webbed-duck compile`, `webbed-duck serve`, `webbed-duck run-incremental`, `webbed-duck perf`) for local execution and benchmarking.
+- Auto-compiling `webbed-duck serve` command with config-driven `source_dir` / `build_dir` defaults and a `--no-auto-compile` escape hatch for frozen artifacts.
+- Built-in watch mode (`server.watch` / `--watch`) that recompiles `.sql.md` files and hot-reloads FastAPI routes without restarting Uvicorn.
+- Dynamic route registry inside the FastAPI app so helpers such as `/routes/{id}` and sharing workflows immediately reflect newly compiled contracts.
+- CLI and docs tuned for a zero-config quick start: install, drop a contract in `routes_src/`, and run `webbed-duck serve --config config.toml --watch` to explore.
 
-### Still planned for 0.4
+### Next up (post-0.4)
 
-- First-class `webbed-duck serve` experience that auto-compiles on boot and optionally watches for contract changes.
-- Production-friendly toggle to disable auto-compilation and serve frozen artifacts from `routes_build/`.
-- Simplified parameter binding UX (auto-generated forms and validation surfaces exposed in HTML views).
-- Declarative caching / snapshot controls (persisted under `storage_root/cache/`).
-- Pluggable lightweight auth adapters and link-based sharing policies exposed in config.
-- Public plugin API for registering preprocessors, postprocessors, charts, and asset resolvers without touching core code.
+- Declarative caching / snapshot controls persisted under `storage_root/cache/`.
+- Richer auto-generated parameter forms exposed directly in HTML responses.
+- Additional auth adapter examples and configuration presets for external identity providers.
 
 MVP 0.4 is the first release we expect to hand to an ops lead with no extra scaffolding.
 

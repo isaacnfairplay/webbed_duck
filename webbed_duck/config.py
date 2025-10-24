@@ -19,6 +19,11 @@ class ServerConfig:
     theme: str = "system"
     host: str = "127.0.0.1"
     port: int = 8000
+    source_dir: Path | None = Path("routes_src")
+    build_dir: Path = Path("routes_build")
+    auto_compile: bool = True
+    watch: bool = False
+    watch_interval: float = 1.0
 
 
 @dataclass(slots=True)
@@ -140,6 +145,18 @@ def _parse_server(data: Mapping[str, Any], base: ServerConfig) -> ServerConfig:
         overrides["host"] = str(data["host"])
     if "port" in data:
         overrides["port"] = int(data["port"])
+    if "source_dir" in data:
+        overrides["source_dir"] = (
+            None if data["source_dir"] is None else _as_path(data["source_dir"])
+        )
+    if "build_dir" in data:
+        overrides["build_dir"] = _as_path(data["build_dir"])
+    if "auto_compile" in data:
+        overrides["auto_compile"] = bool(data["auto_compile"])
+    if "watch" in data:
+        overrides["watch"] = bool(data["watch"])
+    if "watch_interval" in data:
+        overrides["watch_interval"] = float(data["watch_interval"])
     if not overrides:
         return base
     return replace(base, **overrides)
