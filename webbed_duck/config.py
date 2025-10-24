@@ -41,11 +41,35 @@ class AnalyticsConfig:
 class AuthConfig:
     """Authentication adapter selection and tunables."""
 
-    mode: str = "none"
+    mode: str = "pseudo"
     external_adapter: str | None = None
     allowed_domains: Sequence[str] = field(default_factory=list)
     session_ttl_minutes: int = 45
     remember_me_days: int = 7
+    proxy_header_user: str = "x-remote-user"
+    proxy_header_email: str = "x-remote-email"
+    proxy_header_name: str = "x-remote-name"
+
+
+@dataclass(slots=True)
+class EmailConfig:
+    """Email adapter wiring and share token lifetimes."""
+
+    adapter: str | None = None
+    from_address: str | None = None
+    share_token_ttl_minutes: int = 60
+    bind_share_to_user_agent: bool = True
+    bind_share_to_ip_prefix: bool = True
+
+
+@dataclass(slots=True)
+class ShareConfig:
+    """Share delivery safeguards and packaging controls."""
+
+    max_total_size_mb: int = 10
+    zip_attachments: bool = True
+    zip_passphrase_required: bool = False
+    watermark: bool = True
 
 
 @dataclass(slots=True)
@@ -56,6 +80,8 @@ class Config:
     ui: UIConfig = field(default_factory=UIConfig)
     analytics: AnalyticsConfig = field(default_factory=AnalyticsConfig)
     auth: AuthConfig = field(default_factory=AuthConfig)
+    email: EmailConfig = field(default_factory=EmailConfig)
+    share: ShareConfig = field(default_factory=ShareConfig)
 
 
 def _as_path(value: Any) -> Path:
@@ -98,6 +124,12 @@ def load_config(path: str | Path | None = None) -> Config:
     auth_data = data.get("auth")
     if isinstance(auth_data, Mapping):
         cfg.auth = _parse_auth(auth_data, base=cfg.auth)
+    email_data = data.get("email")
+    if isinstance(email_data, Mapping):
+        cfg.email = _parse_email(email_data, base=cfg.email)
+    share_data = data.get("share")
+    if isinstance(share_data, Mapping):
+        cfg.share = _parse_share(share_data, base=cfg.share)
     return cfg
 
 
@@ -150,6 +182,45 @@ def _parse_auth(data: Mapping[str, Any], base: AuthConfig) -> AuthConfig:
         overrides["session_ttl_minutes"] = int(data["session_ttl_minutes"])
     if "remember_me_days" in data:
         overrides["remember_me_days"] = int(data["remember_me_days"])
+    if "proxy_header_user" in data:
+        overrides["proxy_header_user"] = str(data["proxy_header_user"])
+    if "proxy_header_email" in data:
+        overrides["proxy_header_email"] = str(data["proxy_header_email"])
+    if "proxy_header_name" in data:
+        overrides["proxy_header_name"] = str(data["proxy_header_name"])
+    if not overrides:
+        return base
+    return replace(base, **overrides)
+
+
+def _parse_email(data: Mapping[str, Any], base: EmailConfig) -> EmailConfig:
+    overrides: MutableMapping[str, Any] = {}
+    if "adapter" in data:
+        overrides["adapter"] = str(data["adapter"]) if data["adapter"] else None
+    if "from_address" in data:
+        value = data["from_address"]
+        overrides["from_address"] = str(value) if value is not None else None
+    if "share_token_ttl_minutes" in data:
+        overrides["share_token_ttl_minutes"] = max(1, int(data["share_token_ttl_minutes"]))
+    if "bind_share_to_user_agent" in data:
+        overrides["bind_share_to_user_agent"] = bool(data["bind_share_to_user_agent"])
+    if "bind_share_to_ip_prefix" in data:
+        overrides["bind_share_to_ip_prefix"] = bool(data["bind_share_to_ip_prefix"])
+    if not overrides:
+        return base
+    return replace(base, **overrides)
+
+
+def _parse_share(data: Mapping[str, Any], base: ShareConfig) -> ShareConfig:
+    overrides: MutableMapping[str, Any] = {}
+    if "max_total_size_mb" in data:
+        overrides["max_total_size_mb"] = max(1, int(data["max_total_size_mb"]))
+    if "zip_attachments" in data:
+        overrides["zip_attachments"] = bool(data["zip_attachments"])
+    if "zip_passphrase_required" in data:
+        overrides["zip_passphrase_required"] = bool(data["zip_passphrase_required"])
+    if "watermark" in data:
+        overrides["watermark"] = bool(data["watermark"])
     if not overrides:
         return base
     return replace(base, **overrides)
@@ -157,9 +228,11 @@ def _parse_auth(data: Mapping[str, Any], base: AuthConfig) -> AuthConfig:
 
 __all__ = [
     "AnalyticsConfig",
+    "EmailConfig",
     "Config",
     "ServerConfig",
     "UIConfig",
     "AuthConfig",
+    "ShareConfig",
     "load_config",
 ]

@@ -541,7 +541,7 @@ webbed_duck run-incremental <route> [--start --end]  # iterate batches
 * `core.config`: loading, env overrides, validation.
 * `server.auth`: sessions, cookie flags by transport mode, domain allowlist, basic password path (if enabled).
 * Preprocessors: coercions, range checks, path guards.
-* Postprocessors: HTML_T/C snapshots, chart SVG, image getter fallback.
+* Postprocessors & plugins: HTML_T/C snapshots, chart SVG, image getter fallback, registry demos (`tests/test_plugins.py`, `examples/plugin_registry_demo.py`).
 * Share tokens: hashing, TTL, single-use, bindings.
 
 **Integration**
@@ -581,34 +581,35 @@ webbed_duck run-incremental <route> [--start --end]  # iterate batches
 
 **MVP 0.1.x**
 
-* [ ] Compiler: `@meta/@params/@preprocess/@postprocess/@charts/@assets`
-* [ ] Per-request DuckDB exec + Arrow Table
-* [ ] Postprocessors: `html_t`, `parquet`, `csv`
-* [ ] Config loader + storage_root layout
-* [ ] Auth: `pseudo` + sessions (SQLite)
-* [ ] Share link (hash+TTL+UA/IP bind)
-* [ ] Introspection: `/routes`, `/routes/{id}/schema`
-* [ ] Tests: unit + integration basics
-* [ ] HTTP banner toggle (`ui.show_http_warning`)
+* [x] Compiler: `@meta/@params/@preprocess/@postprocess/@charts/@assets`
+* [x] Per-request DuckDB exec + Arrow Table
+* [x] Postprocessors: `html_t`, `parquet`, `csv`
+* [x] Config loader + storage_root layout
+* [x] Auth: `pseudo` + sessions (SQLite)
+* [x] Share link (hash+TTL+UA/IP bind)
+* [x] Introspection: `/routes`, `/routes/{id}/schema`
+* [x] Tests: unit + integration basics
+* [x] HTTP banner toggle (`ui.show_http_warning`)
 
 **Beta 0.2.x**
 
-* [ ] `html_c` cards + `feed` virtual view
-* [ ] Arrow RPC slices for virtual viewers
-* [ ] Email shares (inline + attachments)
-* [ ] Image getter plugin (localize/cache assets)
-* [ ] Charts (SVG) + renderer registry
-* [ ] Popularity analytics + folder indexes
-* [ ] Error taxonomy surfaced in UI
+* [x] `html_c` cards + `feed` virtual view
+* [x] Arrow RPC slices for virtual viewers
+* [x] Email shares (inline + attachments)
+* [x] Image getter plugin (localize/cache assets)
+* [x] Charts (SVG) + renderer registry
+* [x] Plugin registry demos & regression tests outside core
+* [x] Popularity analytics + folder indexes
+* [x] Error taxonomy surfaced in UI
 
 **GA 0.3.x**
 
-* [ ] Annotations/overrides (overlay store)
-* [ ] CSV append + generated forms
-* [ ] Incremental runner + checkpoints
-* [ ] Internal “local:” chaining API
-* [ ] External auth adapter interfaces (OIDC/Proxy)
-* [ ] Perf harness + full docs
+* [x] Annotations/overrides (overlay store)
+* [x] CSV append + generated forms
+* [x] Incremental runner + checkpoints
+* [x] Internal “local:” chaining API
+* [x] External auth adapter interfaces (OIDC/Proxy)
+* [x] Perf harness + full docs
 
 ### 25.2 Roadmap Gantt (Mermaid, **starts 01:45; pause 18:30–05:00**)
 
@@ -619,32 +620,33 @@ gantt
     axisFormat  %m-%d %H:%M
 
     section MVP 0.1.x
-    Compiler and Core Exec        :mvp1, 2025-11-23 01:45, 2025-11-23 05:45
-    HTML_T plus Parquet/CSV       :mvp2, 2025-11-23 03:45, 2025-11-23 09:45
-    Pseudo Auth and Sessions      :mvp3, 2025-11-23 06:00, 2025-11-23 11:00
-    Link Sharing hashed           :mvp4, 2025-11-23 11:00, 2025-11-23 14:30
-    Introspection Endpoints       :mvp5, 2025-11-23 14:30, 2025-11-23 16:30
+    Compiler and Core Exec        :done, mvp1, 2025-11-23 01:45, 2025-11-23 05:45
+    HTML_T plus Parquet/CSV       :done, mvp2, 2025-11-23 03:45, 2025-11-23 09:45
+    Pseudo Auth and Sessions      :done, mvp3, 2025-11-23 06:00, 2025-11-23 11:00
+    Link Sharing hashed           :done, mvp4, 2025-11-23 11:00, 2025-11-23 14:30
+    Introspection Endpoints       :done, mvp5, 2025-11-23 14:30, 2025-11-23 16:30
 
     section Beta 0.2.x (pre-pause)
-    Cards and Feed Virtual Views  :beta1, 2025-11-23 16:30, 2025-11-23 18:15
+    Cards and Feed Virtual Views  :done, beta1, 2025-11-23 16:30, 2025-11-23 18:15
 
     section Pause
     Downtime 18:30-05:00          :pause1, 2025-11-23 18:30, 2025-11-24 05:00
 
     section Beta 0.2.x (resume)
-    Arrow RPC Slices              :beta2, 2025-11-24 05:00, 2025-11-24 09:00
-    Email Share and Attachments   :beta3, 2025-11-24 05:30, 2025-11-24 10:00
-    Image Getter Plugin           :beta4, 2025-11-24 07:00, 2025-11-24 10:30
-    Charts SVG and Registry       :beta5, 2025-11-24 08:00, 2025-11-24 11:00
-    Analytics and Folder Index    :beta6, 2025-11-24 10:00, 2025-11-24 12:00
+    Arrow RPC Slices              :done, beta2, 2025-11-24 05:00, 2025-11-24 09:00
+    Email Share and Attachments   :done, beta3, 2025-11-24 05:30, 2025-11-24 10:00
+    Image Getter Plugin           :done, beta4, 2025-11-24 07:00, 2025-11-24 10:30
+    Charts SVG and Registry       :done, beta5, 2025-11-24 08:00, 2025-11-24 11:00
+    Analytics and Folder Index    :done, beta6, 2025-11-24 10:00, 2025-11-24 12:00
+    Plugin Registry Demos & Tests :done, beta7, 2025-11-24 09:30, 2025-11-24 11:30
 
     section GA 0.3.x
-    Annotations and Overrides     :ga1,  2025-11-24 12:00, 2025-11-24 18:00
-    CSV Append and Forms          :ga2,  2025-11-24 13:30, 2025-11-24 19:30
-    Incremental Runner            :ga3,  2025-11-24 14:00, 2025-11-24 20:00
-    Local Route Chaining          :ga4,  2025-11-24 16:00, 2025-11-24 20:00
-    External Auth Finalization    :ga5,  2025-11-24 19:30, 2025-11-24 23:30
-    Perf Harness and Full Docs    :ga6,  2025-11-24 20:00, 2025-11-25 00:00
+    Annotations and Overrides     :done, ga1,  2025-11-24 12:00, 2025-11-24 18:00
+    CSV Append and Forms          :done, ga2,  2025-11-24 13:30, 2025-11-24 19:30
+    Incremental Runner            :done, ga3,  2025-11-24 14:00, 2025-11-24 20:00
+    Local Route Chaining          :done, ga4,  2025-11-24 16:00, 2025-11-24 20:00
+    External Auth Finalization    :done, ga5,  2025-11-24 19:30, 2025-11-24 23:30
+    Perf Harness and Full Docs    :done, ga6,  2025-11-24 20:00, 2025-11-25 00:00
 ```
 
 > No tasks are scheduled during **18:30 → 05:00**. Overlaps indicate staggered sub-tasks the agent can queue/alternate between while maintaining cadence outside the pause window.
@@ -681,6 +683,10 @@ mode = "pseudo"
 allowed_domains = ["company.local"]
 session_ttl_minutes = 45
 remember_me_days = 14
+proxy_header_user = "x-remote-user"
+proxy_header_email = "x-remote-email"
+proxy_header_name = "x-remote-name"
+external_adapter = "custom:auth.module.create"
 
 [email]
 adapter = "custom:examples.emailer.send_email"
