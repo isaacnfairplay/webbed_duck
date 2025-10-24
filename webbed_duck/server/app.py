@@ -445,6 +445,7 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
                 "redacted_columns": artifact_meta["redacted_columns"],
                 "watermark": artifact_meta["watermark_applied"],
                 "zipped": artifact_meta["zipped"],
+                "zip_encrypted": artifact_meta["zip_encrypted"],
                 "total_rows": artifact_meta["total_rows"],
             }
         }
@@ -781,11 +782,27 @@ def _apply_column_redaction(table: pa.Table, redacted_columns: Sequence[str]) ->
 
 def _zip_attachments(
     route_id: str, attachments: Sequence[tuple[str, bytes]], passphrase: object
-) -> tuple[str, bytes]:
-    import pyzipper  # type: ignore
-
+) -> tuple[str, bytes, bool]:
     buffer = io.BytesIO()
     zip_name = f"{route_id}.zip"
+    zip_encrypted = False
+
+    try:  # pragma: no branch - small helper
+        import pyzipper  # type: ignore
+    except ModuleNotFoundError:  # pragma: no cover - exercised in tests via monkeypatch
+        if passphrase:
+            raise _http_error(
+                "invalid_parameter",
+                "Encrypted ZIP attachments require the optional 'pyzipper' dependency. "
+                "Install it with 'pip install pyzipper' before requesting a passphrase.",
+            )
+        import zipfile
+
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+            for filename, content in attachments:
+                zf.writestr(filename, content)
+        return zip_name, buffer.getvalue(), zip_encrypted
+
     with pyzipper.AESZipFile(
         buffer,
         "w",
@@ -794,9 +811,10 @@ def _zip_attachments(
     ) as zf:
         if passphrase:
             zf.setpassword(str(passphrase).encode("utf-8"))
+            zip_encrypted = True
         for filename, content in attachments:
             zf.writestr(filename, content)
-    return zip_name, buffer.getvalue()
+    return zip_name, buffer.getvalue(), zip_encrypted
 
 
 def _build_share_artifacts(
@@ -878,13 +896,14 @@ def _build_share_artifacts(
     if zip_requested is None:
         zip_requested = bool(config.share.zip_attachments)
     zipped = False
+    zip_encrypted = False
     attachment_names = [name for name, _ in attachments]
     attachments_payload = attachments
     if attachments and zip_requested:
         zip_passphrase = payload.get("zip_passphrase")
         if config.share.zip_passphrase_required and not zip_passphrase:
             raise _http_error("missing_parameter", "zip_passphrase is required for attachments")
-        zip_name, zip_bytes = _zip_attachments(route.id, attachments, zip_passphrase)
+        zip_name, zip_bytes, zip_encrypted = _zip_attachments(route.id, attachments, zip_passphrase)
         if len(zip_bytes) > max_bytes:
             raise _http_error("invalid_parameter", "Attachments exceed configured share size limit")
         attachments_payload = [(zip_name, zip_bytes)]
@@ -897,6 +916,7 @@ def _build_share_artifacts(
         "redacted_columns": removed_columns,
         "watermark_applied": bool(watermark_text),
         "zipped": zipped,
+        "zip_encrypted": zip_encrypted,
         "total_rows": result.total_rows,
     }
 
