@@ -136,6 +136,44 @@ def test_routes_endpoint_reports_metrics(tmp_path: Path) -> None:
     assert route_entry["metrics"]["rows"] >= 1
 
 
+@pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
+def test_local_resolve_endpoint(tmp_path: Path) -> None:
+    src_dir = tmp_path / "src"
+    build_dir = tmp_path / "build"
+    src_dir.mkdir()
+    _write_route(src_dir, ROUTE_TEMPLATE)
+    compile_routes(src_dir, build_dir)
+    routes = load_compiled_routes(build_dir)
+    config = _make_config(tmp_path / "storage")
+    app = create_app(routes, config)
+    client = TestClient(app)
+
+    response = client.post("/local/resolve", json={"reference": "local:hello?name=Duck"})
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["route_id"] == "hello"
+    assert payload["rows"][0]["greeting"] == "Hello, Duck!"
+
+    response = client.post(
+        "/local/resolve",
+        json={
+            "reference": "local:hello",
+            "params": {"name": "Swan"},
+            "format": "table",
+            "columns": ["greeting"],
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["rows"][0] == {"greeting": "Hello, Swan!"}
+    assert data["columns"] == ["greeting"]
+
+    error = client.post("/local/resolve", json={"reference": "hello"})
+    assert error.status_code == 400
+    detail = error.json()
+    assert detail["detail"]["code"] == "invalid_parameter"
+
+
 def test_run_route_local(tmp_path: Path) -> None:
     src_dir = tmp_path / "src"
     build_dir = tmp_path / "build"
