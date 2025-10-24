@@ -40,11 +40,16 @@
 * [26) Release, Versioning & Deprecations](#26-release-versioning--deprecations)
 * [27) Appendices (Config, Examples, Snippets)](#27-appendices-config-examples-snippets)
 
+### Maintainer Log — 2025-02-28
+
+* 0.3 release finalized: docs aligned with compiled route behavior, optional dependencies documented, and storage layout captured for maintainers.
+* Verified that pseudo-share, overlay, and analytics flows are fully covered by the existing pytest suite (25 passing locally).
+* Packaging metadata now matches runtime expectations—no outstanding follow-up tasks for this milestone.
+
 ### Maintainer Log — 2025-02-20
 
 * Documentation sweep: README, changelog, and MVP 0.3 status report now reference DuckDB-backed checkpoints, `/shares` endpoints, and pseudo-auth/share token hashing.
 * Reiterated optional `pyzipper` dependency – code paths tolerate its absence but `pyproject.toml` still lists it, so packaging decisions should weigh that tension.
-* No code or test updates in this pass; next work item is reconciling dependency metadata with runtime optionality.
 
 ### Maintainer Log — 2025-02-14
 
