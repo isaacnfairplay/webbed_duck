@@ -1,6 +1,6 @@
 [project]
 name = "webbed-duck"
-version = "0.4.0"
+version = "0.4.1"
 description = "A parameterized SQL web server for DuckDB routes compiled from Markdown"
 authors = [
   { name = "Isaac Moore" }
@@ -13,7 +13,8 @@ dependencies = [
   "httpx>=0.25",
   "uvicorn>=0.23.2",
   "pyarrow>=14.0.1",
-  "pyzipper>=0.3.6"
+  "pyzipper>=0.3.6",
+  "tzdata; platform_system == \"Windows\""
 ]
 
 [project.optional-dependencies]

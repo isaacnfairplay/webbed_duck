@@ -6,6 +6,11 @@
   `webbed_duck` module (rather than leaking `core`/`server` at the top level),
   and added a packaging test that verifies the generated wheel structure.
 
+## 0.4.1 - 2025-03-06
+
+- Added a Windows-only `tzdata` dependency so packaged builds include a
+  timezone database on platforms lacking system zoneinfo files.
+
 ## 0.4.0 - 2025-03-05
 
 - Added extensive plugin registry tests that verify custom image getters,
