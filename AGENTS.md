@@ -136,8 +136,8 @@ cookie_name = "duckserv_sid"
 adapter = "custom:examples.emailer.send_email"
 from_address = "no-reply@example.local"
 share_token_ttl_minutes = 90
-bind_share_to_user_agent = true
-bind_share_to_ip_prefix = true
+bind_share_to_user_agent = false
+bind_share_to_ip_prefix = false
 
 [share]
 max_total_size_mb = 15
@@ -686,8 +686,8 @@ remember_me_days = 14
 adapter = "custom:examples.emailer.send_email"
 from_address = "no-reply@company.local"
 share_token_ttl_minutes = 90
-bind_share_to_user_agent = true
-bind_share_to_ip_prefix = true
+bind_share_to_user_agent = false
+bind_share_to_ip_prefix = false
 
 [share]
 max_total_size_mb = 15

@@ -49,6 +49,27 @@ class AuthConfig:
 
 
 @dataclass(slots=True)
+class EmailConfig:
+    """Outbound email adapter configuration."""
+
+    adapter: str | None = None
+    from_address: str = "no-reply@company.local"
+    share_token_ttl_minutes: int = 90
+    bind_share_to_user_agent: bool = False
+    bind_share_to_ip_prefix: bool = False
+
+
+@dataclass(slots=True)
+class ShareConfig:
+    """Share workflow configuration."""
+
+    max_total_size_mb: int = 15
+    zip_attachments: bool = True
+    zip_passphrase_required: bool = False
+    watermark: bool = True
+
+
+@dataclass(slots=True)
 class Config:
     """Top-level configuration container."""
 
@@ -56,6 +77,8 @@ class Config:
     ui: UIConfig = field(default_factory=UIConfig)
     analytics: AnalyticsConfig = field(default_factory=AnalyticsConfig)
     auth: AuthConfig = field(default_factory=AuthConfig)
+    email: EmailConfig = field(default_factory=EmailConfig)
+    share: ShareConfig = field(default_factory=ShareConfig)
 
 
 def _as_path(value: Any) -> Path:
@@ -98,6 +121,12 @@ def load_config(path: str | Path | None = None) -> Config:
     auth_data = data.get("auth")
     if isinstance(auth_data, Mapping):
         cfg.auth = _parse_auth(auth_data, base=cfg.auth)
+    email_data = data.get("email")
+    if isinstance(email_data, Mapping):
+        cfg.email = _parse_email(email_data, base=cfg.email)
+    share_data = data.get("share")
+    if isinstance(share_data, Mapping):
+        cfg.share = _parse_share(share_data, base=cfg.share)
     return cfg
 
 
@@ -155,11 +184,45 @@ def _parse_auth(data: Mapping[str, Any], base: AuthConfig) -> AuthConfig:
     return replace(base, **overrides)
 
 
+def _parse_email(data: Mapping[str, Any], base: EmailConfig) -> EmailConfig:
+    overrides: MutableMapping[str, Any] = {}
+    if "adapter" in data:
+        overrides["adapter"] = str(data["adapter"]) if data["adapter"] is not None else None
+    if "from_address" in data:
+        overrides["from_address"] = str(data["from_address"])
+    if "share_token_ttl_minutes" in data:
+        overrides["share_token_ttl_minutes"] = int(data["share_token_ttl_minutes"])
+    if "bind_share_to_user_agent" in data:
+        overrides["bind_share_to_user_agent"] = bool(data["bind_share_to_user_agent"])
+    if "bind_share_to_ip_prefix" in data:
+        overrides["bind_share_to_ip_prefix"] = bool(data["bind_share_to_ip_prefix"])
+    if not overrides:
+        return base
+    return replace(base, **overrides)
+
+
+def _parse_share(data: Mapping[str, Any], base: ShareConfig) -> ShareConfig:
+    overrides: MutableMapping[str, Any] = {}
+    if "max_total_size_mb" in data:
+        overrides["max_total_size_mb"] = int(data["max_total_size_mb"])
+    if "zip_attachments" in data:
+        overrides["zip_attachments"] = bool(data["zip_attachments"])
+    if "zip_passphrase_required" in data:
+        overrides["zip_passphrase_required"] = bool(data["zip_passphrase_required"])
+    if "watermark" in data:
+        overrides["watermark"] = bool(data["watermark"])
+    if not overrides:
+        return base
+    return replace(base, **overrides)
+
+
 __all__ = [
     "AnalyticsConfig",
     "Config",
     "ServerConfig",
     "UIConfig",
     "AuthConfig",
+    "EmailConfig",
+    "ShareConfig",
     "load_config",
 ]

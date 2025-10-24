@@ -49,6 +49,13 @@ class ParameterSpec:
 
 
 @dataclass(slots=True)
+class RouteDirective:
+    name: str
+    args: Mapping[str, str]
+    value: str | None = None
+
+
+@dataclass(slots=True)
 class RouteDefinition:
     id: str
     path: str
@@ -60,6 +67,7 @@ class RouteDefinition:
     title: str | None = None
     description: str | None = None
     metadata: Mapping[str, Any] | None = None
+    directives: Sequence[RouteDirective] = ()
 
     def find_param(self, name: str) -> ParameterSpec | None:
         for param in self.params:
@@ -112,6 +120,22 @@ def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
     if not isinstance(metadata, Mapping):
         metadata = {}
 
+    directives_data = route.get("directives", [])
+    directives: list[RouteDirective] = []
+    for item in directives_data:
+        if not isinstance(item, Mapping):
+            continue
+        name = str(item.get("name")) if item.get("name") is not None else ""
+        if not name:
+            continue
+        args_map = item.get("args")
+        if isinstance(args_map, Mapping):
+            args = {str(k): str(v) for k, v in args_map.items()}
+        else:
+            args = {}
+        value = item.get("value")
+        directives.append(RouteDirective(name=name, args=args, value=str(value) if value is not None else None))
+
     return RouteDefinition(
         id=str(route["id"]),
         path=str(route["path"]),
@@ -123,6 +147,7 @@ def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
         title=route.get("title"),
         description=route.get("description"),
         metadata=metadata,
+        directives=directives,
     )
 
 
@@ -130,5 +155,6 @@ __all__ = [
     "ParameterSpec",
     "ParameterType",
     "RouteDefinition",
+    "RouteDirective",
     "load_compiled_routes",
 ]

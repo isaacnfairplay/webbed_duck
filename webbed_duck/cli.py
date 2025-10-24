@@ -3,12 +3,15 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import statistics
+import time
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
 
 from .config import load_config
 from .core.compiler import compile_routes
 from .core.incremental import run_incremental
+from .core.local import run_route
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -35,6 +38,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     incr_parser.add_argument("--build", default="routes_build", help="Directory containing compiled routes")
     incr_parser.add_argument("--config", default="config.toml", help="Configuration file")
 
+    perf_parser = subparsers.add_parser("perf", help="Run a compiled route repeatedly and report latency stats")
+    perf_parser.add_argument("route_id", help="ID of the compiled route to execute")
+    perf_parser.add_argument("--build", default="routes_build", help="Directory containing compiled routes")
+    perf_parser.add_argument("--config", default="config.toml", help="Configuration file")
+    perf_parser.add_argument("--iterations", type=int, default=5, help="Number of executions to measure")
+    perf_parser.add_argument("--param", action="append", default=[], help="Parameter override in the form name=value")
+
     args = parser.parse_args(argv)
     if args.command == "compile":
         return _cmd_compile(args.source, args.build)
@@ -42,6 +52,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _cmd_serve(args)
     if args.command == "run-incremental":
         return _cmd_run_incremental(args)
+    if args.command == "perf":
+        return _cmd_perf(args)
 
     parser.print_help()
     return 1
@@ -89,6 +101,46 @@ def _cmd_run_incremental(args: argparse.Namespace) -> int:
     for item in results:
         print(f"{item.route_id} {item.cursor_param}={item.value} rows={item.rows_returned}")
     return 0
+
+
+def _cmd_perf(args: argparse.Namespace) -> int:
+    config = load_config(args.config)
+    params = _parse_param_assignments(args.param)
+    iterations = max(1, int(args.iterations))
+    timings: list[float] = []
+    rows_returned = 0
+    for _ in range(iterations):
+        start = time.perf_counter()
+        table = run_route(
+            args.route_id,
+            params=params,
+            build_dir=args.build,
+            config=config,
+            format="table",
+        )
+        elapsed = (time.perf_counter() - start) * 1000
+        timings.append(elapsed)
+        rows_returned = getattr(table, "num_rows", rows_returned)
+    timings.sort()
+    average = statistics.fmean(timings)
+    p95_index = int(round(0.95 * (len(timings) - 1)))
+    p95 = timings[p95_index]
+    print(f"Route: {args.route_id}")
+    print(f"Iterations: {iterations}")
+    print(f"Rows (last run): {rows_returned}")
+    print(f"Average latency: {average:.3f} ms")
+    print(f"95th percentile latency: {p95:.3f} ms")
+    return 0
+
+
+def _parse_param_assignments(pairs: Sequence[str]) -> Mapping[str, str]:
+    params: dict[str, str] = {}
+    for pair in pairs:
+        if "=" not in pair:
+            raise SystemExit(f"Invalid parameter assignment: {pair}")
+        name, value = pair.split("=", 1)
+        params[name] = value
+    return params
 
 
 def _parse_date(value: str) -> datetime.date:
