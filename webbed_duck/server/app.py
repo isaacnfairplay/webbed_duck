@@ -744,6 +744,9 @@ def _format_response(
             charts_meta,
             postprocess=post_opts,
             watermark=watermark,
+            params=route.params,
+            param_values=result.params,
+            format_hint=fmt,
         )
         return HTMLResponse(html)
     if fmt == "html_c":
@@ -757,6 +760,9 @@ def _format_response(
             assets=route.assets,
             route_id=route.id,
             watermark=watermark,
+            params=route.params,
+            param_values=result.params,
+            format_hint=fmt,
         )
         return HTMLResponse(html)
     if fmt == "feed":

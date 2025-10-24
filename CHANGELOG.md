@@ -5,6 +5,9 @@
 - Fixed the wheel build configuration so the published package exposes the
   `webbed_duck` module (rather than leaking `core`/`server` at the top level),
   and added a packaging test that verifies the generated wheel structure.
+- Restored HTML filter controls for parameters declared with `ui_control`
+  metadata so table (`html_t`) and card (`html_c`) views surface interactive
+  inputs based on each route's `show_params` list.
 
 ## 0.4.1 - 2025-03-06
 
