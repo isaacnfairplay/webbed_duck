@@ -37,6 +37,16 @@ path = "/hello"
 type = "str"
 required = false
 default = "DuckDB"
+ui_control = "input"
+ui_label = "Name"
+ui_placeholder = "Team mate"
+ui_help = "Enter a name and apply the filter"
+
+[html_t]
+show_params = ["name"]
+
+[html_c]
+show_params = ["name"]
 
 [overrides]
 key_columns = ["greeting"]
@@ -81,8 +91,12 @@ class ReadmeContext:
     compiled_routes: list
     route_json: dict
     html_text: str
+    html_headers: dict[str, str]
     cards_text: str
+    cards_headers: dict[str, str]
     feed_text: str
+    html_rpc_payload: dict
+    cards_rpc_payload: dict
     csv_headers: dict[str, str]
     parquet_headers: dict[str, str]
     arrow_headers: dict[str, str]
@@ -289,6 +303,20 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
     readme_text = (repo_root / "README.md").read_text(encoding="utf-8")
     readme_lines = _extract_statements(readme_text)
 
+    rpc_pattern = re.compile(
+        r"<script type='application/json' id='wd-rpc-config'>(?P<data>.+?)</script>",
+        re.DOTALL,
+    )
+
+    def _rpc_payload_from(html_text: str) -> dict:
+        match = rpc_pattern.search(html_text)
+        if not match:
+            return {}
+        try:
+            return json.loads(match.group("data"))
+        except json.JSONDecodeError:
+            return {}
+
     return ReadmeContext(
         repo_root=repo_root,
         readme_lines=readme_lines,
@@ -297,7 +325,11 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
         compiled_routes=routes,
         route_json=route_json,
         html_text=html_response.text,
+        html_headers=dict(html_response.headers),
+        html_rpc_payload=_rpc_payload_from(html_response.text),
         cards_text=cards_response.text,
+        cards_headers=dict(cards_response.headers),
+        cards_rpc_payload=_rpc_payload_from(cards_response.text),
         feed_text=feed_response.text,
         csv_headers=dict(csv_response.headers),
         parquet_headers=dict(parquet_response.headers),
@@ -362,6 +394,45 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         )),
         (lambda s: s.startswith("- The runtime ships the results"), lambda s: _ensure(
             "content-type" in ctx.csv_headers and "content-type" in ctx.parquet_headers, s
+        )),
+        (lambda s: s.startswith("- Declare parameter controls"), lambda s: _ensure(
+            "params-form" in ctx.html_text and "params-form" in ctx.cards_text, s
+        )),
+        (lambda s: s.startswith("The same `show_params` list works"), lambda s: _ensure(
+            "params-form" in ctx.cards_text, s
+        )),
+        (lambda s: s.startswith("listed there render controls"), lambda s: _ensure(
+            "type='hidden'" in ctx.html_text or "type=\"hidden\"" in ctx.html_text, s
+        )),
+        (lambda s: s.startswith("filter submissions keep pagination"), lambda s: _ensure(
+            "name='offset'" in ctx.html_text or "name=\"offset\"" in ctx.html_text,
+            s,
+        )),
+        (lambda s: s.startswith("- Table (`html_t`) and card (`html_c`) responses now emit"), lambda s: _ensure(
+            ctx.html_rpc_payload and ctx.cards_rpc_payload, s
+        )),
+        (lambda s: s.startswith("and an embedded `<script id=\"wd-rpc-config\">`"), lambda s: _ensure(
+            "wd-rpc-config" in ctx.html_text and "wd-rpc-config" in ctx.cards_text, s
+        )),
+        (lambda s: s.startswith("slice (`offset`, `limit`, `total_rows`) plus a ready-to-use Arrow RPC"), lambda s: _ensure(
+            "total_rows" in ctx.html_rpc_payload and "total_rows" in ctx.cards_rpc_payload, s
+        )),
+        (lambda s: s.startswith("endpoint. Clients can call that URL"), lambda s: _ensure(
+            "endpoint" in ctx.html_rpc_payload and "endpoint" in ctx.cards_rpc_payload, s
+        )),
+        (lambda s: s.startswith("stream additional pages without re-rendering the HTML."), lambda s: None),
+        (lambda s: s.startswith("- Every HTML response mirrors the RPC headers"), lambda s: _ensure(
+            "Download this slice" in ctx.html_text and "Download this slice" in ctx.cards_text, s
+        )),
+        (lambda s: s.startswith("`x-limit`) and surfaces a convenience link"), lambda s: _ensure(
+            ("link" in ctx.html_headers or "Link" in ctx.html_headers)
+            and ("link" in ctx.cards_headers or "Link" in ctx.cards_headers),
+            s,
+        )),
+        (lambda s: s.startswith("(Arrow)"), lambda s: None),
+        (lambda s: s.startswith("the slice to downstream tooling."), lambda s: _ensure(
+            "Download this slice" in ctx.html_text and "Download this slice" in ctx.cards_text,
+            s,
         )),
         (lambda s: s.startswith("- Drop `.sql.md` files into a folder"), lambda s: _ensure(
             ctx.repo_structure["routes_src"] and ctx.repo_structure["routes_build"], s

@@ -10,10 +10,18 @@ type = "str"
 required = false
 default = "world"
 description = "Name to greet"
+ui_control = "input"
+ui_label = "Name"
+ui_placeholder = "Your teammate"
+ui_help = "Type a name and press Apply to refresh the greeting"
+
+[html_t]
+show_params = ["name"]
 
 [html_c]
 title_col = "greeting"
 meta_cols = ["note", "created_at"]
+show_params = ["name"]
 
 [feed]
 timestamp_col = "created_at"

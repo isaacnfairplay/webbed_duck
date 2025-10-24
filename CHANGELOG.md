@@ -2,12 +2,26 @@
 
 ## Unreleased
 
+- Nothing yet.
+
+## 0.4.3 - 2025-03-08
+
 - Fixed the wheel build configuration so the published package exposes the
   `webbed_duck` module (rather than leaking `core`/`server` at the top level),
   and added a packaging test that verifies the generated wheel structure.
 - Restored HTML filter controls for parameters declared with `ui_control`
   metadata so table (`html_t`) and card (`html_c`) views surface interactive
   inputs based on each route's `show_params` list.
+- Documented the HTML filter workflow, including how `show_params` influences
+  auto-generated forms and how the embedded RPC metadata can be used to page
+  through Arrow slices.
+- Updated `html_t` and `html_c` renderers to emit Arrow RPC metadata (`Link`
+  headers, `wd-rpc-config` script, and download links) while mirroring the
+  pagination headers from the RPC endpoint so downstream clients can request
+  additional slices with explicit offsets and limits.
+- Added regression tests that assert the generated HTML includes the filter
+  controls, hidden pagination inputs, RPC headers, and the embedded Arrow RPC
+  configuration block for both table and card views.
 
 ## 0.4.1 - 2025-03-06
 
