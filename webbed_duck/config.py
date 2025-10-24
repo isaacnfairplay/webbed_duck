@@ -75,6 +75,16 @@ class ShareConfig:
 
 
 @dataclass(slots=True)
+class CacheConfig:
+    """Materialized result cache configuration."""
+
+    enabled: bool = True
+    ttl_seconds: int = 24 * 3600
+    page_rows: int = 500
+    enforce_global_page_size: bool = False
+
+
+@dataclass(slots=True)
 class Config:
     """Top-level configuration container."""
 
@@ -84,6 +94,7 @@ class Config:
     auth: AuthConfig = field(default_factory=AuthConfig)
     email: EmailConfig = field(default_factory=EmailConfig)
     share: ShareConfig = field(default_factory=ShareConfig)
+    cache: CacheConfig = field(default_factory=CacheConfig)
 
 
 def _as_path(value: Any) -> Path:
@@ -132,6 +143,9 @@ def load_config(path: str | Path | None = None) -> Config:
     share_data = data.get("share")
     if isinstance(share_data, Mapping):
         cfg.share = _parse_share(share_data, base=cfg.share)
+    cache_data = data.get("cache")
+    if isinstance(cache_data, Mapping):
+        cfg.cache = _parse_cache(cache_data, base=cfg.cache)
     return cfg
 
 
@@ -228,6 +242,25 @@ def _parse_share(data: Mapping[str, Any], base: ShareConfig) -> ShareConfig:
         overrides["zip_passphrase_required"] = bool(data["zip_passphrase_required"])
     if "watermark" in data:
         overrides["watermark"] = bool(data["watermark"])
+    if not overrides:
+        return base
+    return replace(base, **overrides)
+
+
+def _parse_cache(data: Mapping[str, Any], base: CacheConfig) -> CacheConfig:
+    overrides: MutableMapping[str, Any] = {}
+    if "enabled" in data:
+        overrides["enabled"] = bool(data["enabled"])
+    if "ttl_seconds" in data:
+        overrides["ttl_seconds"] = max(0, int(data["ttl_seconds"]))
+    if "ttl_hours" in data:
+        overrides["ttl_seconds"] = max(0, int(float(data["ttl_hours"]) * 3600))
+    if "page_rows" in data:
+        overrides["page_rows"] = max(0, int(data["page_rows"]))
+    if "rows_per_page" in data:
+        overrides["page_rows"] = max(0, int(data["rows_per_page"]))
+    if "enforce_global_page_size" in data:
+        overrides["enforce_global_page_size"] = bool(data["enforce_global_page_size"])
     if not overrides:
         return base
     return replace(base, **overrides)

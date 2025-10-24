@@ -58,6 +58,29 @@
   - `?limit=` and `?offset=` apply post-query pagination without changing the SQL.
   - `?column=` can be repeated to restrict returned columns.
 
+### Request lifecycle and paged caches
+
+```mermaid
+flowchart LR
+  A[Client request] --> B[FastAPI route handler]
+  B --> C[Run preprocessors]
+  C --> D{Cache lookup}
+  D -->|Hit| E[Load Parquet page from storage_root/cache]
+  D -->|Miss| F[Stream DuckDB record batches]
+  F --> G[Write paged Parquet artifacts]
+  G --> E
+  E --> H[Apply overrides & column filters]
+  H --> I[Post-process (HTML/JSON/CSV/Arrow)]
+  I --> J[Response]
+```
+
+- Cache settings come from `[cache]` frontmatter (per route) merged with the global `[cache]` section in `config.toml`.
+- Routes must declare `cache.order_by` with one or more result columns; cache population validates the schema and every cache hit
+  (including superset/shard reuse) re-sorts combined pages on those columns before applying offsets.
+- The executor snaps requested offsets to cache-friendly pages when a route enforces a `rows_per_page` limit, ensuring subsequent requests reuse the same Parquet artifacts.
+- Cache hits skip DuckDB entirely and hydrate the response from on-disk Parquet pages while still applying overrides, analytics, and post-processing.
+- Transformation-invariant filters can be declared under `[cache.invariant_filters]` (with `param`, `column`, optional `separator`, and `case_insensitive` flags). The cache stores per-value page maps so a superset result can satisfy filtered requests, and disjoint shards (e.g., `product_code=widget` and `product_code=gadget`) can be combined when clients request multiple values within the cache TTL.
+
 ### Supported outputs
 
 All of the following formats work today, provided the route either allows them explicitly or leaves `allowed_formats` empty (which enables everything):
@@ -78,10 +101,16 @@ Routes may set `default_format` in frontmatter to choose the response when `?for
 
 ### Data sources and execution model
 
-- Every request opens a fresh DuckDB connection, executes the prepared SQL with bound parameters, and immediately closes the connection.
+- Every cache miss opens a fresh DuckDB connection, streams the prepared SQL with bound parameters, materialises Parquet pages under `storage_root/cache/<route>/<hash>/`, and then closes the connection.
+- Cache hits reuse those Parquet pages (validated against the route signature and TTL) without touching DuckDB, so most requests read only the slice they need from disk.
 - You can query DuckDB-native sources such as Parquet, CSV, or Iceberg directly inside the SQL (`SELECT * FROM read_parquet('data/orders.parquet')`).
 - For derived inputs, register preprocessors in the `.sql.md` file to inject computed parameters (e.g., resolve the latest production date) before SQL execution.
-- After execution, server-side overlays (cell-level overrides) and append metadata apply automatically when configured in the contract.
+- After loading the cached (or freshly queried) page, server-side overlays (cell-level overrides) and append metadata apply automatically when configured in the contract.
+- When a route defines `cache.rows_per_page`, the backend overrides ad-hoc `limit`/`offset` requests so every consumer sees cache-aligned slices—helpful for HTML pagination and CLI batch jobs alike.
+- When invariant filters are configured, cached pages include value indexes so follow-up requests with the same `rows_per_page`
+  setting can be resolved without re-querying DuckDB even if the client adds or removes filter values. The backend merges
+  superset and shard caches, reorders the combined rows by `cache.order_by`, and then applies the requested offset/limit so HTML
+  and RPC consumers always see deterministic paging.
 - Analytics (hits, rows, latency, interactions) are tracked per route and exposed via `GET /routes` and `GET /routes/{id}/schema` today.
 
 ### Auth, sharing, and append workflows
@@ -109,8 +138,11 @@ Common keys include:
 - `default_format`: Default response format when `?format` is not supplied.
 - `allowed_formats`: Restricts runtime formats (values from the table above).
 - `[params.<name>]`: Parameter declaration blocks with `type`, `required`, `default`, `description`, and arbitrary extra keys.
+- `[cache]`: Enables on-disk pagination; set `rows_per_page`, optional TTLs, and **must** provide `order_by = ["column"]` so the
+  runtime can validate the schema and keep cached shards in deterministic order when they are recombined.
 - Presentation metadata blocks such as `[html_t]`, `[html_c]`, `[feed]`, `[overrides]`, `[append]`, `[charts]`, and `[assets]` configure post-processors, override policies, append targets, charts, and asset lookup hints.
 - `[[preprocess]]` entries or `[preprocess]` tables list callables (`module:function` or dotted paths) that massage parameters prior to execution.
+- Unexpected frontmatter keys trigger compile-time warnings so you can catch typos before shipping a route.
 
 ### SQL placeholders
 
@@ -128,6 +160,14 @@ title = "Workstation production by line"
 description = "Hourly production roll-up with scrap and labour attribution."
 default_format = "html_t"
 allowed_formats = ["html_t", "csv", "parquet", "json"]
+
+[cache]
+rows_per_page = 200
+ttl_hours = 6
+order_by = ["plant_day", "line", "hour"]
+invariant_filters = [
+  { param = "line", column = "line" }
+]
 
 [params.plant_day]
 type = "str"
@@ -172,11 +212,13 @@ SELECT
 FROM source
 WHERE {{line}} IS NULL OR line = {{line}}
 GROUP BY ALL
-ORDER BY hour;
+ORDER BY plant_day, line, hour;
 ```
 ```
 
 This single file defines documentation, parameter validation, output formatting, charts, override rules, and the actual dataset. The compiler consumes it directly—there are no auxiliary `.sql` or `.yaml` files.
+
+`[cache.invariant_filters]` entries accept optional `separator` strings for clients that send comma-separated values (e.g., `?line=assembly,packing`) and a `case_insensitive = true` flag when downstream filters should ignore casing differences.
 
 ## Auto-compile and serve model
 

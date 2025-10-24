@@ -15,6 +15,10 @@ ui_label = "Name"
 ui_placeholder = "Your teammate"
 ui_help = "Type a name and press Apply to refresh the greeting"
 
+[cache]
+ttl_hours = 12
+order_by = ["created_at"]
+
 [html_t]
 show_params = ["name"]
 

@@ -2,7 +2,21 @@
 
 ## Unreleased
 
-- Nothing yet.
+- Added compile-time warnings for unknown TOML frontmatter keys so route authors
+  catch typos before deployment.
+- Implemented paged Parquet caching with configurable TTLs and route-defined
+  `rows_per_page` limits, reusing on-disk slices across HTTP requests and the
+  local runner.
+- Extended configuration with a `[cache]` section and refreshed the README with
+  a request-lifecycle mermaid diagram covering the new caching flow.
+- Added transformation-invariant cache filters so routes can reuse superset
+  pages and combine existing shards for filtered requests without hitting
+  DuckDB, including multi-value combinations defined via `separator` settings.
+- Documented invariant filter frontmatter and expanded the cache test suite to
+  cover superset reuse and shard combination scenarios.
+- Required routes that opt into caching to declare `cache.order_by` columns and
+  taught the cache store to re-sort combined superset/shard hits before paging,
+  eliminating inconsistent ordering when invariant filters are reused.
 
 ## 0.4.3 - 2025-03-08
 

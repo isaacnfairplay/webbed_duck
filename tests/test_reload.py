@@ -20,10 +20,12 @@ path = "/hello"
 type = "str"
 required = false
 default = "world"
+[cache]
+order_by = ["greeting"]
 +++
 
 ```sql
-SELECT 'Hello, ' || {{name}} || '!' AS greeting;
+SELECT 'Hello, ' || {{name}} || '!' AS greeting ORDER BY greeting;
 ```
 """
 
@@ -35,10 +37,12 @@ path = "/hello"
 type = "str"
 required = false
 default = "Duck"
+[cache]
+order_by = ["greeting"]
 +++
 
 ```sql
-SELECT 'Hello again, ' || {{name}} || '!' AS greeting;
+SELECT 'Hello again, ' || {{name}} || '!' AS greeting ORDER BY greeting;
 ```
 """
 
