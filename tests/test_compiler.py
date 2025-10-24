@@ -21,6 +21,29 @@ def write_route(tmp_path: Path, content: str) -> Path:
     return path
 
 
+def test_compile_collects_directives(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"sample\"\n"
+        "path = \"/sample\"\n"
+        "+++\n\n"
+        "<!-- @cache ttl=30 scope=route -->\n"
+        "<!-- @notes important -->\n"
+        "```sql\nSELECT 1 AS value\n```\n"
+    )
+    definition = compile_route_file(write_route(tmp_path, route_text))
+    assert len(definition.directives) == 2
+    assert definition.directives[0].name == "cache"
+    assert definition.directives[0].args["ttl"] == "30"
+    assert definition.directives[0].args["scope"] == "route"
+    assert definition.directives[1].value == "important"
+
+    build_dir = tmp_path / "build"
+    compile_routes(tmp_path, build_dir)
+    loaded = load_compiled_routes(build_dir)
+    assert loaded[0].directives[0].name == "cache"
+
+
 def test_compile_route(tmp_path: Path) -> None:
     route_text = (
         "+++\n"
@@ -94,6 +117,20 @@ def test_server_returns_rows(tmp_path: Path) -> None:
     feed_response = client.get("/hello", params={"name": "DuckDB", "format": "feed"})
     assert feed_response.status_code == 200
     assert "<section" in feed_response.text
+
+    csv_response = client.get("/hello", params={"name": "DuckDB", "format": "csv"})
+    assert csv_response.status_code == 200
+    assert csv_response.headers["content-type"].startswith("text/csv")
+    assert "attachment" in csv_response.headers["content-disposition"]
+
+    parquet_response = client.get("/hello", params={"name": "DuckDB", "format": "parquet"})
+    assert parquet_response.status_code == 200
+    assert parquet_response.headers["content-type"].startswith("application/x-parquet")
+
+    arrow_rpc = client.get("/hello", params={"name": "DuckDB", "format": "arrow_rpc", "limit": 1})
+    assert arrow_rpc.status_code == 200
+    assert arrow_rpc.headers["x-total-rows"] == "1"
+    assert arrow_rpc.headers["x-offset"] == "0"
 
     analytics = client.get("/routes")
     assert analytics.status_code == 200
