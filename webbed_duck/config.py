@@ -114,9 +114,20 @@ def load_config(path: str | Path | None = None) -> Config:
         return cfg
 
     data = _load_toml(Path(path))
+    storage_alias: Path | None = None
+    storage_data = data.get("storage")
+    if isinstance(storage_data, Mapping):
+        root_value = storage_data.get("root")
+        if root_value is None:
+            root_value = storage_data.get("storage_root")
+        if root_value is not None:
+            storage_alias = _as_path(root_value)
+
     server_data = data.get("server")
     if isinstance(server_data, Mapping):
-        cfg.server = _parse_server(server_data, base=cfg.server)
+        cfg.server = _parse_server(server_data, base=cfg.server, storage_root_alias=storage_alias)
+    elif storage_alias is not None:
+        cfg.server = replace(cfg.server, storage_root=storage_alias)
     ui_data = data.get("ui")
     if isinstance(ui_data, Mapping):
         cfg.ui = _parse_ui(ui_data, base=cfg.ui)
@@ -135,10 +146,16 @@ def load_config(path: str | Path | None = None) -> Config:
     return cfg
 
 
-def _parse_server(data: Mapping[str, Any], base: ServerConfig) -> ServerConfig:
+def _parse_server(
+    data: Mapping[str, Any], base: ServerConfig, *, storage_root_alias: Path | None = None
+) -> ServerConfig:
     overrides: MutableMapping[str, Any] = {}
     if "storage_root" in data:
         overrides["storage_root"] = _as_path(data["storage_root"])
+    elif storage_root_alias is not None:
+        overrides["storage_root"] = storage_root_alias
+    elif "root" in data:  # tolerate misplaced alias inside [server]
+        overrides["storage_root"] = _as_path(data["root"])
     if "theme" in data:
         overrides["theme"] = str(data["theme"])
     if "host" in data:
