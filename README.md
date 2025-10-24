@@ -34,3 +34,17 @@ python -m webbed_duck.cli serve --build routes_build --config config.toml
 Visit `http://127.0.0.1:8000/hello?name=DuckDB` to exercise the sample route. Append `&format=html_c` or `&format=feed` to
 see the HTML viewers, or `&format=arrow&limit=25` for Arrow RPC slices. Use `POST /routes/hello/overrides` to annotate rows,
 `POST /routes/hello/append` to persist CSV records, and `GET /routes/hello/schema` to generate auto-form metadata.
+
+## Encrypted ZIP attachments
+
+Shares can optionally bundle CSV, Parquet, or HTML artifacts into a ZIP archive. If a share request specifies a
+`zip_passphrase`, webbed_duck encrypts the archive with AES via the optional [`pyzipper`](https://pypi.org/project/pyzipper/)
+dependency. Install it with:
+
+```bash
+pip install pyzipper
+```
+
+When `pyzipper` is not installed the server still produces plain ZIP archives and reports `"zip_encrypted": false` in the
+share metadata. Passphrase requests are rejected in this scenario so teams that require encryption can surface the missing
+dependency quickly.

@@ -6,6 +6,9 @@
   fallback behaviour, and chart renderer edge cases.
 - Documented the plugin architecture with a standalone demo script and guide
   under `docs/demos/`.
+- Documented the optional `pyzipper` dependency for encrypted share archives
+  and exposed `zip_encrypted` metadata so passphrase requests fail fast when
+  encryption is unavailable.
 
 ## MVP 0.3
 

@@ -103,6 +103,7 @@ def test_pseudo_auth_sessions_and_share(tmp_path: Path) -> None:
     assert share_meta["redacted_columns"] == []
     assert share_meta["watermark"] is True
     assert share_meta["zipped"] is False
+    assert share_meta["zip_encrypted"] is False
 
     db_path = tmp_path / "storage" / "runtime" / "meta.sqlite3"
     with sqlite3.connect(db_path) as conn:
@@ -138,6 +139,8 @@ ROUTE_ATTACH_TEXT = (
 
 @pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
 def test_share_with_attachments_and_redaction(tmp_path: Path) -> None:
+    pytest.importorskip("pyzipper")
+
     records: list[tuple] = []
     module_name = _install_email_adapter(records)
     client = _prepare_app(tmp_path, module_name, route_text=ROUTE_ATTACH_TEXT)
@@ -164,6 +167,7 @@ def test_share_with_attachments_and_redaction(tmp_path: Path) -> None:
     token = share["token"]
     assert share["attachments"] and share["attachments"][0].endswith(".zip")
     assert share["zipped"] is True
+    assert share["zip_encrypted"] is True
     assert share["inline_snapshot"] is False
     assert share["rows_shared"] == 1
     assert "email" in share["redacted_columns"]
@@ -178,3 +182,50 @@ def test_share_with_attachments_and_redaction(tmp_path: Path) -> None:
     assert len(records) == 1
     _, _, _, _, attachments = records[-1]
     assert attachments and attachments[0][0].endswith(".zip")
+
+
+@pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
+def test_share_zip_passphrase_requires_pyzipper(monkeypatch, tmp_path: Path) -> None:
+    records: list[tuple] = []
+    module_name = _install_email_adapter(records)
+    client = _prepare_app(tmp_path, module_name, route_text=ROUTE_ATTACH_TEXT)
+
+    monkeypatch.setitem(sys.modules, "pyzipper", None)
+
+    login = client.post("/auth/pseudo/session", json={"email": "user@example.com"})
+    assert login.status_code == 200
+
+    # Zipping without a passphrase still works (plain ZIP archive)
+    fallback = client.post(
+        "/routes/report/share",
+        json={
+            "emails": ["friend@example.com"],
+            "params": {"name": "Duck"},
+            "format": "html_t",
+            "attachments": ["csv"],
+            "inline_snapshot": False,
+            "zip": True,
+        },
+    )
+    assert fallback.status_code == 200
+    payload = fallback.json()["share"]
+    assert payload["zipped"] is True
+    assert payload["zip_encrypted"] is False
+
+    # Requesting encryption without pyzipper raises a validation error
+    failure = client.post(
+        "/routes/report/share",
+        json={
+            "emails": ["friend@example.com"],
+            "params": {"name": "Duck"},
+            "format": "html_t",
+            "attachments": ["csv"],
+            "inline_snapshot": False,
+            "zip": True,
+            "zip_passphrase": "secret",
+        },
+    )
+    assert failure.status_code == 400
+    detail = failure.json()["detail"]
+    assert detail["code"] == "invalid_parameter"
+    assert "pyzipper" in detail["message"]
