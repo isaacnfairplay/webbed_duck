@@ -9,6 +9,9 @@
 - Documented the optional `pyzipper` dependency for encrypted share archives
   and exposed `zip_encrypted` metadata so passphrase requests fail fast when
   encryption is unavailable.
+- Updated project documentation (README, AGENTS guide, status report) to reflect
+  DuckDB-backed incremental checkpoints, share workflows, and security
+  guardrails for pseudo-auth sessions and share tokens.
 
 ## MVP 0.3
 

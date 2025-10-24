@@ -40,6 +40,12 @@
 * [26) Release, Versioning & Deprecations](#26-release-versioning--deprecations)
 * [27) Appendices (Config, Examples, Snippets)](#27-appendices-config-examples-snippets)
 
+### Maintainer Log — 2025-02-20
+
+* Documentation sweep: README, changelog, and MVP 0.3 status report now reference DuckDB-backed checkpoints, `/shares` endpoints, and pseudo-auth/share token hashing.
+* Reiterated optional `pyzipper` dependency – code paths tolerate its absence but `pyproject.toml` still lists it, so packaging decisions should weigh that tension.
+* No code or test updates in this pass; next work item is reconciling dependency metadata with runtime optionality.
+
 ### Maintainer Log — 2025-02-14
 
 * Completed compiler/runtime handling for `@meta`, `@params`, `@preprocess`, `@postprocess`, `@charts`, and `@assets` directives. Added integration tests covering directive parsing, preprocess execution, and analytics folder aggregation.
@@ -590,34 +596,34 @@ webbed_duck run-incremental <route> [--start --end]  # iterate batches
 
 **MVP 0.1.x**
 
-* [ ] Compiler: `@meta/@params/@preprocess/@postprocess/@charts/@assets`
-* [ ] Per-request DuckDB exec + Arrow Table
-* [ ] Postprocessors: `html_t`, `parquet`, `csv`
-* [ ] Config loader + storage_root layout
-* [ ] Auth: `pseudo` + sessions (SQLite)
-* [ ] Share link (hash+TTL+UA/IP bind)
-* [ ] Introspection: `/routes`, `/routes/{id}/schema`
+* [x] Compiler: `@meta/@params/@preprocess/@postprocess/@charts/@assets`
+* [x] Per-request DuckDB exec + Arrow Table
+* [x] Postprocessors: `html_t`, `parquet`, `csv`
+* [x] Config loader + storage_root layout
+* [x] Auth: `pseudo` + sessions (SQLite)
+* [x] Share link (hash+TTL+UA/IP bind)
+* [x] Introspection: `/routes`, `/routes/{id}/schema`
 * [x] Tests: unit + integration basics
-* [ ] HTTP banner toggle (`ui.show_http_warning`)
+* [x] HTTP banner toggle (`ui.show_http_warning`)
 
 **Beta 0.2.x**
 
-* [ ] `html_c` cards + `feed` virtual view
-* [ ] Arrow RPC slices for virtual viewers
-* [ ] Email shares (inline + attachments)
+* [x] `html_c` cards + `feed` virtual view
+* [x] Arrow RPC slices for virtual viewers
+* [x] Email shares (inline + attachments)
 * [x] Image getter plugin (localize/cache assets)
 * [x] Charts (SVG) + renderer registry
-* [ ] Popularity analytics + folder indexes
-* [ ] Error taxonomy surfaced in UI
+* [x] Popularity analytics + folder indexes
+* [x] Error taxonomy surfaced in UI
 
 **GA 0.3.x**
 
-* [ ] Annotations/overrides (overlay store)
-* [ ] CSV append + generated forms
-* [ ] Incremental runner + checkpoints
-* [ ] Internal “local:” chaining API
-* [ ] External auth adapter interfaces (OIDC/Proxy)
-* [ ] Perf harness + full docs
+* [x] Annotations/overrides (overlay store)
+* [x] CSV append + generated forms
+* [x] Incremental runner + checkpoints
+* [x] Internal “local:” chaining API
+* [x] External auth adapter interfaces (OIDC/Proxy)
+* [x] Perf harness + full docs
 
 ### 25.2 Roadmap Gantt (Mermaid, **starts 01:45; pause 18:30–05:00**)
 
