@@ -1,7 +1,7 @@
 """Route definitions and helpers."""
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 from importlib import util
 from pathlib import Path
@@ -30,6 +30,7 @@ class ParameterSpec:
     required: bool = False
     default: Any | None = None
     description: str | None = None
+    extra: Mapping[str, Any] = field(default_factory=dict)
 
     def convert(self, raw: str) -> Any:
         if self.type is ParameterType.STRING:
@@ -68,6 +69,13 @@ class RouteDefinition:
     description: str | None = None
     metadata: Mapping[str, Any] | None = None
     directives: Sequence[RouteDirective] = ()
+    version: str | None = None
+    default_format: str | None = None
+    allowed_formats: Sequence[str] = ()
+    preprocess: Sequence[Mapping[str, Any]] = ()
+    postprocess: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
+    charts: Sequence[Mapping[str, Any]] = ()
+    assets: Mapping[str, Any] | None = None
 
     def find_param(self, name: str) -> ParameterSpec | None:
         for param in self.params:
@@ -105,20 +113,36 @@ def _load_module_from_path(path: Path) -> ModuleType:
 
 
 def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
-    params = [
-        ParameterSpec(
-            name=item["name"],
-            type=ParameterType.from_string(item.get("type", "str")),
-            required=bool(item.get("required", False)),
-            default=item.get("default"),
-            description=item.get("description"),
+    params: list[ParameterSpec] = []
+    for item in route.get("params", []):
+        if not isinstance(item, Mapping):
+            continue
+        extra = item.get("extra") if isinstance(item.get("extra"), Mapping) else {}
+        params.append(
+            ParameterSpec(
+                name=str(item.get("name")),
+                type=ParameterType.from_string(str(item.get("type", "str"))),
+                required=bool(item.get("required", False)),
+                default=item.get("default"),
+                description=item.get("description"),
+                extra=dict(extra),
+            )
         )
-        for item in route.get("params", [])
-        if isinstance(item, Mapping)
-    ]
     metadata = route.get("metadata")
     if not isinstance(metadata, Mapping):
         metadata = {}
+
+    postprocess = route.get("postprocess")
+    if not isinstance(postprocess, Mapping):
+        postprocess = {}
+    else:
+        postprocess = {str(k): dict(v) for k, v in postprocess.items() if isinstance(v, Mapping)}
+
+    assets = route.get("assets")
+    if isinstance(assets, Mapping):
+        assets = dict(assets)
+    else:
+        assets = None
 
     directives_data = route.get("directives", [])
     directives: list[RouteDirective] = []
@@ -148,6 +172,13 @@ def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
         description=route.get("description"),
         metadata=metadata,
         directives=directives,
+        version=str(route.get("version")) if route.get("version") is not None else None,
+        default_format=str(route.get("default_format")) if route.get("default_format") is not None else None,
+        allowed_formats=[str(item) for item in route.get("allowed_formats", [])],
+        preprocess=[dict(item) if isinstance(item, Mapping) else {"callable": str(item)} for item in route.get("preprocess", [])],
+        postprocess=postprocess,
+        charts=[dict(item) for item in route.get("charts", []) if isinstance(item, Mapping)],
+        assets=assets,
     )
 
 

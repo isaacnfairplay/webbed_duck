@@ -52,6 +52,11 @@ class OverlayStore:
             records.append(OverrideRecord(**data))
         return records
 
+    def count_for_route(self, route_id: str) -> int:
+        with self._lock:
+            bucket = self._data.get(route_id)
+            return len(bucket) if bucket else 0
+
     def upsert(
         self,
         *,

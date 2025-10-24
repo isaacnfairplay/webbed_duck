@@ -1,3 +1,4 @@
+"""Helpers for transforming Arrow tables into HTTP-ready payloads."""
 from __future__ import annotations
 
 import datetime as dt
@@ -7,6 +8,7 @@ from typing import Iterable, Mapping, Sequence
 import pyarrow as pa
 
 from ..config import Config
+from ..plugins.assets import resolve_image
 
 
 def table_to_records(table: pa.Table) -> list[dict[str, object]]:
@@ -22,6 +24,9 @@ def render_table_html(
     route_metadata: Mapping[str, object] | None,
     config: Config,
     charts: Sequence[Mapping[str, str]] | None = None,
+    *,
+    postprocess: Mapping[str, object] | None = None,
+    watermark: str | None = None,
 ) -> str:
     headers = table.column_names
     records = table_to_records(table)
@@ -36,16 +41,22 @@ def render_table_html(
     if config.ui.error_taxonomy_banner:
         banners.append("<p class='banner info'>Errors follow the webbed_duck taxonomy (see docs).</p>")
     chart_html = "".join(item["html"] for item in charts or [])
+    watermark_html = (
+        f"<div class='watermark'>{html.escape(watermark)}</div>" if watermark else ""
+    )
     return (
         "<html><head><style>"
         "body{font-family:system-ui,sans-serif;margin:1.5rem;}"
-        "table{border-collapse:collapse;width:100%;}" 
+        "table{border-collapse:collapse;width:100%;}"
         "th,td{border:1px solid #e5e7eb;padding:0.5rem;text-align:left;}"
         "tr:nth-child(even){background:#f9fafb;}"
         ".cards{display:grid;gap:1rem;}"
         ".banner.warning{color:#b91c1c;}"
         ".banner.info{color:#2563eb;}"
+        ".watermark{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-24deg);"
+        "font-size:3.5rem;color:rgba(37,99,235,0.12);letter-spacing:0.2rem;pointer-events:none;user-select:none;}"
         "</style></head><body>"
+        + watermark_html
         + "".join(banners)
         + chart_html
         + f"<table><thead><tr>{header_html}</tr></thead><tbody>{rows_html}</tbody></table>"
@@ -59,10 +70,35 @@ def render_cards_html(
     config: Config,
     charts: Sequence[Mapping[str, str]] | None = None,
 ) -> str:
+    return render_cards_html_with_assets(
+        table,
+        route_metadata,
+        config,
+        charts=charts,
+        postprocess=None,
+        assets=None,
+        route_id="",
+    )
+
+
+def render_cards_html_with_assets(
+    table: pa.Table,
+    route_metadata: Mapping[str, object] | None,
+    config: Config,
+    *,
+    charts: Sequence[Mapping[str, str]] | None = None,
+    postprocess: Mapping[str, object] | None = None,
+    assets: Mapping[str, object] | None = None,
+    route_id: str,
+    watermark: str | None = None,
+) -> str:
     metadata = route_metadata or {}
-    cards_meta = metadata.get("html_c", {})
-    if not isinstance(cards_meta, Mapping):
-        cards_meta = {}
+    cards_meta: dict[str, object] = {}
+    base_cards = metadata.get("html_c")
+    if isinstance(base_cards, Mapping):
+        cards_meta.update(base_cards)
+    if isinstance(postprocess, Mapping):
+        cards_meta.update(postprocess)
     title_col = str(cards_meta.get("title_col") or (table.column_names[0] if table.column_names else "title"))
     image_col = cards_meta.get("image_col")
     meta_cols = cards_meta.get("meta_cols")
@@ -70,6 +106,8 @@ def render_cards_html(
         meta_cols = [col for col in table.column_names if col not in {title_col, image_col}][:3]
 
     records = table_to_records(table)
+    getter_name = str(assets.get("image_getter")) if assets and assets.get("image_getter") else None
+    base_path = str(assets.get("base_path")) if assets and assets.get("base_path") else None
     cards = []
     for record in records:
         title = html.escape(str(record.get(title_col, "")))
@@ -79,7 +117,11 @@ def render_cards_html(
         )
         image_html = ""
         if image_col and record.get(image_col):
-            image_html = f"<img src='{html.escape(str(record[image_col]))}' alt='{title}'/>"
+            image_value = str(record[image_col])
+            if base_path and not image_value.startswith(("/", "http://", "https://")):
+                image_value = f"{base_path.rstrip('/')}/{image_value}"
+            resolved = resolve_image(image_value, route_id, getter_name=getter_name)
+            image_html = f"<img src='{html.escape(resolved)}' alt='{title}'/>"
         cards.append(
             "<article class='card'>"
             + image_html
@@ -91,6 +133,9 @@ def render_cards_html(
     if config.ui.error_taxonomy_banner:
         banners = "<p class='banner info'>Error taxonomy: user, data, system.</p>"
     chart_html = "".join(item["html"] for item in charts or [])
+    watermark_html = (
+        f"<div class='watermark'>{html.escape(watermark)}</div>" if watermark else ""
+    )
     return (
         "<html><head><style>"
         "body{font-family:system-ui,sans-serif;margin:1.5rem;}"
@@ -100,7 +145,10 @@ def render_cards_html(
         ".card h3{margin:0.5rem 0;font-size:1.1rem;}"
         ".card ul{margin:0;padding-left:1rem;}"
         ".banner.info{color:#2563eb;}"
+        ".watermark{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-24deg);"
+        "font-size:3.5rem;color:rgba(37,99,235,0.12);letter-spacing:0.2rem;pointer-events:none;user-select:none;}"
         "</style></head><body>"
+        + watermark_html
         + banners
         + chart_html
         + f"<section class='cards'>{''.join(cards)}</section>"
@@ -108,11 +156,21 @@ def render_cards_html(
     )
 
 
-def render_feed_html(table: pa.Table, route_metadata: Mapping[str, object] | None, config: Config) -> str:
+def render_feed_html(
+    table: pa.Table,
+    route_metadata: Mapping[str, object] | None,
+    config: Config,
+    *,
+    postprocess: Mapping[str, object] | None = None,
+) -> str:
     metadata = route_metadata or {}
     feed_meta = metadata.get("feed", {})
     if not isinstance(feed_meta, Mapping):
         feed_meta = {}
+    if isinstance(postprocess, Mapping):
+        merged = dict(feed_meta)
+        merged.update(postprocess)
+        feed_meta = merged
     ts_col = str(feed_meta.get("timestamp_col") or (table.column_names[0] if table.column_names else "timestamp"))
     title_col = str(feed_meta.get("title_col") or (table.column_names[1] if len(table.column_names) > 1 else "title"))
     summary_col = feed_meta.get("summary_col")
@@ -176,6 +234,7 @@ def _json_friendly(value: object) -> object:
 
 __all__ = [
     "render_cards_html",
+    "render_cards_html_with_assets",
     "render_feed_html",
     "render_table_html",
     "table_to_records",
