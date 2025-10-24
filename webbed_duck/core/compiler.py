@@ -5,6 +5,7 @@ import json
 import pprint
 import re
 import shlex
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Sequence
@@ -15,6 +16,34 @@ FRONTMATTER_DELIMITER = "+++"
 SQL_BLOCK_PATTERN = re.compile(r"```sql\s*(?P<sql>.*?)```", re.DOTALL | re.IGNORECASE)
 PLACEHOLDER_PATTERN = re.compile(r"\{\{\s*(?P<name>[a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}")
 DIRECTIVE_PATTERN = re.compile(r"<!--\s*@(?P<name>[a-zA-Z0-9_.:-]+)(?P<body>.*?)-->", re.DOTALL)
+
+_KNOWN_FRONTMATTER_KEYS = {
+    "append",
+    "assets",
+    "cache",
+    "charts",
+    "default-format",
+    "default_format",
+    "description",
+    "feed",
+    "html_c",
+    "html_t",
+    "id",
+    "json",
+    "meta",
+    "methods",
+    "params",
+    "path",
+    "postprocess",
+    "preprocess",
+    "share",
+    "table",
+    "title",
+    "version",
+    "overrides",
+    "allowed_formats",
+    "allowed-formats",
+}
 
 
 class RouteCompilationError(RuntimeError):
@@ -39,6 +68,7 @@ class _RouteSections:
     postprocess: Mapping[str, Mapping[str, object]]
     charts: list[Mapping[str, object]]
     assets: Mapping[str, object] | None
+    cache: Mapping[str, object] | None
 
 
 def compile_routes(source_dir: str | Path, build_dir: str | Path) -> List[RouteDefinition]:
@@ -64,6 +94,7 @@ def compile_route_file(path: str | Path) -> RouteDefinition:
     text = Path(path).read_text(encoding="utf-8")
     frontmatter, body = _split_frontmatter(text)
     metadata_raw = _parse_frontmatter(frontmatter)
+    _warn_unexpected_frontmatter(metadata_raw, path)
     directives = _extract_directives(body)
     metadata = _extract_metadata(metadata_raw)
     sections = _interpret_sections(metadata_raw, directives, metadata)
@@ -83,6 +114,8 @@ def compile_route_file(path: str | Path) -> RouteDefinition:
             metadata.setdefault(key, value)
     if sections.assets and "assets" not in metadata:
         metadata["assets"] = sections.assets
+    if sections.cache:
+        metadata["cache"] = sections.cache
 
     return RouteDefinition(
         id=sections.route_id,
@@ -125,6 +158,21 @@ def _parse_frontmatter(frontmatter: str) -> Mapping[str, object]:
         return tomllib.loads(frontmatter)
     except Exception as exc:  # pragma: no cover - toml parsing errors vary
         raise RouteCompilationError(f"Invalid TOML frontmatter: {exc}") from exc
+
+
+def _warn_unexpected_frontmatter(metadata: Mapping[str, object], path: str | Path) -> None:
+    unexpected: list[str] = []
+    for key in metadata.keys():
+        normalized = str(key)
+        if normalized not in _KNOWN_FRONTMATTER_KEYS:
+            unexpected.append(normalized)
+    if not unexpected:
+        return
+    joined = ", ".join(sorted(unexpected))
+    print(
+        f"[webbed-duck] Warning: unexpected frontmatter key(s) {joined} in {path}",
+        file=sys.stderr,
+    )
 
 
 def _extract_sql(body: str) -> str:
@@ -252,6 +300,7 @@ def _interpret_sections(
     postprocess = _build_postprocess(metadata, directives)
     charts = _build_charts(metadata, directives)
     assets = _build_assets(metadata, directives)
+    cache_meta = _build_cache(metadata, directives)
 
     return _RouteSections(
         route_id=route_id,
@@ -264,6 +313,7 @@ def _interpret_sections(
         postprocess=postprocess,
         charts=charts,
         assets=assets,
+        cache=cache_meta,
     )
 
 
@@ -448,6 +498,61 @@ def _build_assets(
         if isinstance(payload, Mapping):
             assets.update({str(k): v for k, v in payload.items()})
     return assets or None
+
+
+def _build_cache(
+    metadata: Mapping[str, Any], directives: Sequence[RouteDirective]
+) -> Mapping[str, object] | None:
+    cache_meta: dict[str, object] = {}
+    base = metadata.get("cache")
+    if isinstance(base, Mapping):
+        cache_meta.update({str(k): v for k, v in base.items()})
+    for payload in _collect_directive_payloads(directives, "cache"):
+        if isinstance(payload, Mapping):
+            cache_meta.update({str(k): v for k, v in payload.items()})
+        elif isinstance(payload, str):
+            cache_meta["profile"] = payload
+    if not cache_meta:
+        return None
+
+    if "order-by" in cache_meta and "order_by" not in cache_meta:
+        cache_meta["order_by"] = cache_meta.pop("order-by")
+
+    if "order_by" in cache_meta:
+        cache_meta["order_by"] = _normalize_order_by(cache_meta["order_by"])
+
+    enabled_raw = cache_meta.get("enabled")
+    enabled = True if enabled_raw is None else bool(enabled_raw)
+    order_values = cache_meta.get("order_by")
+    if enabled and (not isinstance(order_values, Sequence) or not order_values):
+        raise RouteCompilationError(
+            "[cache] blocks must define order_by = [\"column\"] when caching is enabled"
+        )
+
+    return cache_meta
+
+
+def _normalize_order_by(raw: object) -> list[str]:
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        parts = [segment.strip() for segment in raw.split(",")]
+        values = [part for part in parts if part]
+        if not values:
+            raise RouteCompilationError("cache.order_by must list at least one column name")
+        return values
+    if isinstance(raw, Sequence) and not isinstance(raw, (bytes, bytearray)):
+        values: list[str] = []
+        for item in raw:
+            if item is None:
+                continue
+            text = str(item).strip()
+            if text:
+                values.append(text)
+        if not values:
+            raise RouteCompilationError("cache.order_by must list at least one column name")
+        return values
+    raise RouteCompilationError("cache.order_by must be a string or list of column names")
 
 
 def _write_route_module(definition: RouteDefinition, source_path: Path, src_root: Path, build_root: Path) -> None:

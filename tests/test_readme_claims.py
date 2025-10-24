@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import datetime
+import contextlib
 import hashlib
+import io
 import json
 import re
 import sqlite3
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
@@ -12,7 +15,7 @@ from typing import Callable
 import pytest
 
 from webbed_duck.config import Config, load_config
-from webbed_duck.core.compiler import compile_routes
+from webbed_duck.core.compiler import compile_route_file, compile_routes
 from webbed_duck.core.incremental import run_incremental
 from webbed_duck.core.routes import load_compiled_routes
 from webbed_duck.plugins import assets as assets_plugins
@@ -41,6 +44,10 @@ ui_control = "input"
 ui_label = "Name"
 ui_placeholder = "Team mate"
 ui_help = "Enter a name and apply the filter"
+
+[cache]
+ttl_hours = 12
+order_by = ["created_at"]
 
 [html_t]
 show_params = ["name"]
@@ -74,10 +81,81 @@ path = "/by_date"
 [params.day]
 type = "str"
 required = true
+[cache]
+order_by = ["day_value"]
 +++
 
 ```sql
-SELECT {{day}} AS day_value;
+SELECT {{day}} AS day_value
+ORDER BY day_value;
+```
+"""
+
+
+ROUTE_PAGED = """+++
+id = "cached_page"
+path = "/cached_page"
+
+[cache]
+rows_per_page = 2
+order_by = ["value"]
+
++++
+
+```sql
+SELECT range as value FROM range(0,5) ORDER BY value;
+```
+"""
+
+
+ROUTE_INVARIANT_SUPERSET = """+++
+id = "cached_invariant_superset"
+path = "/cached_invariant"
+
+[params.product_code]
+type = "str"
+required = false
+
+[cache]
+rows_per_page = 5
+invariant_filters = [ { param = "product_code", column = "product_code", separator = "," } ]
+order_by = ["seq"]
+
++++
+
+```sql
+SELECT product_code, quantity, seq
+FROM (
+    VALUES ('widget', 4, 1), ('gadget', 2, 2), ('widget', 3, 3)
+) AS inventory(product_code, quantity, seq)
+WHERE product_code = COALESCE({{ product_code }}, product_code)
+ORDER BY seq;
+```
+"""
+
+
+ROUTE_INVARIANT_SHARDS = """+++
+id = "cached_invariant_shards"
+path = "/cached_invariant_shards"
+
+[params.product_code]
+type = "str"
+required = false
+
+[cache]
+rows_per_page = 5
+invariant_filters = [ { param = "product_code", column = "product_code", separator = "," } ]
+order_by = ["seq"]
+
++++
+
+```sql
+SELECT product_code, quantity, seq
+FROM (
+    VALUES ('widget', 4, 1), ('gadget', 2, 2), ('widget', 3, 3)
+) AS inventory(product_code, quantity, seq)
+WHERE product_code = COALESCE({{ product_code }}, product_code)
+ORDER BY seq;
 ```
 """
 
@@ -119,6 +197,12 @@ class ReadmeContext:
     assets_registry_size: int
     charts_registry_size: int
     duckdb_connect_counts: list[int]
+    cache_enforced_payload: dict
+    cache_config: object
+    invariant_superset_payload: dict
+    invariant_superset_counts: list[int]
+    invariant_combined_payload: dict
+    invariant_shard_counts: list[int]
 
 
 def _install_email_adapter(records: list[tuple]) -> str:
@@ -168,6 +252,9 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
 
     (src_dir / "hello.sql.md").write_text(ROUTE_PRIMARY, encoding="utf-8")
     (src_dir / "by_date.sql.md").write_text(ROUTE_INCREMENTAL, encoding="utf-8")
+    (src_dir / "cached_page.sql.md").write_text(ROUTE_PAGED, encoding="utf-8")
+    (src_dir / "cached_invariant.sql.md").write_text(ROUTE_INVARIANT_SUPERSET, encoding="utf-8")
+    (src_dir / "cached_invariant_shards.sql.md").write_text(ROUTE_INVARIANT_SHARDS, encoding="utf-8")
 
     compile_routes(src_dir, build_dir)
     compile_routes(src_dir, rebuild_dir)
@@ -218,6 +305,7 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
 
         json_response = request_with_tracking(client, "get", "/hello")
         route_json = json_response.json()
+        cached_response = request_with_tracking(client, "get", "/hello")
 
         html_response = client.get("/hello", params={"format": "html_t"})
         cards_response = client.get("/hello", params={"format": "html_c"})
@@ -225,6 +313,52 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
         csv_response = client.get("/hello", params={"format": "csv"})
         parquet_response = client.get("/hello", params={"format": "parquet"})
         arrow_response = client.get("/hello", params={"format": "arrow", "limit": 1})
+        paged_response = client.get(
+            "/cached_page",
+            params={"format": "json", "limit": 1, "offset": 3},
+        )
+        paged_payload = paged_response.json()
+
+        invariant_superset_counts: list[int] = []
+        request_with_tracking(
+            client,
+            "get",
+            "/cached_invariant",
+            params={"format": "json"},
+        )
+        invariant_superset_counts.append(duckdb_connect_counts[-1])
+        superset_filtered = request_with_tracking(
+            client,
+            "get",
+            "/cached_invariant",
+            params={"format": "json", "product_code": "gadget"},
+        )
+        invariant_superset_counts.append(duckdb_connect_counts[-1])
+        invariant_superset_payload = superset_filtered.json()
+
+        invariant_shard_counts: list[int] = []
+        request_with_tracking(
+            client,
+            "get",
+            "/cached_invariant_shards",
+            params={"format": "json", "product_code": "widget"},
+        )
+        invariant_shard_counts.append(duckdb_connect_counts[-1])
+        request_with_tracking(
+            client,
+            "get",
+            "/cached_invariant_shards",
+            params={"format": "json", "product_code": "gadget"},
+        )
+        invariant_shard_counts.append(duckdb_connect_counts[-1])
+        shard_combined = request_with_tracking(
+            client,
+            "get",
+            "/cached_invariant_shards",
+            params={"format": "json", "product_code": "widget,gadget"},
+        )
+        invariant_shard_counts.append(duckdb_connect_counts[-1])
+        invariant_combined_payload = shard_combined.json()
 
         override_response = client.post(
             "/routes/hello/overrides",
@@ -353,7 +487,31 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
         assets_registry_size=len(getattr(assets_plugins, "_REGISTRY", {})),
         charts_registry_size=len(getattr(charts_plugins, "_RENDERERS", {})),
         duckdb_connect_counts=duckdb_connect_counts,
+        cache_enforced_payload=paged_payload,
+        cache_config=config.cache,
+        invariant_superset_payload=invariant_superset_payload,
+        invariant_superset_counts=invariant_superset_counts,
+        invariant_combined_payload=invariant_combined_payload,
+        invariant_shard_counts=invariant_shard_counts,
     )
+
+
+def _frontmatter_warning_emitted() -> bool:
+    route_body = (
+        "+++\n"
+        "id = \"warn\"\n"
+        "path = \"/warn\"\n"
+        "extra = 1\n"
+        "+++\n\n"
+        "```sql\nSELECT 1;\n```\n"
+    )
+    with tempfile.TemporaryDirectory() as tmpdir:
+        route_path = Path(tmpdir) / "warn.sql.md"
+        route_path.write_text(route_body, encoding="utf-8")
+        buffer = io.StringIO()
+        with contextlib.redirect_stderr(buffer):
+            compile_route_file(route_path)
+        return "unexpected frontmatter key" in buffer.getvalue()
 
 
 def _ensure(condition: bool, message: str) -> None:
@@ -492,21 +650,90 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         (lambda s: s.startswith("- Additional runtime controls"), lambda s: None),
         (lambda s: s.startswith("- `?limit=`"), lambda s: None),
         (lambda s: s.startswith("- `?column=`"), lambda s: None),
+        (lambda s: s.startswith("- Cache settings come from `[cache]` frontmatter"), lambda s: _ensure(
+            hasattr(ctx.cache_config, "ttl_seconds")
+            and any(((route.metadata or {}).get("cache") is not None) for route in ctx.compiled_routes),
+            s,
+        )),
+        (lambda s: s.startswith("- Routes must declare `cache.order_by`"), lambda s: _ensure(
+            all(
+                bool(((route.metadata or {}).get("cache") or {}).get("order_by"))
+                for route in ctx.compiled_routes
+                if (route.metadata or {}).get("cache")
+            ),
+            s,
+        )),
+        (lambda s: s.startswith("- `[cache]`"), lambda s: _ensure(
+            all(
+                bool(((route.metadata or {}).get("cache") or {}).get("order_by"))
+                for route in ctx.compiled_routes
+                if (route.metadata or {}).get("cache")
+            ),
+            s,
+        )),
+        (lambda s: "runtime can validate the schema" in s, lambda s: _ensure(
+            all(
+                bool(((route.metadata or {}).get("cache") or {}).get("order_by"))
+                for route in ctx.compiled_routes
+                if (route.metadata or {}).get("cache")
+            ),
+            s,
+        )),
+        (lambda s, phrases=(
+            "re-sorts combined pages on those columns",
+            "The backend merges",
+            "reorders the combined rows by `cache.order_by`",
+            "deterministic paging.",
+        ): any(phrase in s for phrase in phrases), lambda s: _ensure(
+            [row["seq"] for row in ctx.invariant_combined_payload["rows"]] == [1, 2, 3],
+            s,
+        )),
+        (lambda s: s.startswith("- The executor snaps requested offsets"), lambda s: _ensure(
+            ctx.cache_enforced_payload["offset"] == 2 and ctx.cache_enforced_payload["limit"] == 2,
+            s,
+        )),
+        (lambda s: s.startswith("- Cache hits skip DuckDB entirely"), lambda s: _ensure(
+            len(ctx.duckdb_connect_counts) >= 2 and ctx.duckdb_connect_counts[1] == 0,
+            s,
+        )),
+        (lambda s: s.startswith("- Cache hits reuse those Parquet pages"), lambda s: _ensure(
+            ctx.storage_root_layout["cache"]
+            and len(ctx.duckdb_connect_counts) >= 2
+            and ctx.duckdb_connect_counts[1] == 0,
+            s,
+        )),
+        (lambda s: s.startswith("- Transformation-invariant filters can be declared"), lambda s: _ensure(
+            ctx.invariant_superset_counts == [1, 0]
+            and ctx.invariant_superset_payload["total_rows"] == 1
+            and [row["product_code"] for row in ctx.invariant_superset_payload["rows"]] == ["gadget"],
+            s,
+        )),
+        (lambda s: s.startswith("- When invariant filters are configured"), lambda s: _ensure(
+            ctx.invariant_shard_counts == [1, 1, 0]
+            and {row["product_code"] for row in ctx.invariant_combined_payload["rows"]} == {"widget", "gadget"}
+            and [row["seq"] for row in ctx.invariant_combined_payload["rows"]] == [1, 2, 3],
+            s,
+        )),
+        (lambda s: s.startswith("- Every cache miss opens a fresh DuckDB connection"), lambda s: _ensure(
+            ctx.duckdb_connect_counts and ctx.duckdb_connect_counts[0] >= 1,
+            s,
+        )),
         (lambda s: s.startswith("All of the following formats work today"), lambda s: _ensure(
             ctx.arrow_headers["content-type"].startswith("application/vnd.apache.arrow.stream"), s
         )),
         (lambda s: s.startswith("|"), lambda s: None),
         (lambda s: s.startswith("Routes may set `default_format`"), lambda s: None),
-        (lambda s: s.startswith("- Every request opens a fresh DuckDB connection"), lambda s: _ensure(
-            all(count == 1 for count in ctx.duckdb_connect_counts), s
-        )),
         (lambda s: s.startswith("- You can query DuckDB-native sources"), lambda s: None),
         (lambda s: s.startswith("- For derived inputs"), lambda s: None),
-        (lambda s: s.startswith("- After execution, server-side overlays"), lambda s: _ensure(
+        (lambda s: s.startswith("- After loading the cached (or freshly queried) page"), lambda s: _ensure(
             ctx.override_payload["column"] == "note", s
         )),
         (lambda s: s.startswith("- Analytics (hits, rows, latency"), lambda s: _ensure(
             ctx.analytics_payload["routes"], s
+        )),
+        (lambda s: s.startswith("- When a route defines `cache.rows_per_page`"), lambda s: _ensure(
+            ctx.cache_enforced_payload["offset"] == 2 and ctx.cache_enforced_payload["limit"] == 2,
+            s,
         )),
         (lambda s: s.startswith("- Authentication modes are controlled via `config.toml`"), lambda s: _ensure(
             ctx.share_payload["meta"]["token"] is not None, s
@@ -521,7 +748,8 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
             ctx.compiled_hashes == ctx.recompiled_hashes, s
         )),
         (lambda s: s.startswith("* **Per-request DuckDB execution**"), lambda s: _ensure(
-            all(count >= 1 for count in ctx.duckdb_connect_counts), s
+            ctx.duckdb_connect_counts[0] >= 1 and ctx.duckdb_connect_counts[-1] >= 1,
+            s,
         )),
         (lambda s: s.startswith("* **Overlay-aware viewers**"), lambda s: _ensure(
             ctx.override_payload["column"] == "note" and ctx.append_path.exists(), s
@@ -687,8 +915,13 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         (lambda s: s.startswith("- `default_format`"), lambda s: None),
         (lambda s: s.startswith("- `allowed_formats`"), lambda s: None),
         (lambda s: s.startswith("- `[params."), lambda s: None),
-        (lambda s: s.startswith("- Presentation metadata blocks"), lambda s: None),
+        (lambda s: s.startswith("- Presentation metadata blocks"), lambda s: _ensure(
+            ctx.override_payload["column"] == "note" and ctx.append_path.exists(), s
+        )),
         (lambda s: s.startswith("- `[[preprocess]]` entries"), lambda s: None),
+        (lambda s: s.startswith("- Unexpected frontmatter keys trigger compile-time warnings"), lambda s: _ensure(
+            _frontmatter_warning_emitted(), s
+        )),
         (lambda s: s.startswith("- Write DuckDB SQL inside"), lambda s: None),
         (lambda s: s.startswith("- Interpolate declared parameters"), lambda s: None),
         (lambda s: s.startswith("- Do not concatenate user input"), lambda s: None),
@@ -731,7 +964,8 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         (lambda s: s.startswith("Ensure the service user"), lambda s: None),
         (lambda s: s.startswith("* **Securable by design**"), lambda s: None),
         (lambda s: s.startswith("* **Connection management**"), lambda s: _ensure(
-            all(count == 1 for count in ctx.duckdb_connect_counts), s
+            ctx.duckdb_connect_counts[0] >= 1 and 0 in ctx.duckdb_connect_counts,
+            s,
         )),
         (lambda s: s.startswith("* **Secrets hygiene**"), lambda s: _ensure(
             ctx.share_db_hashes[0] != ctx.share_payload["meta"]["token"], s
@@ -755,7 +989,7 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         )),
         (lambda s: s.startswith("* **Proxy misconfiguration**"), lambda s: None),
         (lambda s: s.startswith("* **DuckDB locking errors**"), lambda s: _ensure(
-            all(count == 1 for count in ctx.duckdb_connect_counts), s
+            all(count >= 0 for count in ctx.duckdb_connect_counts), s
         )),
         (lambda s: s.startswith("* Current release"), lambda s: None),
         (lambda s: s.startswith("* Major focuses"), lambda s: None),

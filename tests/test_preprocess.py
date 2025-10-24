@@ -48,6 +48,8 @@ def test_run_preprocessors_integrates_with_local_runner(tmp_path: Path) -> None:
         "[params.name]\n"
         "type = \"str\"\n"
         "required = true\n"
+        "[cache]\n"
+        "order_by = [\"result\"]\n"
         "+++\n\n"
         "<!-- @preprocess {\"callable\": \"tests.fake_preprocessors:uppercase_value\", \"field\": \"name\"} -->\n"
         "```sql\nSELECT {{name}} AS result\n```\n"

@@ -27,10 +27,12 @@ path = "/hello"
 type = "str"
 required = false
 default = "world"
+[cache]
+order_by = ["greeting"]
 +++
 
 ```sql
-SELECT 'Hello, ' || {{name}} || '!' AS greeting;
+SELECT 'Hello, ' || {{name}} || '!' AS greeting ORDER BY greeting;
 ```
 """
 
@@ -122,6 +124,8 @@ ROUTE_ATTACH_TEXT = (
     "default = \"world\"\n\n"
     "[share]\n"
     "pii_columns = [\"email\"]\n"
+    "[cache]\n"
+    "order_by = [\"greeting\"]\n"
     "+++\n\n"
     "```sql\n"
     "SELECT\n"
@@ -132,7 +136,8 @@ ROUTE_ATTACH_TEXT = (
     "SELECT\n"
     "  'Hello, friend!' AS greeting,\n"
     "  'friend@example.com' AS email,\n"
-    "  'another' AS note;\n"
+    "  'another' AS note\n"
+    "ORDER BY greeting;\n"
     "```\n"
 )
 

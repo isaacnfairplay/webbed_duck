@@ -42,6 +42,10 @@ type = "str"
 required = false
 default = "world"
 
+[cache]
+rows_per_page = 50
+order_by = ["created_at"]
+
 [overrides]
 key_columns = ["greeting"]
 allowed = ["note"]
@@ -54,7 +58,8 @@ columns = ["greeting", "note", "created_at"]
 SELECT
   'Hello, ' || {{name}} || '!' AS greeting,
   'note from base' AS note,
-  CURRENT_DATE AS created_at;
+  CURRENT_DATE AS created_at
+ORDER BY created_at;
 ```
 """
 
@@ -194,10 +199,13 @@ path = "/by_date"
 [params.day]
 type = "str"
 required = true
+[cache]
+order_by = ["day_value"]
 +++
 
 ```sql
-SELECT {{day}} AS day_value;
+SELECT {{day}} AS day_value
+ORDER BY day_value;
 ```
 """
     src_dir = tmp_path / "src"
@@ -235,24 +243,30 @@ ROUTE_REPORTS_INDEX = (
     "+++\n"
     "id = \"reports_index\"\n"
     "path = \"/reports\"\n"
+    "[cache]\n"
+    "order_by = [\"label\"]\n"
     "+++\n\n"
-    "```sql\nSELECT 'index' AS label;\n```\n"
+    "```sql\nSELECT 'index' AS label ORDER BY label;\n```\n"
 )
 
 ROUTE_REPORTS_DAILY_SUMMARY = (
     "+++\n"
     "id = \"reports_daily_summary\"\n"
     "path = \"/reports/daily/summary\"\n"
+    "[cache]\n"
+    "order_by = [\"label\"]\n"
     "+++\n\n"
-    "```sql\nSELECT 'summary' AS label UNION ALL SELECT 'summary-2' AS label;\n```\n"
+    "```sql\nSELECT 'summary' AS label UNION ALL SELECT 'summary-2' AS label ORDER BY label;\n```\n"
 )
 
 ROUTE_REPORTS_DAILY_DETAIL = (
     "+++\n"
     "id = \"reports_daily_detail\"\n"
     "path = \"/reports/daily/detail\"\n"
+    "[cache]\n"
+    "order_by = [\"label\"]\n"
     "+++\n\n"
-    "```sql\nSELECT 'detail' AS label;\n```\n"
+    "```sql\nSELECT 'detail' AS label ORDER BY label;\n```\n"
 )
 
 

@@ -19,6 +19,7 @@ from ..config import Config
 from ..core.routes import RouteDefinition
 from ..plugins.charts import render_route_charts
 from .analytics import AnalyticsStore
+from .cache import CacheStore, fetch_cached_table
 from .csv import append_record
 from .auth import resolve_auth_adapter
 from .meta import MetaStore, _utcnow
@@ -96,6 +97,7 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
         session_store=app.state.session_store,
     )
 
+    app.state.cache_store = CacheStore(config.server.storage_root)
     app.state._dynamic_route_handles = _register_dynamic_routes(app, app.state.routes)
 
     def _reload_routes(new_routes: Sequence[RouteDefinition]) -> None:
@@ -662,21 +664,6 @@ def _select_columns(table: pa.Table, columns: Sequence[str]) -> pa.Table:
     return table.select(selectable)
 
 
-def _apply_slice(
-    table: pa.Table,
-    offset: int | None,
-    limit: int | None,
-) -> tuple[pa.Table, int, int, int | None]:
-    total = table.num_rows
-    start_idx = max(0, offset or 0)
-    if start_idx >= total:
-        return table.slice(total, 0), total, total, 0
-    if limit is None:
-        return table.slice(start_idx, total - start_idx), total, start_idx, None
-    length = max(0, min(limit, total - start_idx))
-    return table.slice(start_idx, length), total, start_idx, limit
-
-
 def _execute_route(
     route: RouteDefinition,
     request: Request,
@@ -687,23 +674,38 @@ def _execute_route(
 ) -> RouteExecutionResult:
     processed = run_preprocessors(route.preprocess, params, route=route, request=request)
     ordered = [_value_for_name(processed, name, route) for name in route.param_order]
+    sanitized_offset = max(0, offset or 0)
+    sanitized_limit = None if limit is None else max(0, int(limit))
+    cache_store: CacheStore | None = getattr(request.app.state, "cache_store", None)
     start = time.perf_counter()
     try:
-        table = _execute_sql(route.prepared_sql, ordered)
+        cache_result = fetch_cached_table(
+            route,
+            processed,
+            ordered,
+            offset=sanitized_offset,
+            limit=sanitized_limit,
+            store=cache_store,
+            config=request.app.state.config.cache,
+        )
     except duckdb.Error as exc:  # pragma: no cover - safety net
         raise HTTPException(status_code=500, detail={"code": "duckdb_error", "message": str(exc)}) from exc
-    elapsed_ms = (time.perf_counter() - start) * 1000
+    except RuntimeError as exc:  # pragma: no cover - cache safeguards
+        raise HTTPException(status_code=500, detail={"code": "cache_error", "message": str(exc)}) from exc
 
     metadata = route.metadata if isinstance(route.metadata, Mapping) else {}
-    table = apply_overrides(table, metadata, request.app.state.overlays.list_for_route(route.id))
+    table = apply_overrides(cache_result.table, metadata, request.app.state.overlays.list_for_route(route.id))
     table = _select_columns(table, columns)
-    table, total_rows, applied_offset, applied_limit = _apply_slice(table, offset, limit)
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    applied_limit = cache_result.applied_limit
+    if sanitized_limit is not None and applied_limit is None:
+        applied_limit = sanitized_limit
     return RouteExecutionResult(
         params=processed,
         table=table,
         elapsed_ms=elapsed_ms,
-        total_rows=total_rows,
-        offset=applied_offset,
+        total_rows=cache_result.total_rows,
+        offset=cache_result.applied_offset,
         limit=applied_limit,
     )
 

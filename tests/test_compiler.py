@@ -26,6 +26,8 @@ def test_compile_collects_directives(tmp_path: Path) -> None:
         "+++\n"
         "id = \"sample\"\n"
         "path = \"/sample\"\n"
+        "[cache]\n"
+        "order_by = [\"value\"]\n"
         "+++\n\n"
         "<!-- @cache ttl=30 scope=route -->\n"
         "<!-- @notes important -->\n"
@@ -42,6 +44,35 @@ def test_compile_collects_directives(tmp_path: Path) -> None:
     compile_routes(tmp_path, build_dir)
     loaded = load_compiled_routes(build_dir)
     assert loaded[0].directives[0].name == "cache"
+
+
+def test_cache_requires_order_by(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"cache_missing_order\"\n"
+        "path = \"/cache_missing_order\"\n"
+        "[cache]\n"
+        "rows_per_page = 5\n"
+        "+++\n\n"
+        "```sql\nSELECT 1 AS value\n```\n"
+    )
+    with pytest.raises(RouteCompilationError):
+        compile_route_file(write_route(tmp_path, route_text))
+
+
+def test_compile_warns_on_unexpected_frontmatter(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"sample\"\n"
+        "path = \"/sample\"\n"
+        "surplus = 10\n"
+        "+++\n\n"
+        "```sql\nSELECT 1 AS value\n```\n"
+    )
+    compile_route_file(write_route(tmp_path, route_text))
+    captured = capsys.readouterr()
+    assert "unexpected frontmatter key(s) surplus" in captured.err
+    assert "sample.sql.md" in captured.err
 
 
 def test_compile_route(tmp_path: Path) -> None:
@@ -109,8 +140,10 @@ def test_server_returns_rows(tmp_path: Path) -> None:
         "type = \"str\"\n"
         "required = false\n"
         "default = \"world\"\n"
+        "[cache]\n"
+        "order_by = [\"greeting\"]\n"
         "+++\n\n"
-        "```sql\nSELECT 'Hello, ' || {{name}} || '!' AS greeting\n```\n"
+        "```sql\nSELECT 'Hello, ' || {{name}} || '!' AS greeting ORDER BY greeting\n```\n"
     )
     src_dir = tmp_path / "routes"
     src_dir.mkdir()

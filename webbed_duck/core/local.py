@@ -4,10 +4,10 @@ from pathlib import Path
 from typing import Mapping, MutableMapping, Sequence
 
 from ..config import Config, load_config
+from ..server.cache import CacheStore, fetch_cached_table
 from ..server.overlay import OverlayStore, apply_overrides
 from ..server.postprocess import table_to_records
 from ..server.preprocess import run_preprocessors
-from ..server.app import _execute_sql  # type: ignore[attr-defined]
 from .routes import RouteDefinition, load_compiled_routes
 
 
@@ -36,7 +36,17 @@ def run_route(
     values, ordered = _prepare_parameters(route, params)
     processed = run_preprocessors(route.preprocess, values, route=route, request=None)
     bound = _order_from_processed(route, processed)
-    table = _execute_sql(route.prepared_sql, bound)
+    cache_store = CacheStore(config.server.storage_root)
+    cache_result = fetch_cached_table(
+        route,
+        processed,
+        bound,
+        offset=0,
+        limit=None,
+        store=cache_store,
+        config=config.cache,
+    )
+    table = cache_result.table
     overlays = OverlayStore(config.server.storage_root)
     table = apply_overrides(table, route.metadata, overlays.list_for_route(route.id))
 
