@@ -161,12 +161,19 @@ def test_share_with_attachments_and_redaction(tmp_path: Path) -> None:
     )
     assert response.status_code == 200
     share = response.json()["share"]
+    token = share["token"]
     assert share["attachments"] and share["attachments"][0].endswith(".zip")
     assert share["zipped"] is True
     assert share["inline_snapshot"] is False
     assert share["rows_shared"] == 1
     assert "email" in share["redacted_columns"]
     assert share["watermark"] is True
+
+    resolved = client.get(f"/shares/{token}?format=json")
+    assert resolved.status_code == 200
+    resolved_payload = resolved.json()
+    assert "email" not in resolved_payload["columns"]
+    assert all("email" not in row for row in resolved_payload["rows"])
 
     assert len(records) == 1
     _, _, _, _, attachments = records[-1]

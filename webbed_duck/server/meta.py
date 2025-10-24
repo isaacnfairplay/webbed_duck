@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator, Mapping
+from typing import Iterator, Mapping, Sequence
 
 
 _SCHEMA = (
@@ -38,7 +38,8 @@ _SCHEMA = (
         expires_at TEXT NOT NULL,
         created_by_hash TEXT,
         user_agent_hash TEXT,
-        ip_prefix TEXT
+        ip_prefix TEXT,
+        redact_columns_json TEXT
     );
     """,
     """
@@ -62,6 +63,7 @@ class ShareRecord:
     params: Mapping[str, object]
     format: str
     expires_at: datetime
+    redact_columns: Sequence[str]
 
 
 class MetaStore:
@@ -78,6 +80,7 @@ class MetaStore:
         with self.connect() as conn:
             for statement in _SCHEMA:
                 conn.execute(statement)
+            _ensure_share_redaction_columns(conn)
             conn.commit()
 
     @contextmanager
@@ -101,6 +104,12 @@ def serialize_datetime(value: datetime) -> str:
 
 def deserialize_datetime(value: str) -> datetime:
     return datetime.fromisoformat(value).astimezone(timezone.utc)
+
+
+def _ensure_share_redaction_columns(conn: sqlite3.Connection) -> None:
+    existing = {row["name"] for row in conn.execute("PRAGMA table_info(shares)")}
+    if "redact_columns_json" not in existing:
+        conn.execute("ALTER TABLE shares ADD COLUMN redact_columns_json TEXT")
 
 
 __all__ = [

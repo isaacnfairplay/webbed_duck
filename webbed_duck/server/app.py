@@ -392,10 +392,12 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
                 raise _http_error("invalid_parameter", "max_rows must be an integer") from exc
             if share_limit <= 0:
                 share_limit = None
+        redacted_columns = _resolve_share_redaction(route, payload)
         share = app.state.share_store.create(
             route.id,
             params=params,
             fmt=fmt,
+            redact_columns=redacted_columns,
             created_by_hash=user.email_hash,
             request=request,
         )
@@ -409,6 +411,7 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
             payload,
             share,
             app.state.config,
+            redacted_columns,
         )
         if app.state.email_sender is not None:
             subject = f"{route.title or route.id} shared with you"
@@ -466,6 +469,7 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
             limit,
             offset,
             columns,
+            redacted_columns=record.redact_columns,
             record_analytics=False,
         )
 
@@ -506,11 +510,24 @@ def _render_route_response(
     limit: int | None,
     offset: int | None,
     columns: Sequence[str],
+    redacted_columns: Sequence[str] | None = None,
     *,
     record_analytics: bool,
 ) -> Response:
     fmt = _validate_format(fmt, route)
-    result = _execute_route(route, request, params, columns, offset, limit)
+    drop_set = {str(name) for name in redacted_columns} if redacted_columns else set()
+    filtered_columns = [col for col in columns if col not in drop_set] if drop_set else columns
+    result = _execute_route(route, request, params, filtered_columns, offset, limit)
+    if drop_set:
+        table, _ = _apply_column_redaction(result.table, drop_set)
+        result = RouteExecutionResult(
+            params=result.params,
+            table=table,
+            elapsed_ms=result.elapsed_ms,
+            total_rows=result.total_rows,
+            offset=result.offset,
+            limit=result.limit,
+        )
 
     metadata = route.metadata if isinstance(route.metadata, Mapping) else {}
     charts_source = metadata.get("charts") if isinstance(metadata.get("charts"), Sequence) else []
@@ -738,6 +755,30 @@ def _table_to_parquet_bytes(table: pa.Table) -> bytes:
     return sink.getvalue().to_pybytes()
 
 
+def _resolve_share_redaction(route: RouteDefinition, payload: Mapping[str, object]) -> list[str]:
+    metadata = route.metadata if isinstance(route.metadata, Mapping) else {}
+    share_meta = metadata.get("share") if isinstance(metadata, Mapping) else None
+    drop_columns = {str(item) for item in _coerce_sequence(payload.get("redact_columns")) if str(item)}
+    redact_pii_pref = payload.get("redact_pii")
+    redact_pii_enabled = True if redact_pii_pref is None else bool(redact_pii_pref)
+    if redact_pii_enabled and isinstance(share_meta, Mapping):
+        drop_columns.update(str(item) for item in _coerce_sequence(share_meta.get("pii_columns")))
+    return sorted(drop_columns)
+
+
+def _apply_column_redaction(table: pa.Table, redacted_columns: Sequence[str]) -> tuple[pa.Table, list[str]]:
+    if not redacted_columns:
+        return table, []
+    drop_set = {str(name) for name in redacted_columns}
+    present = [name for name in table.column_names if name in drop_set]
+    if not present:
+        return table, []
+    keep = [name for name in table.column_names if name not in drop_set]
+    if not keep:
+        raise _http_error("invalid_parameter", "Redaction removed all result columns")
+    return table.select(keep), sorted(present)
+
+
 def _zip_attachments(
     route_id: str, attachments: Sequence[tuple[str, bytes]], passphrase: object
 ) -> tuple[str, bytes]:
@@ -767,24 +808,14 @@ def _build_share_artifacts(
     payload: Mapping[str, object],
     share: CreatedShare,
     config: Config,
+    redacted_columns: Sequence[str],
 ) -> tuple[str | None, list[tuple[str, bytes]], Mapping[str, object]]:
     metadata = route.metadata if isinstance(route.metadata, Mapping) else {}
-    share_meta = metadata.get("share") if isinstance(metadata, Mapping) else {}
-    drop_columns = set(_coerce_sequence(payload.get("redact_columns")))
-    if bool(payload.get("redact_pii", True)) and isinstance(share_meta, Mapping):
-        drop_columns.update(_coerce_sequence(share_meta.get("pii_columns")))
 
     result = _execute_route(route, request, params, columns, offset=0, limit=limit)
     table = result.table
 
-    removed_columns: list[str] = sorted(drop_columns)
-    if drop_columns:
-        present = [name for name in table.column_names if name in drop_columns]
-        keep = [name for name in table.column_names if name not in drop_columns]
-        if present and not keep:
-            raise _http_error("invalid_parameter", "Redaction removed all result columns")
-        if present:
-            table = table.select(keep)
+    table, removed_columns = _apply_column_redaction(table, redacted_columns)
 
     charts_source = metadata.get("charts") if isinstance(metadata.get("charts"), Sequence) else []
     if route.charts:
