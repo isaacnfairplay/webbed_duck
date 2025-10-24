@@ -1,313 +1,237 @@
 # webbed_duck
 
-`webbed_duck` is an opinionated, securable intranet platform that compiles Markdown + SQL route files into auditable HTTP APIs and HTML experiences backed by DuckDB and Apache Arrow. The project ships a deterministic compiler, a FastAPI runtime, and a library of pluggable adapters so teams can publish dashboards, self-serve data apps, and shareable extracts without bespoke backend glue.
+## What is webbed_duck?
 
-This README is the canonical onboarding document. It explains what the project does, how the pieces fit together, and how to operate it confidently in development and production-style environments.
+`webbed_duck` is a self-contained data server that turns declarative `.sql.md` files into live DuckDB-backed web endpoints.
 
-## Table of contents
+- Each `.sql.md` file is a contract for one route: business context, parameter specification, presentation hints, and the SQL relation itself.
+- The compiler translates those contracts into executable Python modules and registers them as HTTP endpoints.
+- The runtime ships the results as styled HTML tables or cards, JSON payloads, CSV and Parquet downloads, or Arrow streams—no custom FastAPI or Flask code required.
+- Drop `.sql.md` files into a folder, run the bundled CLI, and immediately browse or export the data surfaces.
+- Designed for operational, quality, and manufacturing review workflows where trustworthy tables with traceability matter more than bespoke UI code.
 
-1. [Feature overview](#feature-overview)
-2. [Architecture in brief](#architecture-in-brief)
-3. [Repository structure](#repository-structure)
-4. [Prerequisites](#prerequisites)
-5. [Installation](#installation)
-6. [Configuration](#configuration)
-7. [Authoring routes](#authoring-routes)
-8. [Build & serve workflow](#build--serve-workflow)
-9. [Runtime capabilities](#runtime-capabilities)
-10. [Storage layout](#storage-layout)
-11. [Security & hardening](#security--hardening)
-12. [Testing & quality](#testing--quality)
-13. [Troubleshooting](#troubleshooting)
-14. [Project status & roadmap](#project-status--roadmap)
-15. [Contributing](#contributing)
-16. [Additional resources](#additional-resources)
+## Quick start
 
-## Feature overview
+1. **Install the package and dependencies.**
+   ```bash
+   pip install webbed-duck
+   ```
 
-* **Markdown + SQL compiler** – Author `*.sql.md` files that embed SQL, parameters, preprocessors, postprocessors, charts, and append destinations. A deterministic compiler turns each file into an importable Python module with typed metadata and route manifests.
-* **Per-request DuckDB execution** – Every HTTP request opens a fresh DuckDB connection, applies trusted preprocess hooks, executes SQL, and returns Apache Arrow-backed results that can be rendered as JSON, HTML (`html_t` tables or `html_c` card grids), feeds, or Arrow streaming slices for infinite-scroll UIs.
-* **Overlay-aware viewers** – Opt-in endpoints expose inline annotations, CSV-backed append flows, and generated schemas for auto-forms. Overlay metadata lives beside compiled routes so teams can audit changes.
-* **Share engine** – `POST /shares` materializes HTML, CSV, or Parquet artifacts, optionally bundles them into encrypted ZIP archives, and records access analytics.
-* **Configurable auth adapters** – Choose pseudo-auth tokens, basic auth, or plug in a custom adapter. All tokens and share secrets are hashed on disk and can be bound to user agents or IP prefixes.
-* **Incremental execution** – Long-running extract routes can persist resume checkpoints in DuckDB and continue where the last cursor stopped.
-* **Extensible plugins** – Register custom preprocessors, postprocessors, chart renderers, and asset getters to integrate with internal systems without forking the runtime.
+2. **Create your route source directory** (default is `routes_src/`) and add `.sql.md` contracts (see [Writing a `.sql.md` route](#writing-a-sqlmd-route)).
 
-See the [Quickstart workspace setup](#quickstart-workspace-setup) section for a self-contained starter route. Additional examples live under [`docs/`](docs/) and [`examples/`](examples/) if you cloned the repository for reference.
-
-## Architecture in brief
-
-1. **Authoring** – Developers write Markdown+SQL route files that describe inputs, SQL statements, and output formats.
-2. **Compilation** – `webbed_duck.cli compile` parses each route into a Python manifest stored under `routes_build/`.
-3. **Serving** – The FastAPI runtime imports the compiled modules, validates requests, executes DuckDB queries, and emits Arrow-backed responses.
-4. **Extensions** – Optional preprocessors, chart renderers, share adapters, and overlay storage providers integrate through registries in the `webbed_duck` package.
-
-For an exhaustive architectural deep-dive—including flow diagrams, invariants, and adapter lifecycle details—consult [`AGENTS.md`](AGENTS.md).
-
-## Repository structure
-
-```
-webbed_duck/
-├── CHANGELOG.md          # Release history
-├── README.md             # You are here
-├── config.toml           # Example runtime configuration
-├── docs/                 # Extended design and API documentation
-├── examples/             # Helper scripts (e.g., SMTP emailer)
-├── routes_src/           # Authoring source (.sql.md routes)
-├── routes_build/         # Compiled Python manifests (generated)
-├── tests/                # Pytest suite exercising compiler & runtime
-└── webbed_duck/          # Python package: compiler, runtime, plugins
-```
-
-## Prerequisites
-
-* Python 3.9 or newer
-* DuckDB (installed automatically via Python package dependency)
-* Access to an intranet or trusted environment for serving HTTP traffic
-* Optional: `pyzipper` for encrypted ZIP share attachments
-
-Use a virtual environment (`venv`, `pipenv`, or `conda`) to isolate dependencies.
-
-## Installation
-
-Install the published package from PyPI (no repository clone required):
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install --upgrade pip
-pip install webbed-duck
-```
-
-Optional extras:
-
-```bash
-pip install pyzipper            # Enables encrypted ZIP shares and ZIP encryption policies
-pip install "duckdb[excel]"     # Adds Excel import support for DuckDB
-```
-
-After upgrades, rerun `pip install --upgrade webbed-duck` inside the virtual environment to pick up the latest release.
-
-## Configuration
-
-`webbed_duck` reads a TOML configuration file at startup. The sample `config.toml` ships with sensible defaults:
-
-```toml
-[server]
-storage_root = "./storage"
-host = "127.0.0.1"
-port = 8000
-theme = "system"           # system, light, or dark
-
-[transport]
-mode = "insecure_http"     # or "proxy_tls" behind a trusted proxy
-trusted_proxy_nets = ["127.0.0.1/32", "10.0.0.0/8"]
-
-[auth]
-mode = "pseudo"            # pseudo, basic, or custom module path
-allowed_domains = ["company.local"]
-session_ttl_minutes = 45
-
-[share]
-max_total_size_mb = 15
-zip_attachments = true
-zip_passphrase_required = false
-
-[analytics]
-enabled = true
-weight_interactions = 3
-
-[feature_flags]
-annotations_enabled = true
-comments_enabled = true
-tasks_enabled = true
-overrides_enabled = true
-
-[assets]
-default_image_getter = "static_fallback_getter"
-```
-
-Key principles:
-
-* **`storage_root`** anchors runtime state (compiled routes, cache, runtime metadata, static assets). Use an absolute path in production.
-* **Auth adapters** are referenced by name (`pseudo`, `basic`) or via dotted Python paths for custom implementations.
-* **Transport mode** determines whether the runtime trusts upstream headers. Use `proxy_tls` when deploying behind a TLS-terminating proxy.
-* **Feature flags** toggle overlay components, annotations, and tasks per route.
-
-After editing `config.toml`, re-run the compiler so configuration-sensitive metadata is baked into the manifests.
-
-## Quickstart workspace setup
-
-Once the package is installed, create a working directory to hold your configuration, source routes, and compiled artifacts:
-
-```bash
-mkdir -p storage routes_src routes_build
-cat > config.toml <<'EOF'
-[server]
-storage_root = "./storage"
-
-[transport]
-mode = "insecure_http"
-
-[auth]
-mode = "pseudo"
-allowed_domains = ["example.com"]
-EOF
-```
-
-Add a starter route at `routes_src/hello.sql.md`:
-
-```markdown
-@route id="hello"
-@params name:text="DuckDB"
-@sql
-select 'Hello, ' || {{ name }} || '!' as greeting
-```
-
-This minimal setup is enough to compile, serve, and experiment with the runtime. Expand the configuration and routes as needed for your intranet deployment.
-
-## Authoring routes
-
-Routes live in `routes_src/` as Markdown files with embedded SQL blocks. Core directives include:
-
-* `@route` – Declares the route identifier and optional folder grouping.
-* `@params` – Defines typed input parameters (strings, ints, floats, dates, enums) with validation rules and defaults.
-* `@preprocess` – Points to trusted Python callables for parameter enrichment or guardrails before SQL execution.
-* `@sql` – Contains one or more DuckDB statements. Use `{{param}}` placeholders for bound parameters.
-* `@postprocess` – Chooses output renderers (`html_t`, `html_c`, `feed`, `arrow`, etc.).
-* `@charts` – Registers chart specifications consumed by UI plugins.
-* `@append` – Enables CSV-backed data entry flows.
-* `@assets` – References static assets (images, CSS) resolved through registered getters.
-
-Authoring tips:
-
-* Favor set-based SQL over Python loops—DuckDB is the primary compute engine.
-* Keep preprocessors deterministic and side-effect free.
-* Use folders to group related routes and enable aggregated analytics.
-
-Run `webbed-duck compile` (or `python -m webbed_duck.cli compile`) after editing routes to regenerate manifests.
-
-## Build & serve workflow
-
-1. **Compile** routes from Markdown into Python modules:
-
+3. **Compile the contracts into runnable manifests.**
    ```bash
    webbed-duck compile --source routes_src --build routes_build
    ```
 
-2. **Serve** the compiled routes with FastAPI/Uvicorn:
-
+4. **Launch the server.** This compiles (when `--source` is supplied) and serves the routes over HTTP on the configured host/port.
    ```bash
-   webbed-duck serve --build routes_build --config config.toml
+   webbed-duck serve --source routes_src --build routes_build --config config.toml --reload
    ```
+   - `--reload` enables Uvicorn’s development reloader.
+   - Omit `--source` to skip compilation when you already have `routes_build/` artifacts.
 
-3. **Visit** `http://127.0.0.1:8000/hello?name=DuckDB` to explore the sample route. Append `format=html_c`, `format=feed`, or `format=arrow&limit=25` to test alternate viewers.
+5. **Browse the routes.** Open `http://127.0.0.1:8000/hello` (or your route path) in a browser, or request alternate formats with `?format=csv`, `?format=parquet`, etc.
 
-4. **Interact** with overlays:
-   * `POST /routes/{route_id}/overrides` – Create annotations or overrides.
-   * `POST /routes/{route_id}/append` – Append CSV rows respecting schema validation.
-   * `GET /routes/{route_id}/schema` – Retrieve auto-generated form metadata.
+## How it works today (v0.3)
 
-5. **Share** results:
+### Runtime startup
 
-   ```bash
-   curl -X POST http://127.0.0.1:8000/shares \
-     -H 'Content-Type: application/json' \
-     -d '{"route_id": "hello", "format": "html_t", "zip_passphrase": null}'
-   ```
+- `webbed-duck serve` loads configuration from `config.toml` (defaults to host `127.0.0.1`, port `8000`, storage under `./storage`).
+- If `--source` is provided, it calls the compiler before booting the FastAPI app so every `*.sql.md` file in that directory is fresh.
+- The server is a FastAPI application exposed via Uvicorn. No additional framework integration is necessary for development deployments.
 
-   The runtime stores share metadata in `runtime/meta.sqlite3`, materializes requested artifacts, and enforces optional ZIP encryption policies.
+### Route discovery and mapping
 
-6. **Run incremental workloads** for cursor-based extracts:
+- The compiler scans the source tree for `*.sql.md` files. Each file must begin with TOML frontmatter between `+++` delimiters.
+- Frontmatter declares the route `id`, HTTP `path`, optional `version`, default and allowed formats, parameters, and metadata.
+- Compiled artifacts are written to the `--build` directory, mirroring the source folder structure but with `.py` files. These contain serialised `ROUTE` dictionaries consumed at runtime.
+- At boot, the server imports every compiled module and registers the route path on the FastAPI app. The `id` doubles as the logical identifier for `/routes/{id}` helper endpoints.
 
-   ```bash
-   python -m webbed_duck.cli run-incremental \
-     --route-id hello_world \
-     --build routes_build \
-     --config config.toml \
-     --cursor-column created_at
-   ```
+### Parameter binding
 
-   Progress persists in `runtime/checkpoints.duckdb` so reruns resume automatically.
+- Parameters are declared under `[params.<name>]` in the frontmatter with `type` (`str`, `int`, `float`, or `bool`), `required`, `default`, and `description`.
+- Within the SQL block, use `{{name}}` placeholders. During compilation each placeholder becomes a positional `?` parameter to DuckDB, preserving type safety.
+- At request time the runtime reads query string values, validates types (including boolean coercion for `true`/`false`, `1`/`0`), applies defaults, and rejects missing required parameters.
+- Additional runtime controls:
+  - `?limit=` and `?offset=` apply post-query pagination without changing the SQL.
+  - `?column=` can be repeated to restrict returned columns.
 
-## Runtime capabilities
+### Supported outputs
 
-* **Request lifecycle** – Each request validates parameters, executes preprocessors, runs DuckDB SQL, optionally applies postprocessors, and returns results encoded as Arrow, JSON, HTML, feeds, or downloadable artifacts.
-* **Analytics** – Route hits, row counts, latency, and interaction weights accumulate in the runtime store to power folder-level popularity summaries.
-* **Local route chaining** – Use the internal `local:` protocol to call other routes without HTTP roundtrips.
-* **Static assets** – Register image getters (see `plugins/assets.py`) to resolve per-route images or UI assets.
-* **Email integration** – Example emailer in `examples/emailer.py` demonstrates how to deliver share links via SMTP.
+All of the following formats work today, provided the route either allows them explicitly or leaves `allowed_formats` empty (which enables everything):
 
-## Storage layout
+| Format query       | Response                                                  |
+| ------------------ | --------------------------------------------------------- |
+| default / `?format=json` | JSON payload with metadata, columns, rows, and latency. |
+| `?format=table`    | JSON structured identically to `json` (for compatibility). |
+| `?format=html_t`   | Styled HTML table view with optional chart annotations.    |
+| `?format=html_c`   | Card-style HTML view honouring `[html_c]` metadata.        |
+| `?format=feed`     | Feed-style HTML view for narrative updates.               |
+| `?format=csv`      | Streaming CSV download with `text/csv` content type.      |
+| `?format=parquet`  | Parquet file stream generated via Apache Arrow.           |
+| `?format=arrow`    | Arrow IPC stream for programmatic consumers.              |
+| `?format=arrow_rpc`| Arrow IPC stream with pagination headers.                 |
 
-All runtime paths derive from the configured `storage_root`:
+Routes may set `default_format` in frontmatter to choose the response when `?format` is omitted.
 
+### Data sources and execution model
+
+- Every request opens a fresh DuckDB connection, executes the prepared SQL with bound parameters, and immediately closes the connection.
+- You can query DuckDB-native sources such as Parquet, CSV, or Iceberg directly inside the SQL (`SELECT * FROM read_parquet('data/orders.parquet')`).
+- For derived inputs, register preprocessors in the `.sql.md` file to inject computed parameters (e.g., resolve the latest production date) before SQL execution.
+- After execution, server-side overlays (cell-level overrides) and append metadata apply automatically when configured in the contract.
+- Analytics (hits, rows, latency, interactions) are tracked per route and exposed via `GET /routes` and `GET /routes/{id}/schema` today.
+
+### Auth, sharing, and append workflows
+
+- Authentication modes are controlled via `config.toml`. The default mode is `none`. Enabling `auth.mode="pseudo"` activates the pseudo-session API (`/auth/pseudo/session`) and share endpoints.
+- Users with a pseudo-session can request `/routes/{id}/share` to email HTML/CSV/Parquet snapshots using the configured email adapter.
+- Routes that define `[append]` metadata accept JSON payloads at `/routes/{id}/append` to persist rows into CSV logs stored under the configured storage root.
+
+## Writing a `.sql.md` route
+
+A `.sql.md` file is the single source of truth for a route: metadata, parameter definitions, documentation, and SQL live together. The structure is:
+
+1. **Frontmatter (`+++ … +++`):** TOML describing route metadata and behaviour.
+2. **Markdown body:** Human-facing documentation explaining the purpose, context, and usage.
+3. **SQL code block:** A fenced ```sql``` block containing the relation definition.
+
+### Frontmatter contract
+
+Common keys include:
+
+- `id`: Stable identifier used for compilation, local runners, and helper endpoints.
+- `path`: HTTP path to mount (e.g., `/ops/smt/daily`).
+- `title`, `description`: Display metadata for HTML responses and route listings.
+- `version`: Optional semantic or document version string.
+- `default_format`: Default response format when `?format` is not supplied.
+- `allowed_formats`: Restricts runtime formats (values from the table above).
+- `[params.<name>]`: Parameter declaration blocks with `type`, `required`, `default`, `description`, and arbitrary extra keys.
+- Presentation metadata blocks such as `[html_t]`, `[html_c]`, `[feed]`, `[overrides]`, `[append]`, `[charts]`, and `[assets]` configure post-processors, override policies, append targets, charts, and asset lookup hints.
+- `[[preprocess]]` entries or `[preprocess]` tables list callables (`module:function` or dotted paths) that massage parameters prior to execution.
+
+### SQL placeholders
+
+- Write DuckDB SQL inside a fenced ```sql``` block.
+- Interpolate declared parameters with `{{param_name}}`. The compiler enforces that every placeholder corresponds to a declared parameter and converts it to a bound parameter in the prepared statement.
+- Do not concatenate user input manually—let the compiler handle binding to avoid injection risks.
+
+### Example route
+
+```markdown
++++
+id = "workstation_line"
+path = "/ops/workstations"
+title = "Workstation production by line"
+description = "Hourly production roll-up with scrap and labour attribution."
+default_format = "html_t"
+allowed_formats = ["html_t", "csv", "parquet", "json"]
+
+[params.plant_day]
+type = "str"
+required = true
+description = "Production day in YYYY-MM-DD format"
+
+[params.line]
+type = "str"
+required = false
+description = "Optional production line code"
+
+[html_t]
+title_col = "line"
+meta_cols = ["plant_day", "supervisor"]
+
+[[charts]]
+id = "throughput"
+type = "line"
+x = "hour"
+y = "units"
++++
+
+# Workstation line throughput
+
+Use this surface to reconcile hourly throughput, scrap, and labour time.
+Parameters are documented above; default charts plot `units` per hour.
+
+```sql
+WITH source AS (
+  SELECT *
+  FROM read_parquet('data/workstations.parquet')
+  WHERE plant_day = {{plant_day}}
+)
+SELECT
+  plant_day,
+  line,
+  hour,
+  SUM(units_produced) AS units,
+  SUM(scrap_units) AS scrap,
+  AVG(labour_hours) AS labour_hours,
+  ANY_VALUE(supervisor) AS supervisor
+FROM source
+WHERE {{line}} IS NULL OR line = {{line}}
+GROUP BY ALL
+ORDER BY hour;
 ```
-storage_root/
-├── routes_build/         # Compiled manifests imported by the server
-├── cache/                # Materialized CSV/Parquet/HTML artifacts
-├── schemas/              # Arrow schemas (JSON) per route
-├── static/               # Packaged CSS/JS/images referenced by UI
-└── runtime/
-    ├── meta.sqlite3      # Sessions, shares, analytics
-    ├── checkpoints.duckdb# Incremental runner checkpoints
-    └── auth.duckdb       # Pseudo/basic auth adapter backing store
 ```
 
-Ensure the service user has read/write access to `storage_root` when deploying.
+This single file defines documentation, parameter validation, output formatting, charts, override rules, and the actual dataset. The compiler consumes it directly—there are no auxiliary `.sql` or `.yaml` files.
 
-## Security & hardening
+## Auto-compile and serve model
 
-* **Securable by design** – Intended for trusted intranets with clear paths to add TLS, authentication, and logging through modular adapters.
-* **Connection management** – One DuckDB connection per request; no shared cursors.
-* **Secrets hygiene** – Tokens and share secrets are hashed; no plaintext storage.
-* **Path safety** – All file access is rooted under `storage_root` to prevent traversal attacks.
-* **Proxy deployment** – Terminate TLS at a trusted proxy (e.g., Nginx, Traefik) and use `transport.mode = "proxy_tls"` so `webbed_duck` honors `X-Forwarded-*` headers safely.
-* **External auth** – Implement custom auth adapters or integrate session validation middleware to hook into SSO providers when required.
+- **Today:** Run `webbed-duck compile` when contracts change. `webbed-duck serve --source …` performs a one-time compile before starting the server. Hot reloading of compiled routes requires manually rerunning the compile command or using an external file watcher.
+- **Configuration:** `config.toml` controls storage (`server.storage_root`), theming, analytics weights, auth mode, email adapter, and share behaviour.
+- **Roadmap:** Automatic compilation on startup and live reload of `.sql.md` changes are targeted for MVP 0.4. Expect a toggle to disable auto-compilation in production so you can ship vetted artifacts from `routes_build/`.
 
-## Testing & quality
+## Formats and responses
 
-Run the pytest suite before submitting changes:
+Each compiled route honours runtime format negotiation:
 
 ```bash
-pytest
+# HTML table for people on the floor
+curl http://127.0.0.1:8000/ops/workstations?plant_day=2024-03-01
+
+# CSV export for spreadsheets
+curl "http://127.0.0.1:8000/ops/workstations?plant_day=2024-03-01&format=csv" -o workstations.csv
+
+# Parquet for analytics pipelines
+curl "http://127.0.0.1:8000/ops/workstations?plant_day=2024-03-01&format=parquet" -o workstations.parquet
+
+# JSON payload (default structure)
+curl "http://127.0.0.1:8000/ops/workstations?plant_day=2024-03-01&format=json"
 ```
 
-The suite exercises compiler parsing, preprocess execution, share workflows, overlay storage, analytics aggregation, and error taxonomy mapping. Add regression tests when extending compiler directives, runtime adapters, or plugins.
+Routes can further customise behaviour via presentation metadata—e.g., `[html_c]` for card decks, `[feed]` for update feeds, or `[append]` to allow operators to push corrections into CSV append logs.
 
-Linting can be layered on with tools such as `ruff` or `black` if your team prefers additional static analysis (not enforced by default).
+## MVP 0.4 — One-stop-shop data server
 
-## Troubleshooting
+> **Promise:** By 0.4, `webbed_duck` is the standalone app for data surfaces. Drop `.sql.md` files into a folder, start the server, and you get working web endpoints with HTML/CSV/Parquet/JSON output, parameter forms, lightweight auth, and optional cached snapshots. No hand-written FastAPI, no manual HTML, no bespoke export logic—just `.sql.md` contracts.
 
-* **Missing compiled routes** – Ensure `routes_build/` exists and rerun `webbed_duck.cli compile` after editing source files or configuration.
-* **ZIP encryption disabled** – Install `pyzipper` and confirm `share.zip_passphrase_required = false` unless enforcing passphrases.
-* **Authentication failures** – Verify adapter configuration, session TTLs, and whether `allowed_domains` matches the pseudo-auth email domain.
-* **Proxy misconfiguration** – When running behind a reverse proxy, configure `trusted_proxy_nets` to match the proxy subnet so upstream headers are accepted.
-* **DuckDB locking errors** – Check for stale processes holding open connections; every request should open and close its own connection.
+### Already delivered toward that vision
 
-## Project status & roadmap
+- Markdown-to-Python compiler that enforces the `.sql.md` contract (parameters, metadata, directives).
+- FastAPI runtime that executes DuckDB queries per request and renders HTML tables, cards, and feeds.
+- CSV, Parquet, Arrow, and JSON exporters with format negotiation via `?format=`.
+- Route-level analytics, append workflows, overlay storage, chart hooks, and share/email pipelines.
+- CLI tooling (`webbed-duck compile`, `webbed-duck serve`, `webbed-duck run-incremental`, `webbed-duck perf`) for local execution and benchmarking.
 
-* Current release: 0.3 (see `CHANGELOG.md` for details).
-* Major focuses: compiler determinism, share/overlay workflows, incremental execution, analytics, and plugin ergonomics.
-* Upcoming ideas: richer chart plugins, expanded auth adapters, and improved telemetry visualizations.
+### Still planned for 0.4
 
-Refer to the maintainer logs inside [`AGENTS.md`](AGENTS.md) for ongoing progress trackers and architectural context.
+- First-class `webbed-duck serve` experience that auto-compiles on boot and optionally watches for contract changes.
+- Production-friendly toggle to disable auto-compilation and serve frozen artifacts from `routes_build/`.
+- Simplified parameter binding UX (auto-generated forms and validation surfaces exposed in HTML views).
+- Declarative caching / snapshot controls (persisted under `storage_root/cache/`).
+- Pluggable lightweight auth adapters and link-based sharing policies exposed in config.
+- Public plugin API for registering preprocessors, postprocessors, charts, and asset resolvers without touching core code.
 
-## Contributing
+MVP 0.4 is the first release we expect to hand to an ops lead with no extra scaffolding.
 
-1. Fork the repository and create a topic branch.
-2. Install dependencies in a virtual environment.
-3. Run `pytest` (and any project-specific linters your team adopts) before opening a pull request.
-4. Document new behavior in `README.md`, `docs/`, or inline docstrings as appropriate.
-5. Follow the invariants listed in [`AGENTS.md`](AGENTS.md)—especially around DuckDB connections, trusted preprocessors, and storage isolation.
+## Extending webbed_duck
 
-Bug reports and feature requests are welcome via issues. Please include reproduction steps, relevant configuration snippets, and any failing route manifests to streamline triage.
+- **Preprocessors:** Register callables (e.g., `myapp.preprocess.resolve_shift_window`) and reference them in frontmatter to derive or validate parameters before the SQL runs.
+- **Postprocessors and presentation:** Use `[html_t]`, `[html_c]`, `[feed]`, and `[[charts]]` to pass configuration into the built-in renderers. Custom renderers can be registered via the plugin registries in `webbed_duck.plugins.*`.
+- **Assets and overlays:** `[assets]` metadata controls how related images are resolved; `[overrides]` enables per-cell overrides with audit trails managed by the overlay store.
+- **Local execution:** `webbed_duck.core.local.run_route("route_id", params={...}, format="arrow")` executes a compiled route entirely in-process, useful for testing or batch jobs.
 
-## Additional resources
+As the plugin hooks stabilise, expect additional documentation and examples demonstrating custom formatters, enrichment joins, and sharing adapters that slot into the compile/serve lifecycle without forking the framework.
 
-* [`AGENTS.md`](AGENTS.md) – Comprehensive architecture and maintainer guide.
-* [`docs/`](docs/) – Extended documentation, diagrams, and design notes.
-* [`examples/emailer.py`](examples/emailer.py) – Minimal SMTP emailer used in tests and demos.
-* [`CHANGELOG.md`](CHANGELOG.md) – Release notes and historical context.
-
-Happy routing!

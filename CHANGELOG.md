@@ -12,6 +12,8 @@
 - Updated project documentation (README, AGENTS guide, status report) to reflect
   DuckDB-backed incremental checkpoints, share workflows, and security
   guardrails for pseudo-auth sessions and share tokens.
+- Replaced the README with product-grade docs covering the `.sql.md` contract,
+  runtime formats, and the standalone server workflow.
 
 ## MVP 0.3
 
