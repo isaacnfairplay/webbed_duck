@@ -30,11 +30,14 @@ def render_table_html(
     watermark: str | None = None,
     params: Sequence[ParameterSpec] | None = None,
     param_values: Mapping[str, object] | None = None,
+    format_hint: str | None = None,
 ) -> str:
     headers = table.column_names
     records = table_to_records(table)
     table_meta = _merge_view_metadata(route_metadata, "html_t", postprocess)
-    params_html = _render_params_ui(table_meta, params, param_values)
+    params_html = _render_params_ui(
+        table_meta, params, param_values, format_hint=format_hint
+    )
     rows_html = "".join(
         "<tr>" + "".join(f"<td>{html.escape(str(row.get(col, '')))}</td>" for col in headers) + "</tr>"
         for row in records
@@ -83,6 +86,7 @@ def render_cards_html(
     params: Sequence[ParameterSpec] | None = None,
     param_values: Mapping[str, object] | None = None,
     postprocess: Mapping[str, object] | None = None,
+    format_hint: str | None = None,
 ) -> str:
     return render_cards_html_with_assets(
         table,
@@ -94,6 +98,7 @@ def render_cards_html(
         route_id="",
         params=params,
         param_values=param_values,
+        format_hint=format_hint,
     )
 
 
@@ -109,6 +114,7 @@ def render_cards_html_with_assets(
     watermark: str | None = None,
     params: Sequence[ParameterSpec] | None = None,
     param_values: Mapping[str, object] | None = None,
+    format_hint: str | None = None,
 ) -> str:
     metadata = route_metadata or {}
     cards_meta: dict[str, object] = {}
@@ -124,7 +130,9 @@ def render_cards_html_with_assets(
         meta_cols = [col for col in table.column_names if col not in {title_col, image_col}][:3]
 
     records = table_to_records(table)
-    params_html = _render_params_ui(cards_meta, params, param_values)
+    params_html = _render_params_ui(
+        cards_meta, params, param_values, format_hint=format_hint
+    )
     getter_name = str(assets.get("image_getter")) if assets and assets.get("image_getter") else None
     base_path = str(assets.get("base_path")) if assets and assets.get("base_path") else None
     cards = []
@@ -216,6 +224,8 @@ def _render_params_ui(
     view_meta: Mapping[str, object] | None,
     params: Sequence[ParameterSpec] | None,
     param_values: Mapping[str, object] | None,
+    *,
+    format_hint: str | None = None,
 ) -> str:
     if not params:
         return ""
@@ -232,9 +242,17 @@ def _render_params_ui(
     selected_specs = [param_map[name] for name in show if name in param_map]
     if not selected_specs:
         return ""
-    values = param_values or {}
+    values = dict(param_values or {})
     show_set = {spec.name for spec in selected_specs}
     hidden_inputs = []
+    format_value = values.get("format") or format_hint
+    if format_value:
+        hidden_inputs.append(
+            "<input type='hidden' name='format' value='"
+            + html.escape(_stringify_param_value(format_value))
+            + "'/>"
+        )
+        values.pop("format", None)
     for name, value in values.items():
         if name in show_set:
             continue

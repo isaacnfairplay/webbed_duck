@@ -746,6 +746,7 @@ def _format_response(
             watermark=watermark,
             params=route.params,
             param_values=result.params,
+            format_hint=fmt,
         )
         return HTMLResponse(html)
     if fmt == "html_c":
@@ -761,6 +762,7 @@ def _format_response(
             watermark=watermark,
             params=route.params,
             param_values=result.params,
+            format_hint=fmt,
         )
         return HTMLResponse(html)
     if fmt == "feed":
