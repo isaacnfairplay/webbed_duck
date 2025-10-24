@@ -601,6 +601,25 @@ webbed_duck run-incremental <route> [--start --end]  # iterate batches
 * [x] Plugin registry demos & regression tests outside core
 * [x] Popularity analytics + folder indexes
 * [x] Error taxonomy surfaced in UI
+* [ ] Compiler: `@meta/@params/@preprocess/@postprocess/@charts/@assets`
+* [ ] Per-request DuckDB exec + Arrow Table
+* [ ] Postprocessors: `html_t`, `parquet`, `csv`
+* [ ] Config loader + storage_root layout
+* [ ] Auth: `pseudo` + sessions (SQLite)
+* [ ] Share link (hash+TTL+UA/IP bind)
+* [ ] Introspection: `/routes`, `/routes/{id}/schema`
+* [x] Tests: unit + integration basics
+* [ ] HTTP banner toggle (`ui.show_http_warning`)
+
+**Beta 0.2.x**
+
+* [ ] `html_c` cards + `feed` virtual view
+* [ ] Arrow RPC slices for virtual viewers
+* [ ] Email shares (inline + attachments)
+* [x] Image getter plugin (localize/cache assets)
+* [x] Charts (SVG) + renderer registry
+* [ ] Popularity analytics + folder indexes
+* [ ] Error taxonomy surfaced in UI
 
 **GA 0.3.x**
 

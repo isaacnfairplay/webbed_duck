@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import pyarrow as pa
 import pytest
+import pyarrow as pa
 
 import webbed_duck.plugins.assets as assets
 import webbed_duck.plugins.charts as charts

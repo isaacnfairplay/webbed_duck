@@ -2,6 +2,10 @@
 
 This module avoids importing the FastAPI application and shows how a caller can
 register plugins from a standalone script or tests. The demo keeps all
+"""Demonstration helpers for the asset and chart plugin registries.
+
+This module avoids importing the FastAPI application and shows how a caller can
+register plugins from a standalone script or tests.  The demo keeps all
 interactions outside the main package source so it can be used as a lightweight
 reference implementation for bespoke deployments.
 """
