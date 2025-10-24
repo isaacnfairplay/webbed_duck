@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import io
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Callable, Iterable, Mapping, Sequence
 
@@ -25,24 +26,49 @@ from .overlay import (
     apply_overrides,
     compute_row_key_from_values,
 )
-from .postprocess import render_cards_html, render_feed_html, render_table_html, table_to_records
+from .postprocess import (
+    render_cards_html_with_assets,
+    render_feed_html,
+    render_table_html,
+    table_to_records,
+)
+from .preprocess import run_preprocessors
 from .session import SESSION_COOKIE_NAME, SessionStore
-from .share import ShareStore
+from .share import CreatedShare, ShareStore
 
 EmailSender = Callable[[Sequence[str], str, str, str | None, Sequence[tuple[str, bytes]] | None], None]
+
+
+@dataclass(slots=True)
+class RouteExecutionResult:
+    """Container for executed route artifacts."""
+
+    params: Mapping[str, object]
+    table: pa.Table
+    elapsed_ms: float
+    total_rows: int
+    offset: int
+    limit: int | None
+
 
 _ERROR_TAXONOMY = {
     "missing_parameter": {
         "message": "A required parameter was not provided.",
         "hint": "Ensure the query string includes the documented parameter name.",
+        "category": "ValidationError",
+        "status": 400,
     },
     "invalid_parameter": {
         "message": "A parameter value could not be converted to the expected type.",
         "hint": "Verify the value is formatted as documented (e.g. integer, boolean).",
+        "category": "ValidationError",
+        "status": 400,
     },
     "unknown_parameter": {
         "message": "The query referenced an undefined parameter.",
         "hint": "Recompile routes or check the metadata for available parameters.",
+        "category": "ValidationError",
+        "status": 400,
     },
 }
 
@@ -53,7 +79,10 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
 
     app = FastAPI(title="webbed_duck", version="0.3.0")
     app.state.config = config
-    app.state.analytics = AnalyticsStore(weight=config.analytics.weight_interactions)
+    app.state.analytics = AnalyticsStore(
+        weight=config.analytics.weight_interactions,
+        enabled=config.analytics.enabled,
+    )
     app.state.routes = list(routes)
     app.state.overlays = OverlayStore(config.server.storage_root)
     app.state.meta = MetaStore(config.server.storage_root)
@@ -138,22 +167,88 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
     @app.get("/routes")
     async def list_routes(folder: str | None = None) -> Mapping[str, object]:
         stats = app.state.analytics.snapshot()
-        subset: list[Mapping[str, object]] = []
-        prefix = folder or ""
+        prefix = folder or "/"
+        if not prefix.startswith("/"):
+            prefix = "/" + prefix
+        base_prefix = prefix.rstrip("/") or "/"
+        normalized = "/" if base_prefix == "/" else base_prefix + "/"
+
+        routes_payload: list[Mapping[str, object]] = []
+        folder_metrics: dict[str, dict[str, float | int]] = {}
+
         for route in app.state.routes:
-            if prefix and not route.path.startswith(prefix):
+            path = route.path
+            if base_prefix != "/":
+                if path == base_prefix:
+                    relative = ""
+                elif not path.startswith(normalized):
+                    continue
+                else:
+                    relative = path[len(normalized):]
+            else:
+                if folder and not path.startswith(prefix):
+                    continue
+                relative = path.lstrip("/")
+            metrics_raw = stats.get(route.id, {})
+            route_metrics = {
+                "hits": int(metrics_raw.get("hits", 0)),
+                "rows": int(metrics_raw.get("rows", 0)),
+                "avg_latency_ms": float(metrics_raw.get("avg_latency_ms", 0.0)),
+                "interactions": int(metrics_raw.get("interactions", 0)),
+            }
+            if relative and "/" in relative:
+                child = relative.split("/", 1)[0]
+                child_path = (normalized + child).rstrip("/")
+                agg = folder_metrics.setdefault(
+                    child_path,
+                    {"hits": 0, "rows": 0, "total_latency_ms": 0.0, "interactions": 0, "routes": 0},
+                )
+                agg["hits"] += route_metrics["hits"]
+                agg["rows"] += route_metrics["rows"]
+                agg["total_latency_ms"] += route_metrics["avg_latency_ms"] * max(1, route_metrics["hits"])
+                agg["interactions"] += route_metrics["interactions"]
+                agg["routes"] += 1
                 continue
-            subset.append(
+            routes_payload.append(
                 {
                     "id": route.id,
                     "path": route.path,
                     "title": route.title,
                     "description": route.description,
-                    "popularity": stats.get(route.id, 0),
+                    "metrics": route_metrics,
                 }
             )
-        subset.sort(key=lambda item: (-item["popularity"], item["path"]))
-        return {"folder": prefix or "/", "routes": subset}
+
+        routes_payload.sort(
+            key=lambda item: (
+                -int(item["metrics"]["hits"]),
+                -int(item["metrics"]["interactions"]),
+                item["path"],
+            )
+        )
+
+        folders_payload: list[dict[str, object]] = []
+        for folder_path, agg in folder_metrics.items():
+            hits = int(agg["hits"])
+            total_latency = float(agg["total_latency_ms"])
+            avg_latency = total_latency / hits if hits else 0.0
+            folders_payload.append(
+                {
+                    "path": folder_path or "/",
+                    "hits": hits,
+                    "rows": int(agg["rows"]),
+                    "avg_latency_ms": round(avg_latency, 3),
+                    "interactions": int(agg["interactions"]),
+                    "route_count": int(agg["routes"]),
+                }
+            )
+        folders_payload.sort(key=lambda item: (-int(item["hits"]), item["path"]))
+
+        display_folder = normalized if normalized != "/" else "/"
+        if display_folder.endswith("/") and display_folder != "/":
+            display_folder = display_folder.rstrip("/")
+
+        return {"folder": display_folder, "routes": routes_payload, "folders": folders_payload}
 
     @app.get("/routes/{route_id}/schema")
     async def describe_route(route_id: str, request: Request) -> Mapping[str, object]:
@@ -268,8 +363,10 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
         payload = await request.json()
         if not isinstance(payload, Mapping):
             raise _http_error("invalid_parameter", "Share payload must be an object")
-        fmt = (payload.get("format") or "html_t").lower()
-        fmt = _validate_format(fmt)
+        default_fmt = route.default_format or "html_t"
+        fmt_raw = payload.get("format")
+        fmt = fmt_raw.lower() if isinstance(fmt_raw, str) else default_fmt.lower()
+        fmt = _validate_format(fmt, route)
         params_raw = payload.get("params") or {}
         if not isinstance(params_raw, Mapping):
             raise _http_error("invalid_parameter", "Share params must be an object")
@@ -283,19 +380,57 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
         recipients = [str(item).strip().lower() for item in recipients_raw if str(item).strip()]
         if not recipients:
             raise _http_error("invalid_parameter", "At least one recipient email is required")
+        columns = _coerce_sequence(payload.get("columns"))
+        max_rows_value = payload.get("max_rows")
+        share_limit: int | None
+        if max_rows_value is None:
+            share_limit = 200
+        else:
+            try:
+                share_limit = int(max_rows_value)
+            except (TypeError, ValueError) as exc:
+                raise _http_error("invalid_parameter", "max_rows must be an integer") from exc
+            if share_limit <= 0:
+                share_limit = None
+        redacted_columns = _resolve_share_redaction(route, payload)
         share = app.state.share_store.create(
             route.id,
             params=params,
             fmt=fmt,
+            redact_columns=redacted_columns,
             created_by_hash=user.email_hash,
             request=request,
         )
         share_url = str(request.url_for("resolve_share", token=share.token))
+        inline_html, attachments_payload, artifact_meta = _build_share_artifacts(
+            route,
+            request,
+            params,
+            columns,
+            share_limit,
+            payload,
+            share,
+            app.state.config,
+            redacted_columns,
+        )
         if app.state.email_sender is not None:
             subject = f"{route.title or route.id} shared with you"
-            html_body, text_body = _render_share_email(route, share_url, share.expires_at, user)
+            html_body, text_body = _render_share_email(
+                route,
+                share_url,
+                share.expires_at,
+                user,
+                inline_html,
+                bool(attachments_payload),
+            )
             try:
-                app.state.email_sender(recipients, subject, html_body, text_body, None)
+                app.state.email_sender(
+                    recipients,
+                    subject,
+                    html_body,
+                    text_body,
+                    attachments_payload or None,
+                )
             except Exception as exc:  # pragma: no cover - adapter errors vary
                 raise HTTPException(status_code=502, detail={"code": "email_failed", "message": str(exc)}) from exc
         return {
@@ -304,6 +439,13 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
                 "expires_at": share.expires_at.isoformat(),
                 "url": share_url,
                 "format": fmt,
+                "attachments": artifact_meta["attachments"],
+                "inline_snapshot": bool(inline_html),
+                "rows_shared": artifact_meta["rows"],
+                "redacted_columns": artifact_meta["redacted_columns"],
+                "watermark": artifact_meta["watermark_applied"],
+                "zipped": artifact_meta["zipped"],
+                "total_rows": artifact_meta["total_rows"],
             }
         }
 
@@ -312,18 +454,22 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
         record = app.state.share_store.resolve(token, request)
         if record is None:
             raise HTTPException(status_code=404, detail={"code": "share_not_found", "message": "Share link is invalid or expired"})
-        fmt = _validate_format((request.query_params.get("format") or record.format).lower())
+        route = _get_route(app.state.routes, record.route_id)
+        fmt_override = request.query_params.get("format")
+        fmt_value = fmt_override.lower() if fmt_override else record.format.lower()
+        fmt = _validate_format(fmt_value, route)
         limit = _parse_optional_int(request.query_params.get("limit"))
         offset = _parse_optional_int(request.query_params.get("offset"))
         columns = request.query_params.getlist("column")
         return _render_route_response(
-            _get_route(app.state.routes, record.route_id),
+            route,
             request,
             record.params,
             fmt,
             limit,
             offset,
             columns,
+            redacted_columns=record.redact_columns,
             record_analytics=False,
         )
 
@@ -336,7 +482,11 @@ def _make_endpoint(route: RouteDefinition):
         limit = _parse_optional_int(request.query_params.get("limit"))
         offset = _parse_optional_int(request.query_params.get("offset"))
         columns = request.query_params.getlist("column")
-        fmt = (request.query_params.get("format") or "json").lower()
+        raw_format = request.query_params.get("format")
+        if raw_format:
+            fmt = raw_format.lower()
+        else:
+            fmt = (route.default_format or "json").lower()
 
         return _render_route_response(
             route,
@@ -360,48 +510,59 @@ def _render_route_response(
     limit: int | None,
     offset: int | None,
     columns: Sequence[str],
+    redacted_columns: Sequence[str] | None = None,
     *,
     record_analytics: bool,
 ) -> Response:
-    fmt = _validate_format(fmt)
-    ordered = [_value_for_name(params, name, route) for name in route.param_order]
-    start = time.perf_counter()
-    try:
-        table = _execute_sql(route.prepared_sql, ordered)
-    except duckdb.Error as exc:  # pragma: no cover - safety net
-        raise HTTPException(status_code=500, detail={"code": "duckdb_error", "message": str(exc)}) from exc
-    elapsed_ms = (time.perf_counter() - start) * 1000
+    fmt = _validate_format(fmt, route)
+    drop_set = {str(name) for name in redacted_columns} if redacted_columns else set()
+    filtered_columns = [col for col in columns if col not in drop_set] if drop_set else columns
+    result = _execute_route(route, request, params, filtered_columns, offset, limit)
+    if drop_set:
+        table, _ = _apply_column_redaction(result.table, drop_set)
+        result = RouteExecutionResult(
+            params=result.params,
+            table=table,
+            elapsed_ms=result.elapsed_ms,
+            total_rows=result.total_rows,
+            offset=result.offset,
+            limit=result.limit,
+        )
 
     metadata = route.metadata if isinstance(route.metadata, Mapping) else {}
-    table = apply_overrides(table, metadata, request.app.state.overlays.list_for_route(route.id))
-    table = _select_columns(table, columns)
-    table, total_rows, applied_offset, applied_limit = _apply_slice(table, offset, limit)
+    charts_source = metadata.get("charts") if isinstance(metadata.get("charts"), Sequence) else []
+    if route.charts:
+        charts_source = route.charts
+    charts_meta = render_route_charts(result.table, charts_source)
 
-    if record_analytics:
-        request.app.state.analytics.record(route.id)
-
-    charts_meta: list[dict[str, str]] = []
-    if metadata:
-        charts_meta = render_route_charts(table, metadata.get("charts", []))
+    if record_analytics and getattr(request.app.state.config.analytics, "enabled", True):
+        interactions = request.app.state.overlays.count_for_route(route.id)
+        request.app.state.analytics.record(
+            route.id,
+            rows_returned=result.total_rows,
+            latency_ms=result.elapsed_ms,
+            interactions=interactions,
+        )
 
     return _format_response(
-        table,
+        result,
         fmt,
         route,
-        metadata,
         request,
         charts_meta,
-        elapsed_ms,
-        total_rows,
-        applied_offset,
-        applied_limit,
+        watermark=None,
     )
 
 
-def _validate_format(fmt: str) -> str:
+def _validate_format(fmt: str, route: RouteDefinition | None = None) -> str:
     allowed = {"json", "table", "html_t", "html_c", "feed", "arrow", "arrow_rpc", "csv", "parquet"}
+    fmt = fmt.lower()
     if fmt not in allowed:
         raise _http_error("invalid_parameter", f"Unsupported format '{fmt}'")
+    if route and route.allowed_formats:
+        route_allowed = {item.lower() for item in route.allowed_formats}
+        if fmt not in route_allowed:
+            raise _http_error("invalid_parameter", f"Format '{fmt}' not enabled for route '{route.id}'")
     return fmt
 
 
@@ -429,18 +590,48 @@ def _apply_slice(
     return table.slice(start_idx, length), total, start_idx, limit
 
 
+def _execute_route(
+    route: RouteDefinition,
+    request: Request,
+    params: Mapping[str, object],
+    columns: Sequence[str],
+    offset: int | None,
+    limit: int | None,
+) -> RouteExecutionResult:
+    processed = run_preprocessors(route.preprocess, params, route=route, request=request)
+    ordered = [_value_for_name(processed, name, route) for name in route.param_order]
+    start = time.perf_counter()
+    try:
+        table = _execute_sql(route.prepared_sql, ordered)
+    except duckdb.Error as exc:  # pragma: no cover - safety net
+        raise HTTPException(status_code=500, detail={"code": "duckdb_error", "message": str(exc)}) from exc
+    elapsed_ms = (time.perf_counter() - start) * 1000
+
+    metadata = route.metadata if isinstance(route.metadata, Mapping) else {}
+    table = apply_overrides(table, metadata, request.app.state.overlays.list_for_route(route.id))
+    table = _select_columns(table, columns)
+    table, total_rows, applied_offset, applied_limit = _apply_slice(table, offset, limit)
+    return RouteExecutionResult(
+        params=processed,
+        table=table,
+        elapsed_ms=elapsed_ms,
+        total_rows=total_rows,
+        offset=applied_offset,
+        limit=applied_limit,
+    )
+
+
 def _format_response(
-    table: pa.Table,
+    result: RouteExecutionResult,
     fmt: str,
     route: RouteDefinition,
-    metadata: Mapping[str, object],
     request: Request,
     charts_meta: Sequence[Mapping[str, object]],
-    elapsed_ms: float,
-    total_rows: int,
-    offset: int,
-    limit: int | None,
+    *,
+    watermark: str | None,
 ) -> Response:
+    metadata = route.metadata if isinstance(route.metadata, Mapping) else {}
+    table = result.table
     if fmt in {"json", "table"}:
         records = table_to_records(table)
         payload = {
@@ -450,29 +641,53 @@ def _format_response(
             "row_count": len(records),
             "columns": table.column_names,
             "rows": records,
-            "elapsed_ms": round(elapsed_ms, 3),
+            "elapsed_ms": round(result.elapsed_ms, 3),
             "charts": charts_meta,
-            "total_rows": total_rows,
-            "offset": offset,
-            "limit": limit,
+            "total_rows": result.total_rows,
+            "offset": result.offset,
+            "limit": result.limit,
         }
         return JSONResponse(payload)
     if fmt == "html_t":
-        html = render_table_html(table, metadata, request.app.state.config, charts_meta)
+        post_opts = route.postprocess.get("html_t") if isinstance(route.postprocess, Mapping) else None
+        html = render_table_html(
+            table,
+            metadata,
+            request.app.state.config,
+            charts_meta,
+            postprocess=post_opts,
+            watermark=watermark,
+        )
         return HTMLResponse(html)
     if fmt == "html_c":
-        html = render_cards_html(table, metadata, request.app.state.config, charts_meta)
+        post_opts = route.postprocess.get("html_c") if isinstance(route.postprocess, Mapping) else None
+        html = render_cards_html_with_assets(
+            table,
+            metadata,
+            request.app.state.config,
+            charts=charts_meta,
+            postprocess=post_opts,
+            assets=route.assets,
+            route_id=route.id,
+            watermark=watermark,
+        )
         return HTMLResponse(html)
     if fmt == "feed":
-        html = render_feed_html(table, metadata, request.app.state.config)
+        post_opts = route.postprocess.get("feed") if isinstance(route.postprocess, Mapping) else None
+        html = render_feed_html(
+            table,
+            metadata,
+            request.app.state.config,
+            postprocess=post_opts,
+        )
         return HTMLResponse(html)
     if fmt == "arrow":
         return _arrow_stream_response(table)
     if fmt == "arrow_rpc":
         response = _arrow_stream_response(table)
-        response.headers["x-total-rows"] = str(total_rows)
-        response.headers["x-offset"] = str(offset)
-        response.headers["x-limit"] = str(limit if limit is not None else total_rows)
+        response.headers["x-total-rows"] = str(result.total_rows)
+        response.headers["x-offset"] = str(result.offset)
+        response.headers["x-limit"] = str(result.limit if result.limit is not None else result.total_rows)
         return response
     if fmt == "csv":
         return _csv_response(route, table)
@@ -528,7 +743,179 @@ def _prepare_share_params(route: RouteDefinition, raw: Mapping[str, object]) -> 
     return values
 
 
-def _render_share_email(route: RouteDefinition, url: str, expires_at: datetime, user) -> tuple[str, str]:
+def _table_to_csv_bytes(table: pa.Table) -> bytes:
+    sink = pa.BufferOutputStream()
+    pacsv.write_csv(table, sink)
+    return sink.getvalue().to_pybytes()
+
+
+def _table_to_parquet_bytes(table: pa.Table) -> bytes:
+    sink = pa.BufferOutputStream()
+    pq.write_table(table, sink)
+    return sink.getvalue().to_pybytes()
+
+
+def _resolve_share_redaction(route: RouteDefinition, payload: Mapping[str, object]) -> list[str]:
+    metadata = route.metadata if isinstance(route.metadata, Mapping) else {}
+    share_meta = metadata.get("share") if isinstance(metadata, Mapping) else None
+    drop_columns = {str(item) for item in _coerce_sequence(payload.get("redact_columns")) if str(item)}
+    redact_pii_pref = payload.get("redact_pii")
+    redact_pii_enabled = True if redact_pii_pref is None else bool(redact_pii_pref)
+    if redact_pii_enabled and isinstance(share_meta, Mapping):
+        drop_columns.update(str(item) for item in _coerce_sequence(share_meta.get("pii_columns")))
+    return sorted(drop_columns)
+
+
+def _apply_column_redaction(table: pa.Table, redacted_columns: Sequence[str]) -> tuple[pa.Table, list[str]]:
+    if not redacted_columns:
+        return table, []
+    drop_set = {str(name) for name in redacted_columns}
+    present = [name for name in table.column_names if name in drop_set]
+    if not present:
+        return table, []
+    keep = [name for name in table.column_names if name not in drop_set]
+    if not keep:
+        raise _http_error("invalid_parameter", "Redaction removed all result columns")
+    return table.select(keep), sorted(present)
+
+
+def _zip_attachments(
+    route_id: str, attachments: Sequence[tuple[str, bytes]], passphrase: object
+) -> tuple[str, bytes]:
+    import pyzipper  # type: ignore
+
+    buffer = io.BytesIO()
+    zip_name = f"{route_id}.zip"
+    with pyzipper.AESZipFile(
+        buffer,
+        "w",
+        compression=pyzipper.ZIP_DEFLATED,
+        encryption=pyzipper.WZ_AES,
+    ) as zf:
+        if passphrase:
+            zf.setpassword(str(passphrase).encode("utf-8"))
+        for filename, content in attachments:
+            zf.writestr(filename, content)
+    return zip_name, buffer.getvalue()
+
+
+def _build_share_artifacts(
+    route: RouteDefinition,
+    request: Request,
+    params: Mapping[str, object],
+    columns: Sequence[str],
+    limit: int | None,
+    payload: Mapping[str, object],
+    share: CreatedShare,
+    config: Config,
+    redacted_columns: Sequence[str],
+) -> tuple[str | None, list[tuple[str, bytes]], Mapping[str, object]]:
+    metadata = route.metadata if isinstance(route.metadata, Mapping) else {}
+
+    result = _execute_route(route, request, params, columns, offset=0, limit=limit)
+    table = result.table
+
+    table, removed_columns = _apply_column_redaction(table, redacted_columns)
+
+    charts_source = metadata.get("charts") if isinstance(metadata.get("charts"), Sequence) else []
+    if route.charts:
+        charts_source = route.charts
+    charts_meta = render_route_charts(table, charts_source)
+
+    watermark_pref = payload.get("watermark")
+    if watermark_pref is None:
+        watermark_enabled = bool(config.share.watermark)
+    else:
+        watermark_enabled = bool(watermark_pref)
+    watermark_text = payload.get("watermark_text")
+    if watermark_enabled:
+        watermark_text = watermark_text or _default_share_watermark(route, share)
+    else:
+        watermark_text = None
+
+    inline_snapshot = bool(payload.get("inline_snapshot", True))
+    inline_html = None
+    post_opts = route.postprocess.get("html_t") if isinstance(route.postprocess, Mapping) else None
+    if inline_snapshot:
+        inline_html = render_table_html(
+            table,
+            metadata,
+            config,
+            charts_meta,
+            postprocess=post_opts,
+            watermark=watermark_text,
+        )
+
+    attachments: list[tuple[str, bytes]] = []
+    attachment_formats = payload.get("attachments") or []
+    for fmt_name in attachment_formats:
+        fmt_key = str(fmt_name).lower()
+        if fmt_key not in {"csv", "parquet", "html"}:
+            raise _http_error("invalid_parameter", f"Unsupported attachment format '{fmt_name}'")
+        if fmt_key == "csv":
+            attachments.append((f"{route.id}.csv", _table_to_csv_bytes(table)))
+        elif fmt_key == "parquet":
+            attachments.append((f"{route.id}.parquet", _table_to_parquet_bytes(table)))
+        elif fmt_key == "html":
+            html_body = inline_html
+            if html_body is None:
+                html_body = render_table_html(
+                    table,
+                    metadata,
+                    config,
+                    charts_meta,
+                    postprocess=post_opts,
+                    watermark=watermark_text,
+                )
+            attachments.append((f"{route.id}.html", html_body.encode("utf-8")))
+
+    max_bytes = max(1, int(config.share.max_total_size_mb)) * 1024 * 1024
+    total_size = sum(len(content) for _, content in attachments)
+    if total_size > max_bytes:
+        raise _http_error("invalid_parameter", "Attachments exceed configured share size limit")
+
+    zip_requested = payload.get("zip")
+    if zip_requested is None:
+        zip_requested = bool(config.share.zip_attachments)
+    zipped = False
+    attachment_names = [name for name, _ in attachments]
+    attachments_payload = attachments
+    if attachments and zip_requested:
+        zip_passphrase = payload.get("zip_passphrase")
+        if config.share.zip_passphrase_required and not zip_passphrase:
+            raise _http_error("missing_parameter", "zip_passphrase is required for attachments")
+        zip_name, zip_bytes = _zip_attachments(route.id, attachments, zip_passphrase)
+        if len(zip_bytes) > max_bytes:
+            raise _http_error("invalid_parameter", "Attachments exceed configured share size limit")
+        attachments_payload = [(zip_name, zip_bytes)]
+        attachment_names = [zip_name]
+        zipped = True
+
+    artifact_meta = {
+        "attachments": attachment_names,
+        "rows": table.num_rows,
+        "redacted_columns": removed_columns,
+        "watermark_applied": bool(watermark_text),
+        "zipped": zipped,
+        "total_rows": result.total_rows,
+    }
+
+    return inline_html, attachments_payload, artifact_meta
+
+
+def _default_share_watermark(route: RouteDefinition, share: CreatedShare) -> str:
+    expires = share.expires_at.isoformat(timespec="minutes")
+    return f"webbed_duck share · {route.id} · expires {expires}"
+
+
+def _render_share_email(
+    route: RouteDefinition,
+    url: str,
+    expires_at: datetime,
+    user,
+    inline_html: str | None,
+    has_attachments: bool,
+) -> tuple[str, str]:
     title = route.title or route.id
     creator = getattr(user, "display_name", None) or getattr(user, "user_id", "webbed_duck")
     expires = expires_at.isoformat()
@@ -539,7 +926,13 @@ def _render_share_email(route: RouteDefinition, url: str, expires_at: datetime, 
         f"<p><a href='{url}'>Open the share</a></p>"
         f"<p>This link expires at {expires}.</p>"
     )
+    if has_attachments:
+        html += "<p>Attachments are included with this email.</p>"
+    if inline_html:
+        html += "<hr/>" + inline_html
     text = f"{title} shared by {creator}. Access: {url} (expires {expires})."
+    if has_attachments:
+        text += " Attachments included."
     return html, text
 
 
@@ -641,7 +1034,11 @@ def _http_error(code: str, message: str) -> HTTPException:
     hint = entry.get("hint")
     if hint:
         detail["hint"] = hint
-    return HTTPException(status_code=400, detail=detail)
+    category = entry.get("category")
+    if category:
+        detail["category"] = category
+    status = int(entry.get("status", 400))
+    return HTTPException(status_code=status, detail=detail)
 
 
 __all__ = ["create_app"]

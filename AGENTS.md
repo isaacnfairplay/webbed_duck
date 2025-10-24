@@ -40,6 +40,15 @@
 * [26) Release, Versioning & Deprecations](#26-release-versioning--deprecations)
 * [27) Appendices (Config, Examples, Snippets)](#27-appendices-config-examples-snippets)
 
+### Maintainer Log — 2025-02-14
+
+* Completed compiler/runtime handling for `@meta`, `@params`, `@preprocess`, `@postprocess`, `@charts`, and `@assets` directives. Added integration tests covering directive parsing, preprocess execution, and analytics folder aggregation.
+* Implemented preprocess runner with callable resolution safety checks plus unit tests (`tests/test_preprocess.py`). Local runner respects preprocess output.
+* Upgraded share workflow to produce inline watermarked snapshots, CSV/Parquet/HTML attachments with ZIP support and redaction metadata; added regression coverage in `tests/test_pseudo_share.py`.
+* Expanded analytics to track hits/rows/latency/interactions with folder-aware summaries; verified via `/routes` tests.
+* Error taxonomy now emits category-specific statuses; incremental runner persists progress in `runtime/checkpoints.duckdb`.
+* All new behavior covered by `pytest` (25 passed).
+
 ---
 
 ## 1) Philosophy & Invariants

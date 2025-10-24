@@ -6,6 +6,8 @@ from pathlib import Path
 import pyarrow as pa
 import pytest
 
+import duckdb
+
 from webbed_duck.config import Config, load_config
 from webbed_duck.core.compiler import compile_routes
 from webbed_duck.core.incremental import run_incremental
@@ -112,6 +114,28 @@ def test_schema_endpoint(tmp_path: Path) -> None:
     assert any(item["name"] == "name" for item in payload["form"])
 
 
+@pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
+def test_routes_endpoint_reports_metrics(tmp_path: Path) -> None:
+    src_dir = tmp_path / "src"
+    build_dir = tmp_path / "build"
+    src_dir.mkdir()
+    _write_route(src_dir, ROUTE_TEMPLATE)
+    compile_routes(src_dir, build_dir)
+    routes = load_compiled_routes(build_dir)
+    config = _make_config(tmp_path / "storage")
+    app = create_app(routes, config)
+    client = TestClient(app)
+
+    client.get("/hello")
+    response = client.get("/routes")
+    assert response.status_code == 200
+    data = response.json()
+    assert "folders" in data
+    route_entry = next(item for item in data["routes"] if item["id"] == "hello")
+    assert route_entry["metrics"]["hits"] >= 1
+    assert route_entry["metrics"]["rows"] >= 1
+
+
 def test_run_route_local(tmp_path: Path) -> None:
     src_dir = tmp_path / "src"
     build_dir = tmp_path / "build"
@@ -157,5 +181,70 @@ SELECT {{day}} AS day_value;
         build_dir=build_dir,
     )
     assert len(results) == 3
-    checkpoint = (storage_root / "runtime" / "checkpoints.json").read_text(encoding="utf-8")
-    assert "2025-01-03" in checkpoint
+    checkpoint_path = storage_root / "runtime" / "checkpoints.duckdb"
+    assert checkpoint_path.exists()
+    conn = duckdb.connect(checkpoint_path)
+    try:
+        row = conn.execute(
+            "SELECT cursor_value FROM checkpoints WHERE route_id = ? AND cursor_param = ?",
+            ("by_date", "day"),
+        ).fetchone()
+    finally:
+        conn.close()
+    assert row is not None and row[0] == "2025-01-03"
+
+ROUTE_REPORTS_INDEX = (
+    "+++\n"
+    "id = \"reports_index\"\n"
+    "path = \"/reports\"\n"
+    "+++\n\n"
+    "```sql\nSELECT 'index' AS label;\n```\n"
+)
+
+ROUTE_REPORTS_DAILY_SUMMARY = (
+    "+++\n"
+    "id = \"reports_daily_summary\"\n"
+    "path = \"/reports/daily/summary\"\n"
+    "+++\n\n"
+    "```sql\nSELECT 'summary' AS label UNION ALL SELECT 'summary-2' AS label;\n```\n"
+)
+
+ROUTE_REPORTS_DAILY_DETAIL = (
+    "+++\n"
+    "id = \"reports_daily_detail\"\n"
+    "path = \"/reports/daily/detail\"\n"
+    "+++\n\n"
+    "```sql\nSELECT 'detail' AS label;\n```\n"
+)
+
+
+@pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
+def test_routes_endpoint_folder_aggregation(tmp_path: Path) -> None:
+    src_dir = tmp_path / "src"
+    build_dir = tmp_path / "build"
+    src_dir.mkdir()
+    (src_dir / "index.sql.md").write_text(ROUTE_REPORTS_INDEX, encoding="utf-8")
+    (src_dir / "summary.sql.md").write_text(ROUTE_REPORTS_DAILY_SUMMARY, encoding="utf-8")
+    (src_dir / "detail.sql.md").write_text(ROUTE_REPORTS_DAILY_DETAIL, encoding="utf-8")
+    compile_routes(src_dir, build_dir)
+    routes = load_compiled_routes(build_dir)
+    config = _make_config(tmp_path / "storage")
+    app = create_app(routes, config)
+    client = TestClient(app)
+
+    client.get("/reports")
+    client.get("/reports/daily/summary")
+    client.get("/reports/daily/detail")
+
+    response = client.get("/routes", params={"folder": "/reports"})
+    assert response.status_code == 200
+    data = response.json()
+    assert data["folder"] == "/reports"
+    route_ids = {item["id"] for item in data["routes"]}
+    assert "reports_index" in route_ids
+    folders = {item["path"]: item for item in data["folders"]}
+    assert "/reports/daily" in folders
+    summary = folders["/reports/daily"]
+    assert summary["route_count"] == 2
+    assert summary["hits"] >= 2
+    assert summary["rows"] >= 3

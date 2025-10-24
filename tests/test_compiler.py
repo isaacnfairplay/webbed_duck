@@ -68,6 +68,30 @@ def test_compile_route(tmp_path: Path) -> None:
     assert loaded[0].id == "sample"
 
 
+def test_compile_extracts_directive_sections(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"directive\"\n"
+        "path = \"/directive\"\n"
+        "[html_c]\n"
+        "title_col = \"title\"\n"
+        "+++\n\n"
+        "<!-- @meta default_format=\"html_c\" allowed_formats=\"html_c json\" -->\n"
+        "<!-- @preprocess {\"callable\": \"tests.fake:noop\"} -->\n"
+        "<!-- @postprocess {\"html_c\": {\"image_col\": \"photo\"}} -->\n"
+        "<!-- @charts [{\"id\": \"chart1\", \"type\": \"line\"}] -->\n"
+        "<!-- @assets {\"image_getter\": \"static_fallback\"} -->\n"
+        "```sql\nSELECT 'value' AS col\n```\n"
+    )
+    definition = compile_route_file(write_route(tmp_path, route_text))
+    assert definition.default_format == "html_c"
+    assert set(definition.allowed_formats) == {"html_c", "json"}
+    assert definition.preprocess[0]["callable"] == "tests.fake:noop"
+    assert definition.postprocess["html_c"]["image_col"] == "photo"
+    assert definition.charts[0]["id"] == "chart1"
+    assert definition.assets["image_getter"] == "static_fallback"
+
+
 def test_compile_fails_without_sql(tmp_path: Path) -> None:
     route_text = "+++\nid = \"broken\"\npath = \"/broken\"\n+++\n"
     path = write_route(tmp_path, route_text)
