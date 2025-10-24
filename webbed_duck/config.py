@@ -55,8 +55,8 @@ class EmailConfig:
     adapter: str | None = None
     from_address: str = "no-reply@company.local"
     share_token_ttl_minutes: int = 90
-    bind_share_to_user_agent: bool = True
-    bind_share_to_ip_prefix: bool = True
+    bind_share_to_user_agent: bool = False
+    bind_share_to_ip_prefix: bool = False
 
 
 @dataclass(slots=True)
