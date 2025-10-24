@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Fixed the wheel build configuration so the published package exposes the
+  `webbed_duck` module (rather than leaking `core`/`server` at the top level),
+  and added a packaging test that verifies the generated wheel structure.
+
+## 0.4.0 - 2025-03-05
+
 - Added extensive plugin registry tests that verify custom image getters,
   fallback behaviour, and chart renderer edge cases.
 - Documented the plugin architecture with a standalone demo script and guide
@@ -14,6 +20,9 @@
   guardrails for pseudo-auth sessions and share tokens.
 - Replaced the README with product-grade docs covering the `.sql.md` contract,
   runtime formats, and the standalone server workflow.
+- Delivered a config-driven auto-compiling `webbed-duck serve` command with
+  optional watch mode and FastAPI route hot-reload support for `.sql.md`
+  contract changes.
 
 ## MVP 0.3
 

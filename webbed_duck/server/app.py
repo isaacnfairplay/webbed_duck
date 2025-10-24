@@ -78,7 +78,7 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
     if not routes:
         raise ValueError("At least one route must be provided to create the application")
 
-    app = FastAPI(title="webbed_duck", version="0.3.0")
+    app = FastAPI(title="webbed_duck", version="0.4.0")
     app.state.config = config
     app.state.analytics = AnalyticsStore(
         weight=config.analytics.weight_interactions,
@@ -96,14 +96,12 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
         session_store=app.state.session_store,
     )
 
-    for route in routes:
-        app.add_api_route(
-            route.path,
-            endpoint=_make_endpoint(route),
-            methods=list(route.methods),
-            summary=route.title,
-            description=route.description,
-        )
+    app.state._dynamic_route_handles = _register_dynamic_routes(app, app.state.routes)
+
+    def _reload_routes(new_routes: Sequence[RouteDefinition]) -> None:
+        _replace_dynamic_routes(app, list(new_routes))
+
+    app.state.reload_routes = _reload_routes
 
     if config.auth.mode == "pseudo":
         @app.post("/auth/pseudo/session")
@@ -1199,6 +1197,28 @@ def _http_error(code: str, message: str) -> HTTPException:
         detail["category"] = category
     status = int(entry.get("status", 400))
     return HTTPException(status_code=status, detail=detail)
+
+
+def _register_dynamic_routes(app: FastAPI, routes: Sequence[RouteDefinition]) -> list[object]:
+    handles: list[object] = []
+    for route in routes:
+        app.add_api_route(
+            route.path,
+            endpoint=_make_endpoint(route),
+            methods=list(route.methods),
+            summary=route.title,
+            description=route.description,
+        )
+        handles.append(app.router.routes[-1])
+    return handles
+
+
+def _replace_dynamic_routes(app: FastAPI, routes: Sequence[RouteDefinition]) -> None:
+    existing: Sequence[object] = getattr(app.state, "_dynamic_route_handles", [])
+    if existing:
+        app.router.routes = [route for route in app.router.routes if route not in existing]
+    app.state.routes = list(routes)
+    app.state._dynamic_route_handles = _register_dynamic_routes(app, routes)
 
 
 __all__ = ["create_app"]

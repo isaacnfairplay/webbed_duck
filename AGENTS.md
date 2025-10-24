@@ -40,6 +40,10 @@
 * [26) Release, Versioning & Deprecations](#26-release-versioning--deprecations)
 * [27) Appendices (Config, Examples, Snippets)](#27-appendices-config-examples-snippets)
 
+### Maintainer Log — 2025-03-05
+
+* 0.4 release prepped with auto-compiling `serve`, live route reload support, watch-mode CLI flags, and a refreshed quick start/README to highlight the zero-boilerplate workflow.
+
 ### Maintainer Log — 2025-02-28
 
 * 0.3 release finalized: docs aligned with compiled route behavior, optional dependencies documented, and storage layout captured for maintainers.

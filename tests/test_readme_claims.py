@@ -97,6 +97,7 @@ class ReadmeContext:
     checkpoints_exists: bool
     storage_root_layout: dict[str, bool]
     repo_structure: dict[str, bool]
+    reload_capable: bool
     python_requires: str
     optional_dependencies: dict[str, list[str]]
     dependencies: list[str]
@@ -127,7 +128,11 @@ def _extract_statements(readme: str) -> list[str]:
     for line in readme.splitlines():
         stripped = line.strip()
         if stripped.startswith("```"):
-            in_code_block = not in_code_block
+            if in_code_block:
+                if stripped == "```":
+                    in_code_block = False
+                continue
+            in_code_block = True
             continue
         if in_code_block or not stripped or stripped.startswith("#"):
             continue
@@ -172,6 +177,7 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
     config.email.bind_share_to_ip_prefix = False
 
     app = create_app(routes, config)
+    reload_capable = hasattr(app.state, "reload_routes")
 
     duckdb_connect_counts: list[int] = []
 
@@ -307,6 +313,7 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
         checkpoints_exists=checkpoints_path.exists(),
         storage_root_layout=storage_root_layout,
         repo_structure=repo_structure,
+        reload_capable=reload_capable,
         python_requires=python_requires,
         optional_dependencies=optional_dependencies,
         dependencies=dependencies,
@@ -339,7 +346,7 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
     ctx = readme_context
 
     validators: list[tuple[Callable[[str], bool], Callable[[str], None]]] = [
-        (lambda s: s.startswith("`webbed_duck` is an opinionated"), lambda s: _ensure(
+        (lambda s: s.startswith("`webbed_duck` is a"), lambda s: _ensure(
             ctx.route_json["rows"][0]["greeting"].startswith("Hello"), s
         )),
         (lambda s: s.startswith("This README is the canonical"), lambda s: None),
@@ -347,8 +354,97 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
             ctx.repo_structure["docs"] and ctx.repo_structure["examples"], s
         )),
         (lambda s: bool(re.match(r"^\d+\. \[", s)), lambda s: None),
+        (lambda s: s.startswith("- Each `.sql.md` file is a contract"), lambda s: _ensure(
+            bool(ctx.compiled_routes), s
+        )),
+        (lambda s: s.startswith("- The compiler translates those contracts"), lambda s: _ensure(
+            ctx.compiled_hashes == ctx.recompiled_hashes, s
+        )),
+        (lambda s: s.startswith("- The runtime ships the results"), lambda s: _ensure(
+            "content-type" in ctx.csv_headers and "content-type" in ctx.parquet_headers, s
+        )),
+        (lambda s: s.startswith("- Drop `.sql.md` files into a folder"), lambda s: _ensure(
+            ctx.repo_structure["routes_src"] and ctx.repo_structure["routes_build"], s
+        )),
+        (lambda s: s.startswith("- Designed for operational"), lambda s: None),
+        (lambda s: s.startswith("3. **Compile the contracts into runnable manifests"), lambda s: None),
+        (lambda s: s.startswith("4. **Launch the server."), lambda s: _ensure(
+            ctx.reload_capable, s
+        )),
+        (lambda s: s.startswith("- `--watch` keeps the compiler running"), lambda s: _ensure(
+            ctx.reload_capable, s
+        )),
+        (lambda s: s.startswith("- Pass `--no-auto-compile`"), lambda s: None),
+        (lambda s: s.startswith("1. **Install the package and dependencies.**"), lambda s: None),
+        (lambda s: s.startswith("2. **Create your route source directory**"), lambda s: _ensure(
+            ctx.repo_structure["routes_src"], s
+        )),
+        (lambda s: s.startswith("5. **Browse the routes.**"), lambda s: _ensure(
+            bool(ctx.route_json["rows"]), s
+        )),
         (lambda s: s.startswith("For an exhaustive"), lambda s: _ensure(
             (ctx.repo_root / "AGENTS.md").is_file(), s
+        )),
+        (lambda s: s.startswith("- `webbed-duck serve` loads configuration"), lambda s: _ensure(
+            ctx.repo_structure["config.toml"], s
+        )),
+        (lambda s: s.startswith("- With `server.auto_compile = true`"), lambda s: _ensure(
+            ctx.reload_capable, s
+        )),
+        (lambda s: s.startswith("- Enabling watch mode"), lambda s: _ensure(
+            ctx.reload_capable, s
+        )),
+        (lambda s: s.startswith("- The server is a FastAPI application"), lambda s: _ensure(
+            "html" in ctx.html_text.lower(), s
+        )),
+        (lambda s: s.startswith("- The compiler scans the source tree"), lambda s: _ensure(
+            len(ctx.compiled_routes) >= 1, s
+        )),
+        (lambda s: s.startswith("- Frontmatter declares the route `id`"), lambda s: _ensure(
+            any(item["name"] == "name" for item in ctx.schema_payload.get("form", [])), s
+        )),
+        (lambda s: s.startswith("- Compiled artifacts are written"), lambda s: _ensure(
+            ctx.repo_structure["routes_build"], s
+        )),
+        (lambda s: s.startswith("- At boot"), lambda s: _ensure(
+            ctx.reload_capable, s
+        )),
+        (lambda s: s.startswith("- Parameters are declared"), lambda s: _ensure(
+            any(item["name"] == "name" for item in ctx.schema_payload.get("form", [])), s
+        )),
+        (lambda s: s.startswith("- Within the SQL block"), lambda s: _ensure(
+            bool(getattr(ctx.compiled_routes[0], "param_order", [])), s
+        )),
+        (lambda s: s.startswith("- At request time the runtime reads"), lambda s: _ensure(
+            bool(ctx.route_json["rows"]), s
+        )),
+        (lambda s: s.startswith("- Additional runtime controls"), lambda s: None),
+        (lambda s: s.startswith("- `?limit=`"), lambda s: None),
+        (lambda s: s.startswith("- `?column=`"), lambda s: None),
+        (lambda s: s.startswith("All of the following formats work today"), lambda s: _ensure(
+            ctx.arrow_headers["content-type"].startswith("application/vnd.apache.arrow.stream"), s
+        )),
+        (lambda s: s.startswith("|"), lambda s: None),
+        (lambda s: s.startswith("Routes may set `default_format`"), lambda s: None),
+        (lambda s: s.startswith("- Every request opens a fresh DuckDB connection"), lambda s: _ensure(
+            all(count == 1 for count in ctx.duckdb_connect_counts), s
+        )),
+        (lambda s: s.startswith("- You can query DuckDB-native sources"), lambda s: None),
+        (lambda s: s.startswith("- For derived inputs"), lambda s: None),
+        (lambda s: s.startswith("- After execution, server-side overlays"), lambda s: _ensure(
+            ctx.override_payload["column"] == "note", s
+        )),
+        (lambda s: s.startswith("- Analytics (hits, rows, latency"), lambda s: _ensure(
+            ctx.analytics_payload["routes"], s
+        )),
+        (lambda s: s.startswith("- Authentication modes are controlled via `config.toml`"), lambda s: _ensure(
+            ctx.share_payload["meta"]["token"] is not None, s
+        )),
+        (lambda s: s.startswith("- Users with a pseudo-session"), lambda s: _ensure(
+            ctx.share_payload["meta"]["rows_shared"] >= 1, s
+        )),
+        (lambda s: s.startswith("- Routes that define `[append]` metadata"), lambda s: _ensure(
+            ctx.append_path.exists(), s
         )),
         (lambda s: s.startswith("* **Markdown + SQL compiler**"), lambda s: _ensure(
             ctx.compiled_hashes == ctx.recompiled_hashes, s
@@ -423,6 +519,15 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
             ctx.repo_structure["routes_src"], s
         )),
         (lambda s: s.startswith("Run `webbed-duck compile`"), lambda s: None),
+        (lambda s: s.startswith("- **Default behaviour:**"), lambda s: _ensure(
+            ctx.reload_capable, s
+        )),
+        (lambda s: s.startswith("- **Configurable toggles:**"), lambda s: _ensure(
+            ctx.reload_capable, s
+        )),
+        (lambda s: s.startswith("- **Configuration surface:**"), lambda s: _ensure(
+            ctx.repo_structure["config.toml"], s
+        )),
         (lambda s: s.startswith("* `@route`"), lambda s: _ensure(
             all(hasattr(route, "id") for route in ctx.compiled_routes), s
         )),
@@ -497,6 +602,58 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         (lambda s: s.startswith("* **Email integration**"), lambda s: _ensure(
             len(ctx.email_records) == 1, s
         )),
+        (lambda s: s.startswith("A `.sql.md` file is the single source of truth"), lambda s: _ensure(
+            bool(ctx.compiled_routes), s
+        )),
+        (lambda s: s.startswith("1. **Frontmatter (`+++"), lambda s: None),
+        (lambda s: s.startswith("2. **Markdown body:"), lambda s: None),
+        (lambda s: s.startswith("3. **SQL code block:"), lambda s: None),
+        (lambda s: s.startswith("Common keys include:"), lambda s: None),
+        (lambda s: s.startswith("- `id`: Stable identifier"), lambda s: None),
+        (lambda s: s.startswith("- `path`: HTTP path"), lambda s: None),
+        (lambda s: s.startswith("- `title`, `description`"), lambda s: None),
+        (lambda s: s.startswith("- `version`: Optional"), lambda s: None),
+        (lambda s: s.startswith("- `default_format`"), lambda s: None),
+        (lambda s: s.startswith("- `allowed_formats`"), lambda s: None),
+        (lambda s: s.startswith("- `[params."), lambda s: None),
+        (lambda s: s.startswith("- Presentation metadata blocks"), lambda s: None),
+        (lambda s: s.startswith("- `[[preprocess]]` entries"), lambda s: None),
+        (lambda s: s.startswith("- Write DuckDB SQL inside"), lambda s: None),
+        (lambda s: s.startswith("- Interpolate declared parameters"), lambda s: None),
+        (lambda s: s.startswith("- Do not concatenate user input"), lambda s: None),
+        (lambda s: s.startswith("Routes can further customise behaviour"), lambda s: _ensure(
+            ctx.override_payload["column"] == "note", s
+        )),
+        (lambda s: s.startswith("> **Promise:** By 0.4"), lambda s: _ensure(
+            ctx.reload_capable, s
+        )),
+        (lambda s: s.startswith("MVP 0.4 is the first release"), lambda s: None),
+        (lambda s: s.startswith("- **Preprocessors:**"), lambda s: None),
+        (lambda s: s.startswith("- **Postprocessors and presentation:**"), lambda s: _ensure(
+            "card" in ctx.cards_text.lower(), s
+        )),
+        (lambda s: s.startswith("- **Assets and overlays:**"), lambda s: _ensure(
+            ctx.override_payload["column"] == "note", s
+        )),
+        (lambda s: s.startswith("- **Local execution:**"), lambda s: _ensure(
+            ctx.local_resolve_payload["route_id"] == "hello", s
+        )),
+        (lambda s: s.startswith("As the plugin hooks stabilise"), lambda s: None),
+        (lambda s: s.startswith("- Auto-compiling `webbed-duck serve` command"), lambda s: _ensure(
+            ctx.reload_capable, s
+        )),
+        (lambda s: s.startswith("- Built-in watch mode (`server.watch`"), lambda s: _ensure(
+            ctx.reload_capable, s
+        )),
+        (lambda s: s.startswith("- Dynamic route registry inside the FastAPI app"), lambda s: _ensure(
+            ctx.reload_capable, s
+        )),
+        (lambda s: s.startswith("- CLI and docs tuned for a zero-config quick start"), lambda s: _ensure(
+            ctx.repo_structure["routes_src"] and ctx.repo_structure["config.toml"], s
+        )),
+        (lambda s: s.startswith("- Declarative caching / snapshot controls"), lambda s: None),
+        (lambda s: s.startswith("- Richer auto-generated parameter forms"), lambda s: None),
+        (lambda s: s.startswith("- Additional auth adapter examples"), lambda s: None),
         (lambda s: s.startswith("All runtime paths derive"), lambda s: _ensure(
             ctx.storage_root_layout["runtime"], s
         )),

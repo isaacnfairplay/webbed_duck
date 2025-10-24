@@ -1,6 +1,6 @@
 [project]
 name = "webbed-duck"
-version = "0.3.1"
+version = "0.4.0"
 description = "A parameterized SQL web server for DuckDB routes compiled from Markdown"
 authors = [
   { name = "Isaac Moore" }
@@ -16,6 +16,11 @@ dependencies = [
   "pyzipper>=0.3.6"
 ]
 
+[project.optional-dependencies]
+test = [
+  "build>=1.2",
+]
+
 [project.scripts]
 webbed-duck = "webbed_duck.cli:main"
 
@@ -24,4 +29,5 @@ requires = ["setuptools>=67", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-where = ["webbed_duck"]
+where = ["."]
+include = ["webbed_duck*"]
