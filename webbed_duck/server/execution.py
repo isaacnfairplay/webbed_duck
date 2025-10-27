@@ -4,6 +4,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, Mapping, MutableMapping, Sequence
 
+try:  # pragma: no cover - optional dependency for type checking
+    from fastapi import Request
+except ModuleNotFoundError:  # pragma: no cover - fallback when FastAPI not installed
+    Request = object  # type: ignore[misc,assignment]
+
 import duckdb
 import pyarrow as pa
 
@@ -52,9 +57,16 @@ class RouteExecutor:
         preprocessed: bool = False,
         offset: int = 0,
         limit: int | None = None,
+        request: Request | None = None,
     ) -> CacheQueryResult:
-        prepared = self._prepare(route, params, ordered=ordered, preprocessed=preprocessed)
-        return self._run_relation(route, prepared, offset=offset, limit=limit)
+        prepared = self._prepare(
+            route,
+            params,
+            ordered=ordered,
+            preprocessed=preprocessed,
+            request=request,
+        )
+        return self._run_relation(route, prepared, offset=offset, limit=limit, request=request)
 
     def _run_relation(
         self,
@@ -63,13 +75,14 @@ class RouteExecutor:
         *,
         offset: int,
         limit: int | None,
+        request: Request | None,
     ) -> CacheQueryResult:
         if route.id in self._stack:
             raise RouteExecutionError(f"Circular dependency detected while executing route '{route.id}'")
         self._stack.append(route.id)
         try:
-            reader_factory = self._make_reader_factory(route, prepared)
-            execute_sql = self._make_execute_fn(route, prepared)
+            reader_factory = self._make_reader_factory(route, prepared, request=request)
+            execute_sql = self._make_execute_fn(route, prepared, request=request)
             return fetch_cached_table(
                 route,
                 prepared.params,
@@ -93,6 +106,7 @@ class RouteExecutor:
         *,
         ordered: Sequence[object] | None,
         preprocessed: bool,
+        request: Request | None = None,
     ) -> _PreparedRoute:
         if preprocessed:
             processed = dict(params)
@@ -100,7 +114,7 @@ class RouteExecutor:
             return _PreparedRoute(params=processed, ordered=ordered_params)
 
         coerced = self._coerce_params(route, params)
-        processed = run_preprocessors(route.preprocess, coerced, route=route, request=None)
+        processed = run_preprocessors(route.preprocess, coerced, route=route, request=request)
         ordered_params = self._ordered_from_processed(route, processed)
         return _PreparedRoute(params=processed, ordered=ordered_params)
 
@@ -161,12 +175,16 @@ class RouteExecutor:
         return ordered
 
     def _make_reader_factory(
-        self, route: RouteDefinition, prepared: _PreparedRoute
+        self,
+        route: RouteDefinition,
+        prepared: _PreparedRoute,
+        *,
+        request: Request | None,
     ) -> Callable[[], tuple[pa.RecordBatchReader, Callable[[], None]]]:
         def factory() -> tuple[pa.RecordBatchReader, Callable[[], None]]:
             con = duckdb.connect()
             try:
-                self._register_dependencies(con, route, prepared.params)
+                self._register_dependencies(con, route, prepared.params, request=request)
                 cursor = con.execute(route.prepared_sql, prepared.ordered)
                 reader = cursor.fetch_record_batch()
             except Exception:
@@ -177,12 +195,16 @@ class RouteExecutor:
         return factory
 
     def _make_execute_fn(
-        self, route: RouteDefinition, prepared: _PreparedRoute
+        self,
+        route: RouteDefinition,
+        prepared: _PreparedRoute,
+        *,
+        request: Request | None,
     ) -> Callable[[], pa.Table]:
         def runner() -> pa.Table:
             con = duckdb.connect()
             try:
-                self._register_dependencies(con, route, prepared.params)
+                self._register_dependencies(con, route, prepared.params, request=request)
                 cursor = con.execute(route.prepared_sql, prepared.ordered)
                 return cursor.fetch_arrow_table()
             finally:
@@ -195,11 +217,13 @@ class RouteExecutor:
         con: duckdb.DuckDBPyConnection,
         route: RouteDefinition,
         params: Mapping[str, object],
+        *,
+        request: Request | None,
     ) -> None:
         if not getattr(route, "uses", None):
             return
         for use in route.uses:
-            self._register_dependency(con, route, params, use)
+            self._register_dependency(con, route, params, use, request=request)
 
     def _register_dependency(
         self,
@@ -207,6 +231,8 @@ class RouteExecutor:
         route: RouteDefinition,
         params: Mapping[str, object],
         use: RouteUse,
+        *,
+        request: Request | None,
     ) -> None:
         target = self._routes.get(use.call)
         if target is None:
@@ -215,12 +241,24 @@ class RouteExecutor:
             )
         resolved_args = self._resolve_dependency_args(use, params)
         if use.mode == "relation":
-            prepared = self._prepare(target, resolved_args, ordered=None, preprocessed=False)
-            result = self._run_relation(target, prepared, offset=0, limit=None)
+            prepared = self._prepare(
+                target,
+                resolved_args,
+                ordered=None,
+                preprocessed=False,
+                request=request,
+            )
+            result = self._run_relation(target, prepared, offset=0, limit=None, request=request)
             con.register(use.alias, result.table)
             return
         if use.mode == "parquet_path":
-            prepared = self._prepare(target, resolved_args, ordered=None, preprocessed=False)
+            prepared = self._prepare(
+                target,
+                resolved_args,
+                ordered=None,
+                preprocessed=False,
+                request=request,
+            )
             try:
                 artifacts = materialize_parquet_artifacts(
                     target,
@@ -228,7 +266,7 @@ class RouteExecutor:
                     prepared.ordered,
                     store=self._cache_store,
                     config=self._cache_config,
-                    reader_factory=self._make_reader_factory(target, prepared),
+                    reader_factory=self._make_reader_factory(target, prepared, request=request),
                 )
             except RuntimeError as exc:
                 raise RouteExecutionError(str(exc)) from exc
