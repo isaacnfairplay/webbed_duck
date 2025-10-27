@@ -6,7 +6,7 @@ import json
 import secrets
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from typing import Iterable, Mapping, Sequence
+from typing import Mapping, Sequence
 
 from fastapi import Request
 

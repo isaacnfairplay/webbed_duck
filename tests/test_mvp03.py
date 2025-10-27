@@ -11,7 +11,7 @@ import duckdb
 from webbed_duck.config import Config, load_config
 from webbed_duck.core.compiler import compile_routes
 from webbed_duck.core.incremental import run_incremental
-from webbed_duck.core.local import run_route
+from webbed_duck.core.local import RouteNotFoundError, run_route
 from webbed_duck.core.routes import load_compiled_routes
 from webbed_duck.server.app import create_app
 
@@ -189,6 +189,35 @@ def test_run_route_local(tmp_path: Path) -> None:
     table = run_route("hello", params={"name": "Duck"}, build_dir=build_dir, config=_make_config(tmp_path / "storage"))
     assert isinstance(table, pa.Table)
     assert table.column("greeting")[0].as_py() == "Hello, Duck!"
+
+
+def test_run_route_unknown_route(tmp_path: Path) -> None:
+    src_dir = tmp_path / "src"
+    build_dir = tmp_path / "build"
+    src_dir.mkdir()
+    _write_route(src_dir, ROUTE_TEMPLATE)
+    compile_routes(src_dir, build_dir)
+
+    with pytest.raises(RouteNotFoundError):
+        run_route("missing", params={}, build_dir=build_dir, config=_make_config(tmp_path / "storage"))
+
+
+def test_run_route_rejects_unknown_format(tmp_path: Path) -> None:
+    src_dir = tmp_path / "src"
+    build_dir = tmp_path / "build"
+    src_dir.mkdir()
+    _write_route(src_dir, ROUTE_TEMPLATE)
+    compile_routes(src_dir, build_dir)
+
+    with pytest.raises(ValueError) as excinfo:
+        run_route(
+            "hello",
+            params={"name": "Duck"},
+            build_dir=build_dir,
+            config=_make_config(tmp_path / "storage"),
+            format="unsupported",
+        )
+    assert "Unsupported format" in str(excinfo.value)
 
 
 def test_run_incremental_tracks_progress(tmp_path: Path) -> None:

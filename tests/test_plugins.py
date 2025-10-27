@@ -7,34 +7,44 @@ import pyarrow as pa
 
 import webbed_duck.plugins.assets as assets
 import webbed_duck.plugins.charts as charts
-from webbed_duck.plugins.assets import register_image_getter, resolve_image
-from webbed_duck.plugins.charts import register_chart_renderer, render_route_charts
+from webbed_duck.plugins.assets import (
+    register_image_getter,
+    reset_image_getters,
+    resolve_image,
+)
+from webbed_duck.plugins.charts import (
+    register_chart_renderer,
+    render_route_charts,
+    reset_chart_renderers,
+)
 
 
 @pytest.fixture()
-def asset_registry(monkeypatch):
+def asset_registry():
     """Reset the asset registry to the static fallback for each test."""
 
-    original = dict(getattr(assets, "_REGISTRY", {}))
-    base = {"static_fallback": assets.static_fallback}
-    monkeypatch.setattr(assets, "_REGISTRY", base.copy(), raising=False)
+    original = assets.list_image_getters()
+    reset_image_getters()
     try:
-        yield assets._REGISTRY
+        yield assets.list_image_getters()
     finally:
-        monkeypatch.setattr(assets, "_REGISTRY", original, raising=False)
+        reset_image_getters(include_defaults=False)
+        for name, getter in original.items():
+            register_image_getter(name)(getter)
 
 
 @pytest.fixture()
-def chart_registry(monkeypatch):
+def chart_registry():
     """Reset the chart renderer registry to only include the built-in line chart."""
 
-    original = dict(getattr(charts, "_RENDERERS", {}))
-    base = {"line": charts._render_line}
-    monkeypatch.setattr(charts, "_RENDERERS", base.copy(), raising=False)
+    original = charts.list_chart_renderers()
+    reset_chart_renderers()
     try:
-        yield charts._RENDERERS
+        yield charts.list_chart_renderers()
     finally:
-        monkeypatch.setattr(charts, "_RENDERERS", original, raising=False)
+        reset_chart_renderers(include_defaults=False)
+        for name, renderer in original.items():
+            register_chart_renderer(name)(renderer)
 
 
 def test_resolve_image_uses_registered_getter(asset_registry):

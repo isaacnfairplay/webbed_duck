@@ -385,7 +385,7 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
 
         json_response = request_with_tracking(client, "get", "/hello")
         route_json = json_response.json()
-        cached_response = request_with_tracking(client, "get", "/hello")
+        request_with_tracking(client, "get", "/hello")
 
         html_response = client.get("/hello", params={"format": "html_t"})
         cards_response = client.get("/hello", params={"format": "html_c"})
@@ -723,12 +723,13 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
             TestClient is not None, s
         )),
         (lambda s: s.startswith("1. **Install the package and dependencies.**"), lambda s: None),
-        (lambda s: s.startswith("2. **Create your route source directory**"), lambda s: _ensure(
-            ctx.repo_structure["routes_src"], s
-        )),
-        (lambda s: s.startswith("5. **Browse the routes.**"), lambda s: _ensure(
-            bool(ctx.route_json["rows"]), s
-        )),
+            (lambda s: s.startswith("2. **Create your route source directory**"), lambda s: _ensure(
+                ctx.repo_structure["routes_src"], s
+            )),
+            (lambda s: s.startswith("> Legacy HTML comment directives"), lambda s: None),
+            (lambda s: s.startswith("5. **Browse the routes.**"), lambda s: _ensure(
+                bool(ctx.route_json["rows"]), s
+            )),
         (lambda s: s.startswith("For an exhaustive"), lambda s: _ensure(
             (ctx.repo_root / "AGENTS.md").is_file(), s
         )),
