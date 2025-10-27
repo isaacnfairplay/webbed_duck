@@ -11,7 +11,7 @@ import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterable
 from types import ModuleType
 
 import pytest
@@ -722,6 +722,18 @@ def _ensure(condition: bool, message: str) -> None:
     assert condition, message
 
 
+def _dependency_names(specs: Iterable[str] | None) -> set[str]:
+    names: set[str] = set()
+    for spec in specs or []:
+        base = spec.split("[", 1)[0]
+        for delimiter in ("<", ">", "=", "!", "~", ";"):
+            base = base.split(delimiter, 1)[0]
+        base = base.strip()
+        if base:
+            names.add(base)
+    return names
+
+
 def _python_requirement_at_least(requirement: str, minimum: tuple[int, int]) -> bool:
     if not requirement.startswith(">="):
         return False
@@ -758,6 +770,17 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         )),
         (lambda s: s.startswith("- The runtime ships the results"), lambda s: _ensure(
             "content-type" in ctx.csv_headers and "content-type" in ctx.parquet_headers, s
+        )),
+        (lambda s: s.startswith("> **FastAPI extras required:**"), lambda s: _ensure(
+            {"fastapi", "uvicorn"}.issubset(
+                _dependency_names(ctx.dependencies)
+                | _dependency_names(ctx.optional_dependencies.get("server"))
+            ),
+            s,
+        )),
+        (lambda s: s.startswith("The published wheel currently depends on `fastapi`"), lambda s: _ensure(
+            {"fastapi", "uvicorn"}.issubset(_dependency_names(ctx.dependencies)),
+            s,
         )),
         (lambda s: s.startswith("- Declare parameter controls"), lambda s: _ensure(
             "params-form" in ctx.html_text and "params-form" in ctx.cards_text, s

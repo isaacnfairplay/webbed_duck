@@ -168,87 +168,9 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
     @app.get("/routes")
     async def list_routes(folder: str | None = None) -> Mapping[str, object]:
         stats = app.state.analytics.snapshot()
-        prefix = folder or "/"
-        if not prefix.startswith("/"):
-            prefix = "/" + prefix
-        base_prefix = prefix.rstrip("/") or "/"
-        normalized = "/" if base_prefix == "/" else base_prefix + "/"
-
-        routes_payload: list[Mapping[str, object]] = []
-        folder_metrics: dict[str, dict[str, float | int]] = {}
-
-        for route in app.state.routes:
-            path = route.path
-            if base_prefix != "/":
-                if path == base_prefix:
-                    relative = ""
-                elif not path.startswith(normalized):
-                    continue
-                else:
-                    relative = path[len(normalized):]
-            else:
-                if folder and not path.startswith(prefix):
-                    continue
-                relative = path.lstrip("/")
-            metrics_raw = stats.get(route.id, {})
-            route_metrics = {
-                "hits": int(metrics_raw.get("hits", 0)),
-                "rows": int(metrics_raw.get("rows", 0)),
-                "avg_latency_ms": float(metrics_raw.get("avg_latency_ms", 0.0)),
-                "interactions": int(metrics_raw.get("interactions", 0)),
-            }
-            if relative and "/" in relative:
-                child = relative.split("/", 1)[0]
-                child_path = (normalized + child).rstrip("/")
-                agg = folder_metrics.setdefault(
-                    child_path,
-                    {"hits": 0, "rows": 0, "total_latency_ms": 0.0, "interactions": 0, "routes": 0},
-                )
-                agg["hits"] += route_metrics["hits"]
-                agg["rows"] += route_metrics["rows"]
-                agg["total_latency_ms"] += route_metrics["avg_latency_ms"] * max(1, route_metrics["hits"])
-                agg["interactions"] += route_metrics["interactions"]
-                agg["routes"] += 1
-                continue
-            routes_payload.append(
-                {
-                    "id": route.id,
-                    "path": route.path,
-                    "title": route.title,
-                    "description": route.description,
-                    "metrics": route_metrics,
-                }
-            )
-
-        routes_payload.sort(
-            key=lambda item: (
-                -int(item["metrics"]["hits"]),
-                -int(item["metrics"]["interactions"]),
-                item["path"],
-            )
+        display_folder, routes_payload, folders_payload = _build_folder_listing(
+            app.state.routes, stats, folder
         )
-
-        folders_payload: list[dict[str, object]] = []
-        for folder_path, agg in folder_metrics.items():
-            hits = int(agg["hits"])
-            total_latency = float(agg["total_latency_ms"])
-            avg_latency = total_latency / hits if hits else 0.0
-            folders_payload.append(
-                {
-                    "path": folder_path or "/",
-                    "hits": hits,
-                    "rows": int(agg["rows"]),
-                    "avg_latency_ms": round(avg_latency, 3),
-                    "interactions": int(agg["interactions"]),
-                    "route_count": int(agg["routes"]),
-                }
-            )
-        folders_payload.sort(key=lambda item: (-int(item["hits"]), item["path"]))
-
-        display_folder = normalized if normalized != "/" else "/"
-        if display_folder.endswith("/") and display_folder != "/":
-            display_folder = display_folder.rstrip("/")
-
         return {"folder": display_folder, "routes": routes_payload, "folders": folders_payload}
 
     @app.get("/routes/{route_id}/schema")
@@ -1270,6 +1192,98 @@ def _coerce_sequence(value: object) -> list[str]:
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
         return [str(item) for item in value]
     return []
+
+
+def _build_folder_listing(
+    routes: Sequence[RouteDefinition],
+    stats: Mapping[str, Mapping[str, object]],
+    folder: str | None,
+) -> tuple[str, list[Mapping[str, object]], list[dict[str, object]]]:
+    prefix = folder or "/"
+    if not prefix.startswith("/"):
+        prefix = "/" + prefix
+    base_prefix = prefix.rstrip("/") or "/"
+    normalized = "/" if base_prefix == "/" else base_prefix + "/"
+
+    routes_payload: list[Mapping[str, object]] = []
+    folder_metrics: dict[str, dict[str, float | int]] = {}
+
+    for route in routes:
+        path = route.path
+        if base_prefix != "/":
+            if path == base_prefix:
+                relative = ""
+            elif not path.startswith(normalized):
+                continue
+            else:
+                relative = path[len(normalized):]
+        else:
+            if folder and not path.startswith(prefix):
+                continue
+            relative = path.lstrip("/")
+
+        metrics_raw = stats.get(route.id, {})
+        route_metrics = {
+            "hits": int(metrics_raw.get("hits", 0)),
+            "rows": int(metrics_raw.get("rows", 0)),
+            "avg_latency_ms": float(metrics_raw.get("avg_latency_ms", 0.0)),
+            "interactions": int(metrics_raw.get("interactions", 0)),
+        }
+
+        if relative and "/" in relative:
+            child = relative.split("/", 1)[0]
+            child_path = (normalized + child).rstrip("/")
+            agg = folder_metrics.setdefault(
+                child_path,
+                {"hits": 0, "rows": 0, "total_latency_ms": 0.0, "interactions": 0, "routes": 0},
+            )
+            agg["hits"] += route_metrics["hits"]
+            agg["rows"] += route_metrics["rows"]
+            agg["total_latency_ms"] += route_metrics["avg_latency_ms"] * max(1, route_metrics["hits"])
+            agg["interactions"] += route_metrics["interactions"]
+            agg["routes"] += 1
+            continue
+
+        routes_payload.append(
+            {
+                "id": route.id,
+                "path": route.path,
+                "title": route.title,
+                "description": route.description,
+                "metrics": route_metrics,
+            }
+        )
+
+    routes_payload.sort(
+        key=lambda item: (
+            -int(item["metrics"]["hits"]),
+            -int(item["metrics"]["interactions"]),
+            item["path"],
+        )
+    )
+
+    folders_payload: list[dict[str, object]] = []
+    for folder_path, agg in folder_metrics.items():
+        hits = int(agg["hits"])
+        total_latency = float(agg["total_latency_ms"])
+        avg_latency = total_latency / hits if hits else 0.0
+        folders_payload.append(
+            {
+                "path": folder_path or "/",
+                "hits": hits,
+                "rows": int(agg["rows"]),
+                "avg_latency_ms": round(avg_latency, 3),
+                "interactions": int(agg["interactions"]),
+                "route_count": int(agg["routes"]),
+            }
+        )
+    folders_payload.sort(key=lambda item: (-int(item["hits"]), item["path"]))
+
+    display_folder = normalized if normalized != "/" else "/"
+    if display_folder.endswith("/") and display_folder != "/":
+        display_folder = display_folder.rstrip("/")
+
+    return display_folder, routes_payload, folders_payload
 
 
 def _get_route(routes: Sequence[RouteDefinition], route_id: str) -> RouteDefinition:
