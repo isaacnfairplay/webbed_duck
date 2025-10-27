@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Simplified the `/routes` index by extracting folder aggregation into a helper,
+  paving the way for reuse in analytics surfaces and clarifying how metrics roll
+  up across nested folders.
+- Clarified the FastAPI/Uvicorn dependency guidance in the README and README
+  coverage test so packaging metadata and documentation stay aligned when
+  altering optional extras.
 - Extracted email adapter loading into a dedicated module with callable
   validation, unit tests, and README guidance so share workflows fail fast when
   misconfigured.

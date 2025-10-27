@@ -34,7 +34,9 @@
    - File watching relies on timestamp and size fingerprints of matching route files, so ensure your editor writes changes to disk (saving partial files can trigger reload attempts). Network or synced file systems that coalesce timestamp updates may require a longer `watch_interval`.
    - The `webbed-duck perf` helper expects compiled routes in the build directory, uses PyArrow tables to compute latency statistics, and accepts repeated `--param name=value` overrides for the target route.
 
-   > **FastAPI extras required:** Install `fastapi` and `uvicorn` (for example `pip install webbed-duck[server]`) when you plan to run `webbed-duck serve` or execute the CLI-driven integration tests. Without those optional dependencies the HTTP coverage will be skipped, lowering confidence in auth, overlays, and caching flows.
+> **FastAPI extras required:** Install `fastapi` and `uvicorn` when you plan to run `webbed-duck serve` or execute the CLI-driven integration tests. Without those optional dependencies the HTTP coverage will be skipped, lowering confidence in auth, overlays, and caching flows.
+
+The published wheel currently depends on `fastapi` and `uvicorn` directly; if you later introduce a dedicated `server` optional dependency group or slim vendor builds, keep those extras aligned with this guidance so HTTP coverage remains installable.
 
 > **Testing note:** The integration tests exercise the FastAPI stack via `fastapi.testclient`. If you install `webbed-duck` in a minimal environment without FastAPI (for example by vendoring only `webbed_duck/`), expect those tests to be skipped. Install the optional server dependencies (`pip install fastapi uvicorn`) when you want the suite to cover the HTTP APIs; skipping them reduces confidence in auth, overlays, and cache behaviour and should be treated as "partial coverage" when assessing deployment readiness.
 
