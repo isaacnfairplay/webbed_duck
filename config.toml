@@ -1,6 +1,5 @@
 [server]
 storage_root = "storage"
-theme = "system"
 host = "127.0.0.1"
 port = 8000
 source_dir = "routes_src"

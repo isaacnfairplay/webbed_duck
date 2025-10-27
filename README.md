@@ -132,7 +132,7 @@ Routes may set `default_format` in TOML to choose the response when `?format` is
 
 - Authentication modes are controlled via `config.toml`. The default mode is `none`. Enabling `auth.mode="pseudo"` activates the pseudo-session API (`/auth/pseudo/session`) and share endpoints.
 - Pseudo sessions enforce the `auth.allowed_domains` allow list and store only hashed session tokens/email addresses in `runtime/meta.sqlite3` for auditability. Optional bindings (`email.bind_share_to_user_agent`, `email.bind_share_to_ip_prefix`) ensure shares and sessions are tied to browser fingerprints when enabled.
-- Users with a pseudo-session can request `/routes/{id}/share` to email HTML/CSV/Parquet snapshots using the configured email adapter.
+- Users with a pseudo-session can request `/routes/{id}/share` to email HTML/CSV/Parquet snapshots using the configured email adapter. The adapter is responsible for picking envelope details such as the sender address.
 - Routes that define `[append]` metadata accept JSON payloads at `/routes/{id}/append` to persist rows into CSV logs stored under the configured storage root.
 
 ## How parameters work
@@ -332,7 +332,7 @@ This trio mirrors the canonical on-disk structure: metadata in TOML, SQL in its 
 
 - **Default behaviour:** `webbed-duck serve` compiles the configured source directory before launching so you always run with fresh artifacts.
 - **Configurable toggles:** Set `server.auto_compile = false` or pass `--no-auto-compile` to serve an existing `routes_build/` snapshot without touching the source tree. Enable `server.watch = true` (or `--watch`) to keep a background watcher running for instant reloads.
-- **Configuration surface:** `config.toml` still controls storage (`server.storage_root`), theming, analytics weights, auth mode, email adapter, and share behaviour alongside the new `source_dir` / `build_dir` settings.
+- **Configuration surface:** `config.toml` still controls storage (`server.storage_root`), analytics weights, auth mode, email adapter, and share behaviour alongside the new `source_dir` / `build_dir` settings.
 
 ## Formats and responses
 

@@ -191,6 +191,26 @@ def test_run_route_local(tmp_path: Path) -> None:
     assert table.column("greeting")[0].as_py() == "Hello, Duck!"
 
 
+def test_run_route_records_format(tmp_path: Path) -> None:
+    src_dir = tmp_path / "src"
+    build_dir = tmp_path / "build"
+    src_dir.mkdir()
+    _write_route(src_dir, ROUTE_TEMPLATE)
+    compile_routes(src_dir, build_dir)
+
+    records = run_route(
+        "hello",
+        params={"name": "Duck"},
+        build_dir=build_dir,
+        config=_make_config(tmp_path / "storage"),
+        format="records",
+    )
+    assert isinstance(records, list)
+    first = records[0]
+    assert first["greeting"] == "Hello, Duck!"
+    assert {"note", "created_at"}.issubset(first)
+
+
 def test_run_route_unknown_route(tmp_path: Path) -> None:
     src_dir = tmp_path / "src"
     build_dir = tmp_path / "build"
