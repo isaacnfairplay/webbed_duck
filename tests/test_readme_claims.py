@@ -26,6 +26,7 @@ from webbed_duck.plugins import assets as assets_plugins
 from webbed_duck.plugins import charts as charts_plugins
 from webbed_duck.server.app import create_app
 from webbed_duck.server.auth import resolve_auth_adapter
+from webbed_duck.server.email import load_email_sender
 from webbed_duck.server.execution import RouteExecutor
 
 try:
@@ -37,6 +38,9 @@ try:
     import tomllib  # Python 3.11+
 except ModuleNotFoundError:  # pragma: no cover - fallback for <3.11
     import tomli as tomllib  # type: ignore
+
+
+not_callable = "email-attribute"
 
 
 ROUTE_PRIMARY = """+++
@@ -1021,6 +1025,17 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
             and ctx.share_db_hashes[1] != ""
             and ctx.email_bind_to_user_agent is False
             and ctx.email_bind_to_ip_prefix is False,
+            s,
+        )),
+        (lambda s: s.startswith("- When configuring `email.adapter`"), lambda s: _ensure(
+            isinstance(
+                pytest.raises(
+                    TypeError,
+                    load_email_sender,
+                    "tests.test_readme_claims:not_callable",
+                ).value,
+                TypeError,
+            ),
             s,
         )),
         (lambda s: s.startswith("- When `auth.mode=\"external\"`"), lambda s: _ensure(
