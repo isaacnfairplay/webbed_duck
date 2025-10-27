@@ -30,6 +30,9 @@
    ```
    - `--watch` keeps the compiler running and reloads routes in-place when `.toml`, `.sql`, or legacy `.sql.md` files change.
    - Pass `--no-auto-compile` to serve pre-built `routes_build/` artifacts without touching the source tree.
+   - Watching performs filesystem polls once per second by default; disable it (or raise `server.watch_interval`) if you run on slower hardware where constant polling is undesirable.
+
+> **Testing note:** The integration tests exercise the FastAPI stack via `fastapi.testclient`. If you install `webbed-duck` in a minimal environment without FastAPI (for example by vendoring only `webbed_duck/`), expect those tests to be skipped.
 
 5. **Browse the routes.** Open `http://127.0.0.1:8000/hello` (or your route path) in a browser, or request alternate formats with `?format=csv`, `?format=parquet`, etc.
 
@@ -40,6 +43,7 @@
 - `webbed-duck serve` loads configuration from `config.toml` (defaults to host `127.0.0.1`, port `8000`, storage under `./storage`) and resolves `server.source_dir` / `server.build_dir`.
 - With `server.auto_compile = true` (the default) the CLI compiles every `<stem>.toml` + `<stem>.sql` pair in the configured source directory before starting Uvicorn. Legacy `*.sql.md` files are converted into sibling TOML/SQL/MD files the first time they are encountered.
 - Enabling watch mode (`server.watch = true` or the `--watch` flag) keeps a background poller running so route edits trigger re-compilation and live reloading without restarting the process.
+- Combine `server.watch = true` with a sensible `server.watch_interval` (defaults to `1.0` seconds) to balance responsiveness and CPU usage.
 - The server is a FastAPI application exposed via Uvicorn. No additional framework integration is necessary for development deployments.
 
 ### Route discovery and mapping

@@ -699,6 +699,12 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
             ctx.reload_capable, s
         )),
         (lambda s: s.startswith("- Pass `--no-auto-compile`"), lambda s: None),
+        (lambda s: s.startswith("- Watching performs filesystem polls once per second"), lambda s: _ensure(
+            ctx.reload_capable and Config().server.watch_interval == pytest.approx(1.0), s
+        )),
+        (lambda s: s.startswith("> **Testing note:** The integration tests exercise the FastAPI stack"), lambda s: _ensure(
+            TestClient is not None, s
+        )),
         (lambda s: s.startswith("1. **Install the package and dependencies.**"), lambda s: None),
         (lambda s: s.startswith("2. **Create your route source directory**"), lambda s: _ensure(
             ctx.repo_structure["routes_src"], s
@@ -717,6 +723,9 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         )),
         (lambda s: s.startswith("- Enabling watch mode"), lambda s: _ensure(
             ctx.reload_capable, s
+        )),
+        (lambda s: s.startswith("- Combine `server.watch = true`"), lambda s: _ensure(
+            ctx.reload_capable and Config().server.watch_interval == pytest.approx(1.0), s
         )),
         (lambda s: s.startswith("- The server is a FastAPI application"), lambda s: _ensure(
             "html" in ctx.html_text.lower(), s

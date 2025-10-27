@@ -92,31 +92,6 @@ def render_table_html(
     )
 
 
-def render_cards_html(
-    table: pa.Table,
-    route_metadata: Mapping[str, object] | None,
-    config: Config,
-    charts: Sequence[Mapping[str, str]] | None = None,
-    *,
-    params: Sequence[ParameterSpec] | None = None,
-    param_values: Mapping[str, object] | None = None,
-    postprocess: Mapping[str, object] | None = None,
-    format_hint: str | None = None,
-) -> str:
-    return render_cards_html_with_assets(
-        table,
-        route_metadata,
-        config,
-        charts=charts,
-        postprocess=postprocess,
-        assets=None,
-        route_id="",
-        params=params,
-        param_values=param_values,
-        format_hint=format_hint,
-    )
-
-
 def render_cards_html_with_assets(
     table: pa.Table,
     route_metadata: Mapping[str, object] | None,
@@ -599,7 +574,6 @@ def _json_friendly(value: object) -> object:
 
 
 __all__ = [
-    "render_cards_html",
     "render_cards_html_with_assets",
     "render_feed_html",
     "render_table_html",
