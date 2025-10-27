@@ -1,5 +1,15 @@
 # Branch-level Changelog
 
+## Incremental runner resilience (work branch)
+
+- Refactored `core.incremental.run_incremental` to accept a pluggable runner, reuse
+  a shared date-range helper, and skip already checkpointed days without manual
+  loops.
+- Added regression tests that prove checkpoint reuse, failure handling, and the
+  absence of partial checkpoint writes when a run raises an error.
+- Documented the helper in the README, including guidance on optional FastAPI
+  dependencies so test environments exercise the HTTP stack before release.
+
 ## CLI coverage hardening (work branch)
 
 - Add direct unit coverage for `webbed-duck compile`, `run-incremental`, and `serve`

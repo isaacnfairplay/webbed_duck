@@ -40,6 +40,8 @@ The published wheel currently depends on `fastapi` and `uvicorn` directly; if yo
 
 > **Testing note:** The integration tests exercise the FastAPI stack via `fastapi.testclient`. If you install `webbed-duck` in a minimal environment without FastAPI (for example by vendoring only `webbed_duck/`), expect those tests to be skipped. Install the optional server dependencies (`pip install fastapi uvicorn`) when you want the suite to cover the HTTP APIs; skipping them reduces confidence in auth, overlays, and cache behaviour and should be treated as "partial coverage" when assessing deployment readiness.
 
+> **Server optional dependencies:** The packaged wheel depends on `fastapi` and `uvicorn`. If you deliberately omit them (for example, when embedding the runtime into another ASGI host), remember that both the CLI and the regression suite will skip HTTP coverage. Always verify pseudo auth, share, and overlay flows inside an environment with the extras before promoting a build.
+
 5. **Browse the routes.** Open `http://127.0.0.1:8000/hello` (or your route path) in a browser, or request alternate formats with `?format=csv`, `?format=parquet`, etc.
 
 ## How it works today (v0.4)
@@ -74,6 +76,12 @@ The published wheel currently depends on `fastapi` and `uvicorn` directly; if yo
 - `returns` declares the default return style for internal callers: `relation` (Arrow table), `parquet` (materialized artifact), or `error_frame` (schema-compatible error payload).
 - Each `[[uses]]` block defines an upstream dependency with an `alias`, the downstream route to `call`, an execution `mode` (`relation` or `parquet_path`), and an `[uses.args]` table for pass-through, renamed, or literal parameters. The executor resolves these dependencies before your SQL runs and registers them under the provided alias.
 - When `mode = "parquet_path"`, the executor materializes the upstream route (using its cache settings) and exposes a DuckDB view built from the parquet paths, enabling composable, cache-aware joins without additional Python code.
+
+### Incremental catch-up jobs
+
+- `webbed_duck.core.incremental.run_incremental` iterates over a date range and records the last successful cursor value inside `storage_root/runtime/checkpoints.duckdb`. Subsequent runs only execute dates newer than the recorded checkpoint so you can schedule the helper daily without re-reading historical data.
+- When the underlying route raises an error the checkpoint is left unchanged, ensuring the same date is retried on the next invocation after you address the failure.
+- Pass a custom callable via the `runner` parameter when you need to wrap `run_route` (for example to inject observability) while keeping the checkpoint and pagination logic intact.
 
 ### Request lifecycle and paged caches
 
