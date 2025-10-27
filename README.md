@@ -75,16 +75,18 @@
 
 ```mermaid
 flowchart LR
-  A[Client request] --> B[FastAPI route handler]
+  %% Request lifecycle and paged caches
+
+  A[Client request] --> B[Route handler]
   B --> C[Run preprocessors]
   C --> D{Cache lookup}
-  D -->|Hit| E[Load Parquet page from storage_root/cache]
-  D -->|Miss| F[Stream DuckDB record batches]
-  F --> G[Write paged Parquet artifacts]
+  D -->|Hit| E[Load Parquet page<br/>from storage_root/cache]
+  D -->|Miss| F[Stream DuckDB<br/>record batches]
+  F --> G[Write paged<br/>Parquet artifacts]
   G --> E
-  E --> H[Apply overrides & column filters]
-  H --> I[Post-process (HTML/JSON/CSV/Arrow)]
-  I --> J[Response]
+  E --> H[Apply overrides<br/>and column filters]
+  H --> I[Post-process<br/>to HTML / JSON / CSV / Arrow]
+  I --> J[Send response]
 ```
 
 - Cache settings come from the `[cache]` table in each route's TOML metadata merged with the global `[cache]` section in `config.toml`.
