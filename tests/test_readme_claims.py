@@ -7,21 +7,26 @@ import io
 import json
 import re
 import sqlite3
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
+from types import ModuleType
 
 import pytest
+import duckdb
 
 from webbed_duck import cli as cli_module
 from webbed_duck.config import Config, load_config
 from webbed_duck.core.compiler import compile_route_file, compile_routes
 from webbed_duck.core.incremental import run_incremental
-from webbed_duck.core.routes import load_compiled_routes
+from webbed_duck.core.routes import ParameterSpec, RouteDefinition, load_compiled_routes
 from webbed_duck.plugins import assets as assets_plugins
 from webbed_duck.plugins import charts as charts_plugins
 from webbed_duck.server.app import create_app
+from webbed_duck.server.auth import resolve_auth_adapter
+from webbed_duck.server.execution import RouteExecutor
 
 try:
     from fastapi.testclient import TestClient
@@ -261,6 +266,14 @@ class ReadmeContext:
     invariant_superset_counts: list[int]
     invariant_combined_payload: dict
     invariant_shard_counts: list[int]
+    duckdb_binding_checks: dict[str, bool]
+    external_adapter_checks: dict[str, bool]
+
+
+def _inject_file_list_preprocessor(params, *, context, files):
+    updated = dict(params)
+    updated["files"] = list(files)
+    return updated
 
 
 def _install_email_adapter(records: list[tuple]) -> str:
@@ -487,6 +500,46 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
 
     parquet_artifacts = list((storage_root / "cache").rglob("*.parquet"))
 
+    duckdb_binding_checks = {"single": False, "multi": False, "preprocessed_multi": False}
+    if parquet_artifacts:
+        sample_path = parquet_artifacts[0]
+        with duckdb.connect() as con:
+            duckdb_binding_checks["single"] = (
+                con.execute("SELECT COUNT(*) FROM read_parquet(?::TEXT)", [str(sample_path)]).fetchone()[0]
+                >= 0
+            )
+            duckdb_binding_checks["multi"] = (
+                con.execute("SELECT COUNT(*) FROM read_parquet(?::TEXT[])", [[str(sample_path)]]).fetchone()[0]
+                >= 0
+            )
+        preprocessed_route = RouteDefinition(
+            id="doc_duckdb_preprocessor",
+            path="/doc_duckdb_preprocessor",
+            methods=["GET"],
+            raw_sql="SELECT COUNT(*) AS row_count FROM read_parquet($files::TEXT[])",
+            prepared_sql="SELECT COUNT(*) AS row_count FROM read_parquet(?::TEXT[])",
+            param_order=["files"],
+            params=(ParameterSpec(name="files", required=False, default=None),),
+            metadata={},
+            preprocess=(
+                {
+                    "callable": "tests.test_readme_claims:_inject_file_list_preprocessor",
+                    "files": [str(sample_path)],
+                },
+            ),
+            cache_mode="passthrough",
+        )
+        executor = RouteExecutor({preprocessed_route.id: preprocessed_route}, cache_store=None, config=config)
+        result = executor.execute_relation(
+            preprocessed_route,
+            params={},
+            offset=0,
+            limit=None,
+        )
+        duckdb_binding_checks["preprocessed_multi"] = (
+            result.table.to_pydict().get("row_count", [0])[0] >= 0
+        )
+
     share_db_path = storage_root / "runtime" / "meta.sqlite3"
     with sqlite3.connect(share_db_path) as conn:
         share_hash = conn.execute("SELECT token_hash FROM shares").fetchone()[0]
@@ -501,6 +554,51 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
         "runtime/meta.sqlite3": share_db_path.exists(),
         "runtime/checkpoints.duckdb": checkpoints_path.exists(),
     }
+
+    external_adapter_checks: dict[str, bool] = {}
+
+    failure_module = ModuleType("tests.readme_external_failure")
+
+    def _failure_factory(config: Config):  # pragma: no cover - intentional failure path
+        raise TypeError("boom")
+
+    failure_module.build_adapter = _failure_factory  # type: ignore[attr-defined]
+    sys.modules[failure_module.__name__] = failure_module
+
+    failure_config = Config()
+    failure_config.auth.mode = "external"
+    failure_config.auth.external_adapter = f"{failure_module.__name__}:build_adapter"
+    try:
+        resolve_auth_adapter("external", config=failure_config, session_store=None)
+    except TypeError as exc:
+        external_adapter_checks["type_error"] = "boom" in str(exc)
+    else:  # pragma: no cover - should not succeed
+        external_adapter_checks["type_error"] = False
+    finally:
+        sys.modules.pop(failure_module.__name__, None)
+
+    success_module = ModuleType("tests.readme_external_success_adapter")
+
+    class _ReadmeDummyAdapter:
+        def __init__(self, cfg: Config) -> None:
+            self.config = cfg
+
+        async def authenticate(self, request):  # pragma: no cover - simple stub
+            return None
+
+    def _success_factory(config: Config) -> _ReadmeDummyAdapter:
+        return _ReadmeDummyAdapter(config)
+
+    success_module.build_adapter = _success_factory  # type: ignore[attr-defined]
+    sys.modules[success_module.__name__] = success_module
+
+    success_config = Config()
+    success_config.auth.mode = "external"
+    success_config.auth.external_adapter = f"{success_module.__name__}:build_adapter"
+    adapter_instance = resolve_auth_adapter("external", config=success_config, session_store=None)
+    external_adapter_checks["returns_adapter"] = isinstance(adapter_instance, _ReadmeDummyAdapter)
+    external_adapter_checks["config_passthrough"] = getattr(adapter_instance, "config", None) is success_config
+    sys.modules.pop(success_module.__name__, None)
 
     repo_root = Path(__file__).resolve().parents[1]
     repo_structure = {
@@ -593,6 +691,8 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
         invariant_superset_counts=invariant_superset_counts,
         invariant_combined_payload=invariant_combined_payload,
         invariant_shard_counts=invariant_shard_counts,
+        duckdb_binding_checks=duckdb_binding_checks,
+        external_adapter_checks=external_adapter_checks,
     )
 
 
@@ -923,6 +1023,12 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
             and ctx.email_bind_to_ip_prefix is False,
             s,
         )),
+        (lambda s: s.startswith("- When `auth.mode=\"external\"`"), lambda s: _ensure(
+            ctx.external_adapter_checks.get("returns_adapter", False)
+            and ctx.external_adapter_checks.get("config_passthrough", False)
+            and ctx.external_adapter_checks.get("type_error", False),
+            s,
+        )),
         (lambda s: s.startswith("- Users with a pseudo-session"), lambda s: _ensure(
             ctx.share_payload["meta"]["rows_shared"] >= 1, s
         )),
@@ -942,6 +1048,27 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
                 for arg in use.args.values()
             ),
             s,
+        )),
+        (lambda s: s.startswith("DuckDB allows parameter binding for table functions"), lambda s: _ensure(
+            ctx.duckdb_binding_checks.get("single", False), s
+        )),
+        (lambda s: s.startswith("interpret them as SQL identifiers."), lambda s: _ensure(
+            ctx.duckdb_binding_checks.get("single", False), s
+        )),
+        (lambda s: s.startswith("To pass multiple artifacts"), lambda s: _ensure(
+            ctx.duckdb_binding_checks.get("multi", False), s
+        )),
+        (lambda s: s.startswith("When the list needs to be composed dynamically"), lambda s: _ensure(
+            ctx.duckdb_binding_checks.get("multi", False), s
+        )),
+        (lambda s: s.startswith("preprocessor that returns the file list"), lambda s: _ensure(
+            ctx.duckdb_binding_checks.get("multi", False), s
+        )),
+        (lambda s: s.startswith("This keeps cache keys deterministic"), lambda s: _ensure(
+            ctx.duckdb_binding_checks.get("multi", False), s
+        )),
+        (lambda s: s.startswith("Executors treat sequences returned by preprocessors"), lambda s: _ensure(
+            ctx.duckdb_binding_checks.get("preprocessed_multi", False), s
         )),
         (lambda s: s.startswith("- Constants baked into the route definition"), lambda s: _ensure(
             any(route.id == "readme_parent" and "'US01'" in route.raw_sql for route in ctx.compiled_routes),
