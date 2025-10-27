@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Hardened executor and append coverage: added failure-path tests for parameter
+  coercion, parquet dependencies with empty results, append misconfiguration
+  flows, and MetaStore schema upgrades; refactored DuckDB execution helpers to
+  share connection logic and removed the unused `render_cards_html` wrapper.
+- Documented watch interval performance considerations plus FastAPI testing
+  prerequisites in the README so contributors understand skipped integration
+  cases.
 - Added compile-time warnings for unknown TOML frontmatter keys so route authors
   catch typos before deployment.
 - Implemented paged Parquet caching with configurable TTLs and route-defined

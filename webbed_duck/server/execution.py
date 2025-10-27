@@ -182,10 +182,8 @@ class RouteExecutor:
         request: Request | None,
     ) -> Callable[[], tuple[pa.RecordBatchReader, Callable[[], None]]]:
         def factory() -> tuple[pa.RecordBatchReader, Callable[[], None]]:
-            con = duckdb.connect()
+            con, cursor = self._connect_and_execute(route, prepared, request=request)
             try:
-                self._register_dependencies(con, route, prepared.params, request=request)
-                cursor = con.execute(route.prepared_sql, prepared.ordered)
                 reader = cursor.fetch_record_batch()
             except Exception:
                 con.close()
@@ -202,15 +200,29 @@ class RouteExecutor:
         request: Request | None,
     ) -> Callable[[], pa.Table]:
         def runner() -> pa.Table:
-            con = duckdb.connect()
+            con, cursor = self._connect_and_execute(route, prepared, request=request)
             try:
-                self._register_dependencies(con, route, prepared.params, request=request)
-                cursor = con.execute(route.prepared_sql, prepared.ordered)
                 return cursor.fetch_arrow_table()
             finally:
                 con.close()
 
         return runner
+
+    def _connect_and_execute(
+        self,
+        route: RouteDefinition,
+        prepared: _PreparedRoute,
+        *,
+        request: Request | None,
+    ) -> tuple[duckdb.DuckDBPyConnection, duckdb.DuckDBPyRelation]:
+        con = duckdb.connect()
+        try:
+            self._register_dependencies(con, route, prepared.params, request=request)
+            cursor = con.execute(route.prepared_sql, prepared.ordered)
+            return con, cursor
+        except Exception:
+            con.close()
+            raise
 
     def _register_dependencies(
         self,

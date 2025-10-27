@@ -5,7 +5,7 @@ import pytest
 from webbed_duck.config import load_config
 from webbed_duck.core.compiler import compile_routes
 from webbed_duck.core.routes import load_compiled_routes
-from webbed_duck.server.execution import RouteExecutor
+from webbed_duck.server.execution import RouteExecutionError, RouteExecutor
 
 
 def _write_pair(base: Path, stem: str, toml: str, sql: str) -> None:
@@ -151,3 +151,39 @@ WHERE ($enabled = enabled_again)
     assert data["enabled_again"] == [True]
     assert data["ratio_again"][0] == pytest.approx(2.5)
     assert data["text_again"] == ["Alpha"]
+
+
+def test_executor_reports_conversion_failure(tmp_path: Path) -> None:
+    source = tmp_path / "src"
+    build = tmp_path / "build"
+    source.mkdir()
+
+    _write_pair(
+        source,
+        "needs_int",
+        """id = "needs_int"
+path = "/needs_int"
+cache_mode = "passthrough"
+
+[params.value]
+type = "int"
+required = true
+""".strip(),
+        "SELECT $value AS coerced",  # noqa: P103 - intentional placeholder
+    )
+
+    compile_routes(source, build)
+    routes = load_compiled_routes(build)
+    route = next(item for item in routes if item.id == "needs_int")
+
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+
+    executor = RouteExecutor({item.id: item for item in routes}, cache_store=None, config=config)
+
+    with pytest.raises(RouteExecutionError) as excinfo:
+        executor.execute_relation(route, params={"value": "not-an-int"}, offset=0, limit=None)
+
+    message = str(excinfo.value)
+    assert "value" in message
+    assert "Unable to convert" in message
