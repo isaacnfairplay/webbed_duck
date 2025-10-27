@@ -4,6 +4,7 @@ from __future__ import annotations
 import datetime as dt
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable, Iterable
 
 import duckdb
 
@@ -27,6 +28,7 @@ def run_incremental(
     end: dt.date,
     config: Config | None = None,
     build_dir: str | Path = "routes_build",
+    runner: Callable[..., object] = run_route,
 ) -> list[IncrementalResult]:
     """Run ``route_id`` for each day in ``[start, end]`` inclusive."""
 
@@ -36,33 +38,47 @@ def run_incremental(
     try:
         last_value = _read_checkpoint(conn, route_id, cursor_param)
         results: list[IncrementalResult] = []
-        current = start
-        while current <= end:
+        for current in _date_range(start, end):
             iso_value = current.isoformat()
             if last_value and iso_value <= last_value:
-                current += dt.timedelta(days=1)
                 continue
-            table = run_route(
+            table = runner(
                 route_id,
                 params={cursor_param: iso_value},
                 build_dir=build_dir,
                 config=config,
                 format="arrow",
             )
+            rows = _table_row_count(table)
             results.append(
                 IncrementalResult(
                     route_id=route_id,
                     cursor_param=cursor_param,
                     value=iso_value,
-                    rows_returned=table.num_rows,
+                    rows_returned=rows,
                 )
             )
             _write_checkpoint(conn, route_id, cursor_param, iso_value)
             last_value = iso_value
-            current += dt.timedelta(days=1)
     finally:
         conn.close()
     return results
+
+
+def _date_range(start: dt.date, end: dt.date) -> Iterable[dt.date]:
+    current = start
+    while current <= end:
+        yield current
+        current += dt.timedelta(days=1)
+
+
+def _table_row_count(table: object) -> int:
+    rows = getattr(table, "num_rows", None)
+    if rows is not None:
+        return int(rows)
+    if hasattr(table, "__len__"):
+        return int(len(table))  # type: ignore[arg-type]
+    return 0
 
 
 def _open_checkpoint_db(storage_root: Path) -> duckdb.DuckDBPyConnection:

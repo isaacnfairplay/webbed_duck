@@ -248,6 +248,10 @@ class ReadmeContext:
     local_resolve_payload: dict
     incremental_rows: list
     checkpoints_exists: bool
+    incremental_checkpoint_value: str | None
+    incremental_failure_preserves_checkpoint: bool
+    incremental_custom_runner_rows: int
+    incremental_custom_runner_checkpoint: str | None
     storage_root_layout: dict[str, bool]
     repo_structure: dict[str, bool]
     reload_capable: bool
@@ -501,6 +505,64 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
             build_dir=build_dir,
         )
     )
+    if incremental_rows:
+        with duckdb.connect(checkpoints_path) as conn:
+            row = conn.execute(
+                "SELECT cursor_value FROM checkpoints WHERE route_id = ? AND cursor_param = ?",
+                ("by_date", "day"),
+            ).fetchone()
+        checkpoint_value = row[0] if row else None
+        last_day = datetime.date.fromisoformat(incremental_rows[-1].value)
+        next_day = last_day + datetime.timedelta(days=1)
+
+        def _failing_runner(route_id, *, params, **kwargs):  # type: ignore[no-untyped-def]
+            raise ValueError("boom")
+
+        try:
+            run_incremental(
+                "by_date",
+                cursor_param="day",
+                start=next_day,
+                end=next_day,
+                config=config,
+                build_dir=build_dir,
+                runner=_failing_runner,
+            )
+        except ValueError:
+            pass
+
+        with duckdb.connect(checkpoints_path) as conn:
+            failure_row = conn.execute(
+                "SELECT cursor_value FROM checkpoints WHERE route_id = ? AND cursor_param = ?",
+                ("by_date", "day"),
+            ).fetchone()
+        failure_preserves_checkpoint = (failure_row[0] if failure_row else None) == checkpoint_value
+
+        class _DummyTable:
+            def __init__(self, rows: int) -> None:
+                self.num_rows = rows
+
+        custom_results = run_incremental(
+            "by_date",
+            cursor_param="day",
+            start=next_day,
+            end=next_day,
+            config=config,
+            build_dir=build_dir,
+            runner=lambda *args, **kwargs: _DummyTable(5),  # type: ignore[arg-type]
+        )
+        custom_runner_rows = custom_results[0].rows_returned if custom_results else 0
+        with duckdb.connect(checkpoints_path) as conn:
+            custom_row = conn.execute(
+                "SELECT cursor_value FROM checkpoints WHERE route_id = ? AND cursor_param = ?",
+                ("by_date", "day"),
+            ).fetchone()
+        custom_runner_checkpoint = custom_row[0] if custom_row else None
+    else:
+        checkpoint_value = None
+        failure_preserves_checkpoint = False
+        custom_runner_rows = 0
+        custom_runner_checkpoint = None
 
     parquet_artifacts = list((storage_root / "cache").rglob("*.parquet"))
 
@@ -673,6 +735,10 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
         local_resolve_payload=local_resolve.json(),
         incremental_rows=incremental_rows,
         checkpoints_exists=checkpoints_path.exists(),
+        incremental_checkpoint_value=checkpoint_value,
+        incremental_failure_preserves_checkpoint=failure_preserves_checkpoint,
+        incremental_custom_runner_rows=custom_runner_rows,
+        incremental_custom_runner_checkpoint=custom_runner_checkpoint,
         storage_root_layout=storage_root_layout,
         repo_structure=repo_structure,
         reload_capable=reload_capable,
@@ -776,6 +842,10 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
                 _dependency_names(ctx.dependencies)
                 | _dependency_names(ctx.optional_dependencies.get("server"))
             ),
+            s,
+        )),
+        (lambda s: s.startswith("> **Server optional dependencies:**"), lambda s: _ensure(
+            {"fastapi", "uvicorn"}.issubset(_dependency_names(ctx.dependencies)),
             s,
         )),
         (lambda s: s.startswith("The published wheel currently depends on `fastapi`"), lambda s: _ensure(
@@ -1188,6 +1258,20 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         )),
         (lambda s: s.startswith("* **Incremental execution**"), lambda s: _ensure(
             len(ctx.incremental_rows) >= 1 and ctx.checkpoints_exists, s
+        )),
+        (lambda s: s.startswith("- `webbed_duck.core.incremental.run_incremental`"), lambda s: _ensure(
+            bool(ctx.incremental_rows)
+            and ctx.incremental_checkpoint_value == ctx.incremental_rows[-1].value,
+            s,
+        )),
+        (lambda s: s.startswith("- When the underlying route raises an error"), lambda s: _ensure(
+            ctx.incremental_failure_preserves_checkpoint,
+            s,
+        )),
+        (lambda s: s.startswith("- Pass a custom callable via the `runner` parameter"), lambda s: _ensure(
+            ctx.incremental_custom_runner_rows > 0
+            and ctx.incremental_custom_runner_checkpoint is not None,
+            s,
         )),
         (lambda s: s.startswith("* **Extensible plugins**"), lambda s: _ensure(
             ctx.assets_registry_size >= 1 and ctx.charts_registry_size >= 0, s
