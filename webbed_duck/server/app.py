@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-import importlib
 import io
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Callable, Iterable, Mapping, MutableMapping, Sequence
+from typing import Iterable, Mapping, MutableMapping, Sequence
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import duckdb
@@ -19,10 +18,11 @@ from ..config import Config
 from ..core.routes import RouteDefinition
 from ..plugins.charts import render_route_charts
 from .analytics import AnalyticsStore, ExecutionMetrics
-from .cache import CacheStore
-from .execution import RouteExecutionError, RouteExecutor
-from .csv import append_record
 from .auth import resolve_auth_adapter
+from .cache import CacheStore
+from .csv import append_record
+from .email import EmailSender, load_email_sender
+from .execution import RouteExecutionError, RouteExecutor
 from .meta import MetaStore, _utcnow
 from .overlay import (
     OverlayStore,
@@ -38,8 +38,6 @@ from .postprocess import (
 from .preprocess import run_preprocessors
 from .session import SESSION_COOKIE_NAME, SessionStore
 from .share import CreatedShare, ShareStore
-
-EmailSender = Callable[[Sequence[str], str, str, str | None, Sequence[tuple[str, bytes]] | None], None]
 
 
 @dataclass(slots=True)
@@ -92,7 +90,7 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
     app.state.meta = MetaStore(config.server.storage_root)
     app.state.session_store = SessionStore(app.state.meta, config.auth)
     app.state.share_store = ShareStore(app.state.meta, config)
-    app.state.email_sender = _load_email_sender(config.email.adapter)
+    app.state.email_sender = load_email_sender(config.email.adapter)
     app.state.auth_adapter = resolve_auth_adapter(
         config.auth.mode,
         config=config,
@@ -1148,19 +1146,6 @@ def _render_share_email(
     if has_attachments:
         text += " Attachments included."
     return html, text
-
-
-def _load_email_sender(path: str | None) -> EmailSender | None:
-    if not path:
-        return None
-    module_name, _, attr = path.partition(":")
-    if not attr:
-        module_name, attr = path.rsplit(".", 1)
-    module = importlib.import_module(module_name)
-    sender = getattr(module, attr)
-    if not callable(sender):
-        raise TypeError("Email adapter must be callable")
-    return sender
 
 
 def _collect_params(route: RouteDefinition, request: Request) -> Mapping[str, object]:

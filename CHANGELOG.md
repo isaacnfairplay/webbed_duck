@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Extracted email adapter loading into a dedicated module with callable
+  validation, unit tests, and README guidance so share workflows fail fast when
+  misconfigured.
 - Hardened CLI ergonomics by extracting a reusable source fingerprint helper and
   adding unit tests around CLI parameter parsing, date validation, and watcher
   change detection.

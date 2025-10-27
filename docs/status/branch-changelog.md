@@ -1,5 +1,14 @@
 # Branch-level Changelog
 
+## Email adapter validation (work branch)
+
+- Extracted email adapter loading into `webbed_duck.server.email.load_email_sender`
+  so FastAPI setup and tests share validation logic.
+- Added unit tests for colon-separated and dotted adapter paths plus the
+  non-callable guard to catch misconfiguration before shares attempt delivery.
+- Documented the callable requirement for `config.email.adapter` in the README
+  to steer contributors away from referencing module-level constants.
+
 ## Auth adapter robustness (work branch)
 
 - Harden external auth adapter loading by inspecting adapter factory signatures
