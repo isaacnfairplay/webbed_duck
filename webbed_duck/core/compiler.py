@@ -10,11 +10,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Sequence
 
-from .routes import ParameterSpec, ParameterType, RouteDefinition, RouteDirective
+from .routes import (
+    ParameterSpec,
+    ParameterType,
+    RouteDefinition,
+    RouteDirective,
+    RouteUse,
+)
 
 FRONTMATTER_DELIMITER = "+++"
 SQL_BLOCK_PATTERN = re.compile(r"```sql\s*(?P<sql>.*?)```", re.DOTALL | re.IGNORECASE)
-PLACEHOLDER_PATTERN = re.compile(r"\{\{\s*(?P<name>[a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}")
+PLACEHOLDER_PATTERN = re.compile(
+    r"\{\{\s*(?P<brace>[a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}|\$(?P<dollar>[a-zA-Z_][a-zA-Z0-9_]*)"
+)
 DIRECTIVE_PATTERN = re.compile(r"<!--\s*@(?P<name>[a-zA-Z0-9_.:-]+)(?P<body>.*?)-->", re.DOTALL)
 
 _KNOWN_FRONTMATTER_KEYS = {
@@ -22,6 +30,8 @@ _KNOWN_FRONTMATTER_KEYS = {
     "assets",
     "cache",
     "charts",
+    "cache-mode",
+    "cache_mode",
     "default-format",
     "default_format",
     "description",
@@ -36,6 +46,7 @@ _KNOWN_FRONTMATTER_KEYS = {
     "path",
     "postprocess",
     "preprocess",
+    "returns",
     "share",
     "table",
     "title",
@@ -43,6 +54,7 @@ _KNOWN_FRONTMATTER_KEYS = {
     "overrides",
     "allowed_formats",
     "allowed-formats",
+    "uses",
 }
 
 
@@ -69,10 +81,20 @@ class _RouteSections:
     charts: list[Mapping[str, object]]
     assets: Mapping[str, object] | None
     cache: Mapping[str, object] | None
+    cache_mode: str
+    returns: str
+    uses: Sequence[RouteUse]
+
+
+@dataclass(slots=True)
+class _RouteSource:
+    toml_path: Path
+    sql_path: Path
+    doc_path: Path | None
 
 
 def compile_routes(source_dir: str | Path, build_dir: str | Path) -> List[RouteDefinition]:
-    """Compile all ``*.sql.md`` files from ``source_dir`` into ``build_dir``."""
+    """Compile all route source files from ``source_dir`` into ``build_dir``."""
 
     src = Path(source_dir)
     dest = Path(build_dir)
@@ -80,11 +102,14 @@ def compile_routes(source_dir: str | Path, build_dir: str | Path) -> List[RouteD
         raise FileNotFoundError(f"Route source directory not found: {src}")
     dest.mkdir(parents=True, exist_ok=True)
 
+    _import_legacy_markdown_routes(src)
+
     compiled: List[RouteDefinition] = []
-    for path in sorted(src.rglob("*.sql.md")):
-        definition = compile_route_file(path)
+    for source in _iter_route_sources(src):
+        text = _compose_route_text(source)
+        definition = compile_route_text(text, source_path=source.toml_path)
         compiled.append(definition)
-        _write_route_module(definition, path, src, dest)
+        _write_route_module(definition, source.toml_path, src, dest)
     return compiled
 
 
@@ -92,9 +117,19 @@ def compile_route_file(path: str | Path) -> RouteDefinition:
     """Compile a single Markdown route file into a :class:`RouteDefinition`."""
 
     text = Path(path).read_text(encoding="utf-8")
+    return compile_route_text(text, source_path=Path(path))
+
+
+def compile_route_text(text: str, *, source_path: Path) -> RouteDefinition:
+    """Compile ``text`` into a :class:`RouteDefinition`."""
+
     frontmatter, body = _split_frontmatter(text)
-    metadata_raw = _parse_frontmatter(frontmatter)
-    _warn_unexpected_frontmatter(metadata_raw, path)
+    metadata_raw = dict(_parse_frontmatter(frontmatter))
+    if "id" not in metadata_raw:
+        metadata_raw["id"] = _derive_route_id(source_path)
+    if "path" not in metadata_raw:
+        metadata_raw["path"] = f"/{metadata_raw['id']}"
+    _warn_unexpected_frontmatter(metadata_raw, source_path)
     directives = _extract_directives(body)
     metadata = _extract_metadata(metadata_raw)
     sections = _interpret_sections(metadata_raw, directives, metadata)
@@ -136,6 +171,9 @@ def compile_route_file(path: str | Path) -> RouteDefinition:
         postprocess=sections.postprocess,
         charts=sections.charts,
         assets=sections.assets,
+        cache_mode=sections.cache_mode,
+        returns=sections.returns,
+        uses=sections.uses,
     )
 
 
@@ -186,13 +224,28 @@ def _parse_params(raw: Mapping[str, object]) -> List[ParameterSpec]:
     params: List[ParameterSpec] = []
     for name, value in raw.items():
         if not isinstance(value, Mapping):
+            if isinstance(value, str):
+                params.append(
+                    ParameterSpec(
+                        name=name,
+                        type=ParameterType.STRING,
+                        required=False,
+                        default=None,
+                        description=None,
+                        extra={"duckdb_type": value},
+                    )
+                )
+                continue
             raise RouteCompilationError(f"Parameter '{name}' must be a table of settings")
         extras = {k: v for k, v in value.items()}
         type_value = extras.pop("type", "str")
         required_value = extras.pop("required", False)
         default_value = extras.pop("default", None)
         description_value = extras.pop("description", None)
+        duckdb_type = extras.get("duckdb_type")
         param_type = ParameterType.from_string(str(type_value))
+        if duckdb_type is not None:
+            extras.setdefault("duckdb_type", duckdb_type)
         params.append(
             ParameterSpec(
                 name=name,
@@ -211,7 +264,7 @@ def _prepare_sql(sql: str, params: Sequence[ParameterSpec]) -> tuple[List[str], 
     order: List[str] = []
 
     def replace(match: re.Match[str]) -> str:
-        name = match.group("name")
+        name = match.group("brace") or match.group("dollar")
         if name not in param_names:
             raise RouteCompilationError(f"Parameter '{{{name}}}' used in SQL but not declared in frontmatter")
         order.append(name)
@@ -301,6 +354,11 @@ def _interpret_sections(
     charts = _build_charts(metadata, directives)
     assets = _build_assets(metadata, directives)
     cache_meta = _build_cache(metadata, directives)
+    cache_mode_raw = metadata_raw.get("cache_mode") or metadata_raw.get("cache-mode")
+    cache_mode = str(cache_mode_raw).lower() if cache_mode_raw else "materialize"
+    returns_raw = metadata_raw.get("returns")
+    returns = str(returns_raw).lower() if returns_raw else "relation"
+    uses = _build_uses(metadata_raw.get("uses"))
 
     return _RouteSections(
         route_id=route_id,
@@ -314,6 +372,9 @@ def _interpret_sections(
         charts=charts,
         assets=assets,
         cache=cache_meta,
+        cache_mode=cache_mode,
+        returns=returns,
+        uses=uses,
     )
 
 
@@ -377,6 +438,8 @@ def _normalize_params(raw: object) -> dict[str, dict[str, object]]:
         for name, settings in raw.items():
             if isinstance(settings, Mapping):
                 params[str(name)] = {str(k): v for k, v in settings.items()}
+            else:
+                params[str(name)] = {"duckdb_type": settings}
     return params
 
 
@@ -387,7 +450,8 @@ def _merge_param_payload(target: MutableMapping[str, dict[str, object]], payload
             if isinstance(value, Mapping):
                 bucket.update({str(k): v for k, v in value.items()})
             else:
-                bucket["default"] = value
+                key = "duckdb_type" if isinstance(value, str) else "default"
+                bucket[key] = value
     elif isinstance(payload, Sequence) and not isinstance(payload, (str, bytes)):
         for item in payload:
             _merge_param_payload(target, item)
@@ -500,6 +564,31 @@ def _build_assets(
     return assets or None
 
 
+def _build_uses(data: object) -> list[RouteUse]:
+    if isinstance(data, Mapping):
+        entries: Sequence[Mapping[str, object]] = [dict(data)]
+    elif isinstance(data, Sequence) and not isinstance(data, (str, bytes)):
+        entries = [dict(item) for item in data if isinstance(item, Mapping)]
+    else:
+        return []
+
+    uses: list[RouteUse] = []
+    for entry in entries:
+        alias = entry.get("alias")
+        call = entry.get("call")
+        if alias is None or call is None:
+            raise RouteCompilationError("Each [[uses]] entry must define 'alias' and 'call'")
+        mode_raw = entry.get("mode", "relation")
+        mode = str(mode_raw).lower()
+        args_raw = entry.get("args")
+        if isinstance(args_raw, Mapping):
+            args = {str(k): v for k, v in args_raw.items()}
+        else:
+            args = {}
+        uses.append(RouteUse(alias=str(alias), call=str(call), mode=mode, args=args))
+    return uses
+
+
 def _build_cache(
     metadata: Mapping[str, Any], directives: Sequence[RouteDirective]
 ) -> Mapping[str, object] | None:
@@ -555,10 +644,103 @@ def _normalize_order_by(raw: object) -> list[str]:
     raise RouteCompilationError("cache.order_by must be a string or list of column names")
 
 
+def _import_legacy_markdown_routes(src_root: Path) -> None:
+    for legacy in sorted(src_root.rglob("*.sql.md")):
+        stem = Path(str(legacy)[: -len(".sql.md")])
+        toml_path = stem.with_suffix(".toml")
+        sql_path = stem.with_suffix(".sql")
+        if toml_path.exists() or sql_path.exists():
+            continue
+        text = legacy.read_text(encoding="utf-8")
+        frontmatter, body = _split_frontmatter(text)
+        sql = _extract_sql(body)
+        toml_path.write_text(frontmatter.strip() + "\n", encoding="utf-8")
+        sql_path.write_text(sql.strip() + "\n", encoding="utf-8")
+        doc = _remove_sql_block(body)
+        if doc.strip():
+            doc_path = stem.with_suffix(".md")
+            doc_path.write_text(doc.strip() + "\n", encoding="utf-8")
+
+
+def _iter_route_sources(root: Path) -> list[_RouteSource]:
+    sources: list[_RouteSource] = []
+    seen: set[Path] = set()
+    for toml_path in sorted(root.rglob("*.toml")):
+        if not toml_path.is_file():
+            continue
+        sql_path = toml_path.with_suffix(".sql")
+        if not sql_path.exists():
+            continue
+        doc_path = toml_path.with_suffix(".md")
+        if not doc_path.exists():
+            doc_path = None
+        sources.append(_RouteSource(toml_path=toml_path, sql_path=sql_path, doc_path=doc_path))
+        seen.add(sql_path.resolve())
+
+    unmatched: list[Path] = []
+    for sql_path in sorted(root.rglob("*.sql")):
+        if not sql_path.is_file():
+            continue
+        if sql_path.resolve() in seen:
+            continue
+        toml_candidate = sql_path.with_suffix(".toml")
+        if toml_candidate.exists():
+            continue
+        try:
+            relative = sql_path.relative_to(root)
+        except ValueError:
+            continue
+        unmatched.append(relative)
+    if unmatched:
+        missing = ", ".join(str(path) for path in unmatched)
+        raise RouteCompilationError(f"Found SQL files without matching TOML: {missing}")
+
+    sources.sort(key=lambda item: str(item.toml_path.relative_to(root)))
+    return sources
+
+
+def _compose_route_text(source: _RouteSource) -> str:
+    toml_text = source.toml_path.read_text(encoding="utf-8").strip()
+    sql_text = source.sql_path.read_text(encoding="utf-8").strip()
+    parts: list[str] = []
+    if source.doc_path is not None:
+        doc_text = source.doc_path.read_text(encoding="utf-8").strip()
+        if doc_text:
+            parts.append(doc_text)
+    parts.append(f"```sql\n{sql_text}\n```")
+    body = "\n\n".join(parts)
+    return f"{FRONTMATTER_DELIMITER}\n{toml_text}\n{FRONTMATTER_DELIMITER}\n\n{body}\n"
+
+
+def _remove_sql_block(body: str) -> str:
+    return SQL_BLOCK_PATTERN.sub("", body, count=1)
+
+
+def _derive_route_id(path: Path) -> str:
+    name = path.name
+    if name.endswith(".sql.md"):
+        name = name[: -len(".sql.md")]
+    elif path.suffix:
+        name = path.stem
+    name = re.sub(r"[^a-zA-Z0-9_]+", "_", name)
+    name = name.strip("_")
+    return name or "route"
+
+
+def _target_module_path(relative: Path) -> Path:
+    suffixes = relative.suffixes
+    if suffixes[-2:] == [".sql", ".md"]:
+        base = relative.with_suffix("")
+        base = base.with_suffix("")
+        return base.with_suffix(".py")
+    if relative.suffix == ".toml":
+        return relative.with_suffix(".py")
+    raise RouteCompilationError(f"Unsupported route source path: {relative}")
+
+
 def _write_route_module(definition: RouteDefinition, source_path: Path, src_root: Path, build_root: Path) -> None:
     relative = source_path.relative_to(src_root)
-    target_rel = Path(str(relative)[: -len(".sql.md")])
-    target_path = build_root / target_rel.with_suffix(".py")
+    target_path = build_root / _target_module_path(relative)
     target_path.parent.mkdir(parents=True, exist_ok=True)
 
     route_dict: Dict[str, object] = {
@@ -593,6 +775,17 @@ def _write_route_module(definition: RouteDefinition, source_path: Path, src_root
         "postprocess": {key: dict(value) for key, value in (definition.postprocess or {}).items()},
         "charts": [dict(item) for item in definition.charts],
         "assets": dict(definition.assets) if definition.assets else None,
+        "cache_mode": definition.cache_mode,
+        "returns": definition.returns,
+        "uses": [
+            {
+                "alias": use.alias,
+                "call": use.call,
+                "mode": use.mode,
+                **({"args": dict(use.args)} if use.args else {}),
+            }
+            for use in definition.uses
+        ],
     }
 
     module_content = "# Generated by webbed_duck.core.compiler\nROUTE = " + pprint.pformat(route_dict, width=88) + "\n"
@@ -601,6 +794,7 @@ def _write_route_module(definition: RouteDefinition, source_path: Path, src_root
 
 __all__ = [
     "compile_route_file",
+    "compile_route_text",
     "compile_routes",
     "RouteCompilationError",
 ]

@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Mapping, MutableMapping, Sequence
+from typing import Mapping, Sequence
 
 from ..config import Config, load_config
-from ..server.cache import CacheStore, fetch_cached_table
+from ..server.cache import CacheStore
+from ..server.execution import RouteExecutionError, RouteExecutor
 from ..server.overlay import OverlayStore, apply_overrides
 from ..server.postprocess import table_to_records
-from ..server.preprocess import run_preprocessors
 from .routes import RouteDefinition, load_compiled_routes
 
 
@@ -33,19 +33,12 @@ def run_route(
     if config is None:
         config = load_config(None)
 
-    values, ordered = _prepare_parameters(route, params)
-    processed = run_preprocessors(route.preprocess, values, route=route, request=None)
-    bound = _order_from_processed(route, processed)
     cache_store = CacheStore(config.server.storage_root)
-    cache_result = fetch_cached_table(
-        route,
-        processed,
-        bound,
-        offset=0,
-        limit=None,
-        store=cache_store,
-        config=config.cache,
-    )
+    executor = RouteExecutor({item.id: item for item in routes}, cache_store=cache_store, config=config)
+    try:
+        cache_result = executor.execute_relation(route, params, offset=0, limit=None)
+    except RouteExecutionError as exc:
+        raise ValueError(str(exc)) from exc
     table = cache_result.table
     overlays = OverlayStore(config.server.storage_root)
     table = apply_overrides(table, route.metadata, overlays.list_for_route(route.id))
@@ -56,51 +49,6 @@ def run_route(
     if fmt == "records":
         return table_to_records(table)
     raise ValueError(f"Unsupported format '{format}'")
-
-
-def _prepare_parameters(route: RouteDefinition, provided: Mapping[str, object]) -> tuple[dict[str, object | None], list[object | None]]:
-    values: MutableMapping[str, object | None] = {}
-    for spec in route.params:
-        if spec.name in provided:
-            raw = provided[spec.name]
-            if raw is None:
-                values[spec.name] = None
-            elif isinstance(raw, str):
-                values[spec.name] = spec.convert(raw)
-            else:
-                values[spec.name] = raw
-        else:
-            if spec.default is not None:
-                values[spec.name] = spec.default
-            elif spec.required:
-                raise ValueError(f"Missing required parameter '{spec.name}'")
-            else:
-                values[spec.name] = None
-    ordered = []
-    for name in route.param_order:
-        if name not in values:
-            raise ValueError(f"Parameter '{name}' was referenced in SQL but not provided")
-        ordered.append(values[name])
-    return dict(values), ordered
-
-
-def _order_from_processed(route: RouteDefinition, processed: Mapping[str, object | None]) -> list[object | None]:
-    ordered: list[object | None] = []
-    for name in route.param_order:
-        if name in processed:
-            ordered.append(processed[name])
-            continue
-        spec = route.find_param(name)
-        if spec is None:
-            ordered.append(None)
-            continue
-        if spec.default is not None:
-            ordered.append(spec.default)
-        elif spec.required:
-            raise ValueError(f"Missing required parameter '{name}' after preprocessing")
-        else:
-            ordered.append(None)
-    return ordered
 
 
 def _find_route(routes: Sequence[RouteDefinition], route_id: str) -> RouteDefinition:

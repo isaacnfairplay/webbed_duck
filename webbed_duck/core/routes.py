@@ -57,6 +57,14 @@ class RouteDirective:
 
 
 @dataclass(slots=True)
+class RouteUse:
+    alias: str
+    call: str
+    mode: str = "relation"
+    args: Mapping[str, Any] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class RouteDefinition:
     id: str
     path: str
@@ -76,6 +84,9 @@ class RouteDefinition:
     postprocess: Mapping[str, Mapping[str, Any]] = field(default_factory=dict)
     charts: Sequence[Mapping[str, Any]] = ()
     assets: Mapping[str, Any] | None = None
+    cache_mode: str = "materialize"
+    returns: str = "relation"
+    uses: Sequence[RouteUse] = ()
 
     def find_param(self, name: str) -> ParameterSpec | None:
         for param in self.params:
@@ -160,6 +171,23 @@ def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
         value = item.get("value")
         directives.append(RouteDirective(name=name, args=args, value=str(value) if value is not None else None))
 
+    uses_data = route.get("uses", [])
+    uses: list[RouteUse] = []
+    for item in uses_data:
+        if not isinstance(item, Mapping):
+            continue
+        alias = item.get("alias")
+        call = item.get("call")
+        if not alias or not call:
+            continue
+        mode = str(item.get("mode", "relation")).lower()
+        args_map = item.get("args")
+        if isinstance(args_map, Mapping):
+            args = {str(k): v for k, v in args_map.items()}
+        else:
+            args = {}
+        uses.append(RouteUse(alias=str(alias), call=str(call), mode=mode, args=args))
+
     return RouteDefinition(
         id=str(route["id"]),
         path=str(route["path"]),
@@ -179,6 +207,9 @@ def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
         postprocess=postprocess,
         charts=[dict(item) for item in route.get("charts", []) if isinstance(item, Mapping)],
         assets=assets,
+        cache_mode=str(route.get("cache_mode", "materialize")).lower(),
+        returns=str(route.get("returns", "relation")).lower(),
+        uses=uses,
     )
 
 
@@ -187,5 +218,6 @@ __all__ = [
     "ParameterType",
     "RouteDefinition",
     "RouteDirective",
+    "RouteUse",
     "load_compiled_routes",
 ]

@@ -233,12 +233,16 @@ def _snapshot_source(source_dir: Path) -> dict[str, tuple[float, int]]:
     snapshot: dict[str, tuple[float, int]] = {}
     if not source_dir.exists():
         return snapshot
-    for path in sorted(source_dir.rglob("*.sql.md")):
-        try:
-            stat = path.stat()
-        except FileNotFoundError:  # pragma: no cover - filesystem race
-            continue
-        snapshot[str(path.relative_to(source_dir))] = (stat.st_mtime, stat.st_size)
+    patterns = ("*.toml", "*.sql", "*.sql.md")
+    for pattern in patterns:
+        for path in sorted(source_dir.rglob(pattern)):
+            if not path.is_file():
+                continue
+            try:
+                stat = path.stat()
+            except FileNotFoundError:  # pragma: no cover - filesystem race
+                continue
+            snapshot[str(path.relative_to(source_dir))] = (stat.st_mtime, stat.st_size)
     return snapshot
 
 

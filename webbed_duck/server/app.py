@@ -19,7 +19,8 @@ from ..config import Config
 from ..core.routes import RouteDefinition
 from ..plugins.charts import render_route_charts
 from .analytics import AnalyticsStore
-from .cache import CacheStore, fetch_cached_table
+from .cache import CacheStore
+from .execution import RouteExecutionError, RouteExecutor
 from .csv import append_record
 from .auth import resolve_auth_adapter
 from .meta import MetaStore, _utcnow
@@ -86,6 +87,7 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
         enabled=config.analytics.enabled,
     )
     app.state.routes = list(routes)
+    app.state.route_index = {route.id: route for route in app.state.routes}
     app.state.overlays = OverlayStore(config.server.storage_root)
     app.state.meta = MetaStore(config.server.storage_root)
     app.state.session_store = SessionStore(app.state.meta, config.auth)
@@ -677,19 +679,28 @@ def _execute_route(
     sanitized_offset = max(0, offset or 0)
     sanitized_limit = None if limit is None else max(0, int(limit))
     cache_store: CacheStore | None = getattr(request.app.state, "cache_store", None)
+    executor = RouteExecutor(
+        getattr(request.app.state, "route_index", {}),
+        cache_store=cache_store,
+        config=request.app.state.config,
+    )
     start = time.perf_counter()
     try:
-        cache_result = fetch_cached_table(
+        cache_result = executor.execute_relation(
             route,
             processed,
-            ordered,
+            ordered=ordered,
+            preprocessed=True,
             offset=sanitized_offset,
             limit=sanitized_limit,
-            store=cache_store,
-            config=request.app.state.config.cache,
         )
     except duckdb.Error as exc:  # pragma: no cover - safety net
         raise HTTPException(status_code=500, detail={"code": "duckdb_error", "message": str(exc)}) from exc
+    except RouteExecutionError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail={"code": "route_execution_error", "message": str(exc)},
+        ) from exc
     except RuntimeError as exc:  # pragma: no cover - cache safeguards
         raise HTTPException(status_code=500, detail={"code": "cache_error", "message": str(exc)}) from exc
 
@@ -1314,6 +1325,7 @@ def _replace_dynamic_routes(app: FastAPI, routes: Sequence[RouteDefinition]) -> 
     if existing:
         app.router.routes = [route for route in app.router.routes if route not in existing]
     app.state.routes = list(routes)
+    app.state.route_index = {route.id: route for route in app.state.routes}
     app.state._dynamic_route_handles = _register_dynamic_routes(app, routes)
 
 

@@ -2,6 +2,7 @@
 ROUTE = {'allowed_formats': [],
  'assets': None,
  'charts': [{'id': 'greeting_length', 'type': 'line', 'y': 'greeting_length'}],
+ 'cache_mode': 'materialize',
  'default_format': None,
  'description': 'Return a greeting using DuckDB',
  'directives': [],
@@ -50,5 +51,7 @@ ROUTE = {'allowed_formats': [],
             "  'Personalized greeting rendered by DuckDB' AS note,\n"
             "  LENGTH('Hello, ' || {{name}} || '!')::INT AS greeting_length,\n"
             '  CURRENT_TIMESTAMP AS created_at;',
+ 'returns': 'relation',
  'title': 'Hello world',
+ 'uses': [],
  'version': None}

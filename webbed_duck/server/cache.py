@@ -73,6 +73,14 @@ class CacheQueryResult:
     cache_hit: bool
 
 
+@dataclass(slots=True)
+class CacheArtifactResult:
+    paths: tuple[Path, ...]
+    schema: pa.Schema
+    total_rows: int
+    cache_key: CacheKey
+
+
 class CacheStore:
     """Persist and reuse paged query results."""
 
@@ -833,6 +841,9 @@ def resolve_cache_settings(route: RouteDefinition, config: CacheConfig) -> Cache
             order_by = tuple(order_values)
     if rows_per_page <= 0:
         enabled = False
+    route_cache_mode = getattr(route, "cache_mode", "materialize")
+    if isinstance(route_cache_mode, str) and route_cache_mode.lower() != "materialize":
+        enabled = False
     if enabled and rows_per_page > 0 and not order_by:
         raise RuntimeError(f"cache.order_by must list at least one column for route '{route.id}'")
     return CacheSettings(
@@ -854,13 +865,17 @@ def fetch_cached_table(
     limit: int | None,
     store: CacheStore | None,
     config: CacheConfig,
+    reader_factory: RecordBatchFactory | None = None,
+    execute_sql: Callable[[], pa.Table] | None = None,
 ) -> CacheQueryResult:
     settings = resolve_cache_settings(route, config)
     effective_offset, effective_limit = _effective_window(offset, limit, settings)
     invariant_requests = _collect_invariant_requests(settings.invariant_filters, params)
+    reader_factory_fn = reader_factory or (lambda: _record_batch_reader(route.prepared_sql, ordered_params))
+    execute_sql_fn = execute_sql or (lambda: _execute_sql(route.prepared_sql, ordered_params))
 
     if not store or not settings.enabled:
-        table = _execute_sql(route.prepared_sql, ordered_params)
+        table = execute_sql_fn()
         table = _sort_table(table, settings.order_by)
         sliced, total_rows, applied_offset, applied_limit = _slice_table(
             table, effective_offset, effective_limit
@@ -911,7 +926,7 @@ def fetch_cached_table(
             settings=settings,
             offset=effective_offset,
             limit=effective_limit,
-            reader_factory=lambda: _record_batch_reader(route.prepared_sql, ordered_params),
+            reader_factory=reader_factory_fn,
             invariant_values=invariant_requests,
         )
         cache_hit = read.from_cache
@@ -934,6 +949,52 @@ def fetch_cached_table(
         ),
         settings.order_by,
     )
+
+
+def materialize_parquet_artifacts(
+    route: RouteDefinition,
+    params: Mapping[str, object],
+    ordered_params: Sequence[object],
+    *,
+    store: CacheStore | None,
+    config: CacheConfig,
+    reader_factory: RecordBatchFactory | None = None,
+) -> CacheArtifactResult:
+    settings = resolve_cache_settings(route, config)
+    if not store or not settings.enabled:
+        raise RuntimeError(
+            f"Route '{route.id}' does not support parquet_path dependencies because caching is disabled"
+        )
+    if settings.invariant_filters:
+        raise RuntimeError(
+            f"Route '{route.id}' cannot be used in parquet_path mode while invariant filters are configured"
+        )
+    requests = _collect_invariant_requests(settings.invariant_filters, params)
+    if requests:
+        raise RuntimeError(
+            f"Route '{route.id}' received invariant-filter overrides incompatible with parquet_path mode"
+        )
+    reader_factory_fn = reader_factory or (lambda: _record_batch_reader(route.prepared_sql, ordered_params))
+    cache_params = _prepare_cache_params(params, settings.invariant_filters)
+    key = store.compute_key(route, cache_params, settings)
+    route_signature = _route_signature(route)
+    store.get_or_populate(
+        key,
+        route_signature=route_signature,
+        settings=settings,
+        offset=0,
+        limit=None,
+        reader_factory=reader_factory_fn,
+        invariant_values=None,
+    )
+    entry_path = key.path(store._root)
+    meta = store._load_meta(entry_path)
+    if not meta:
+        raise RuntimeError(f"Failed to materialize parquet artifacts for route '{route.id}'")
+    schema = _schema_from_meta(meta)
+    total_rows = int(meta.get("total_rows", 0))
+    paths = tuple(sorted(entry_path.glob("page-*.parquet")))
+    return CacheArtifactResult(paths=paths, schema=schema, total_rows=total_rows, cache_key=key)
 
 
 def _reuse_invariant_caches(
@@ -1254,6 +1315,8 @@ __all__ = [
     "CacheReadResult",
     "CacheSettings",
     "CacheStore",
+    "CacheArtifactResult",
     "fetch_cached_table",
+    "materialize_parquet_artifacts",
     "resolve_cache_settings",
 ]

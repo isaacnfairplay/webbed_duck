@@ -7,6 +7,9 @@
 - Implemented paged Parquet caching with configurable TTLs and route-defined
   `rows_per_page` limits, reusing on-disk slices across HTTP requests and the
   local runner.
+- Introduced a dependency-aware route executor that honors `[[uses]]` metadata,
+  supporting both relation and parquet_path modes while respecting per-route
+  `cache_mode` controls.
 - Extended configuration with a `[cache]` section and refreshed the README with
   a request-lifecycle mermaid diagram covering the new caching flow.
 - Added transformation-invariant cache filters so routes can reuse superset
@@ -14,6 +17,12 @@
   DuckDB, including multi-value combinations defined via `separator` settings.
 - Documented invariant filter frontmatter and expanded the cache test suite to
   cover superset reuse and shard combination scenarios.
+- Refreshed the README to document the TOML + SQL route layout, declarative
+  dependencies, and safe parameter binding patterns (including multi-value
+  `IN` filters and named bindings).
+- Added NYC taxi-inspired performance regression tests that exercise
+  cache-backed execution across increasing data volumes and verify cache hits
+  accelerate repeat requests.
 - Required routes that opt into caching to declare `cache.order_by` columns and
   taught the cache store to re-sort combined superset/shard hits before paging,
   eliminating inconsistent ordering when invariant filters are reused.

@@ -1,5 +1,26 @@
 # Branch-level Changelog
 
+## Route authoring guidance refresh (work branch)
+
+- Rewrite the README around the new TOML + SQL route layout, covering
+  dependency metadata, execution modes, and the compiler's legacy `.sql.md`
+  import path.
+- Add a detailed "How parameters work" section documenting safe named binding,
+  multi-value filters, and cache-aware distinctions between persistent and
+  ephemeral parameters.
+- Update changelog entries to point readers at the refreshed docs and parameter
+  guidance.
+
+## Route composition runtime (work branch)
+
+- Add a dependency-aware route executor that resolves `[[uses]]` entries for
+  both relation and parquet_path modes while sharing cache/coercion logic with
+  HTTP requests and the local runner.
+- Materialize parquet artifacts on demand so downstream routes can reference
+  cached pages without re-running upstream queries.
+- Update the FastAPI app and local runner to use the new executor, enabling
+  declarative route composition without manual glue code.
+
 ## webbed_duck packaging hardening (work branch)
 
 - Fix setuptools configuration so `pip install webbed-duck` installs the actual
@@ -18,3 +39,21 @@
   and Arrow RPC download links while mirroring the RPC headers on responses.
 - Expand the regression suite with tests that assert filter controls, hidden
   pagination inputs, and RPC metadata render for both table and card formats.
+
+## Performance regression coverage (work branch)
+
+- Generate NYC taxi-style Parquet fixtures on the fly and compile TOML/SQL
+  routes against them to stress the executor with small, medium, and large
+  workloads.
+- Assert that first-run timings grow with the dataset size while parquet-backed
+  cache hits respond faster than the initial materialisation.
+- Verify that cache materialisation leaves behind parquet page artifacts so
+  downstream parquet_path consumers can reuse them.
+
+## Parameter coercion regression (work branch)
+
+- Add executor-level tests that coerce every supported parameter type
+  (string, integer, float, and boolean) while exercising repeated placeholders
+  inside nested queries.
+- Cover multi-value inputs by binding repeated parameters as Python lists so
+  the executor preserves sequence values for `IN $param` filters.

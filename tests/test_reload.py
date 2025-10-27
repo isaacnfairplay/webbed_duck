@@ -13,40 +13,6 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency
     TestClient = None  # type: ignore
 
 
-ROUTE_V1 = """+++
-id = "hello"
-path = "/hello"
-[params.name]
-type = "str"
-required = false
-default = "world"
-[cache]
-order_by = ["greeting"]
-+++
-
-```sql
-SELECT 'Hello, ' || {{name}} || '!' AS greeting ORDER BY greeting;
-```
-"""
-
-
-ROUTE_V2 = """+++
-id = "hello"
-path = "/hello"
-[params.name]
-type = "str"
-required = false
-default = "Duck"
-[cache]
-order_by = ["greeting"]
-+++
-
-```sql
-SELECT 'Hello again, ' || {{name}} || '!' AS greeting ORDER BY greeting;
-```
-"""
-
-
 @pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
 def test_reload_routes_reflects_new_compilation(tmp_path: Path) -> None:
     src_dir = tmp_path / "src"
@@ -55,7 +21,24 @@ def test_reload_routes_reflects_new_compilation(tmp_path: Path) -> None:
     src_dir.mkdir()
     storage_root.mkdir()
 
-    (src_dir / "hello.sql.md").write_text(ROUTE_V1, encoding="utf-8")
+    (src_dir / "hello.toml").write_text(
+        (
+            "id = \"hello\"\n"
+            "path = \"/hello\"\n"
+            "[params.name]\n"
+            "type = \"str\"\n"
+            "required = false\n"
+            "default = \"world\"\n"
+            "[cache]\n"
+            "order_by = [\"greeting\"]\n"
+        ),
+        encoding="utf-8",
+    )
+    (src_dir / "hello.sql").write_text(
+        "SELECT 'Hello, ' || $name || '!' AS greeting ORDER BY greeting;\n",
+        encoding="utf-8",
+    )
+
     compile_routes(src_dir, build_dir)
     routes = load_compiled_routes(build_dir)
 
@@ -71,7 +54,23 @@ def test_reload_routes_reflects_new_compilation(tmp_path: Path) -> None:
         assert response.json()["rows"][0]["greeting"] == "Hello, world!"
 
         # Update the route contract and recompile
-        (src_dir / "hello.sql.md").write_text(ROUTE_V2, encoding="utf-8")
+        (src_dir / "hello.toml").write_text(
+            (
+                "id = \"hello\"\n"
+                "path = \"/hello\"\n"
+                "[params.name]\n"
+                "type = \"str\"\n"
+                "required = false\n"
+                "default = \"Duck\"\n"
+                "[cache]\n"
+                "order_by = [\"greeting\"]\n"
+            ),
+            encoding="utf-8",
+        )
+        (src_dir / "hello.sql").write_text(
+            "SELECT 'Hello again, ' || $name || '!' AS greeting ORDER BY greeting;\n",
+            encoding="utf-8",
+        )
         compile_routes(src_dir, build_dir)
         updated_routes = load_compiled_routes(build_dir)
 

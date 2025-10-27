@@ -160,6 +160,54 @@ ORDER BY seq;
 """
 
 
+ROUTE_DEP_CHILD_TOML = """id = "readme_child"
+path = "/readme_child"
+title = "Child dataset for README coverage"
+cache_mode = "materialize"
+returns = "parquet"
+
+[cache]
+order_by = ["id"]
+rows_per_page = 10
+
+[params]
+label = "VARCHAR"
+plant = "VARCHAR"
+"""
+
+
+ROUTE_DEP_CHILD_SQL = """SELECT id, label, 'US01' AS plant
+FROM (VALUES (1, 'alpha'), (2, 'beta')) AS t(id, label)
+WHERE $label IS NULL OR label = $label
+ORDER BY id;"""
+
+
+ROUTE_DEP_PARENT_TOML = """id = "readme_parent"
+path = "/readme_parent"
+title = "Parent dataset via dependency"
+cache_mode = "passthrough"
+returns = "relation"
+
+[params]
+label = "VARCHAR"
+
+[[uses]]
+alias = "child_cache"
+call = "readme_child"
+mode = "parquet_path"
+
+[uses.args]
+label = "label"
+plant = "US01"
+"""
+
+
+ROUTE_DEP_PARENT_SQL = """SELECT id, label
+FROM child_cache
+WHERE plant = 'US01' AND ($label IS NULL OR label = $label)
+ORDER BY id;"""
+
+
 @dataclass(slots=True)
 class ReadmeContext:
     repo_root: Path
@@ -197,6 +245,12 @@ class ReadmeContext:
     assets_registry_size: int
     charts_registry_size: int
     duckdb_connect_counts: list[int]
+    source_pairs: dict[str, dict[str, bool]]
+    route_cache_modes: dict[str, str]
+    route_returns: dict[str, str]
+    route_uses: dict[str, list]
+    composition_payload: dict
+    parquet_artifacts: list[Path]
     cache_enforced_payload: dict
     cache_config: object
     invariant_superset_payload: dict
@@ -256,8 +310,25 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
     (src_dir / "cached_invariant.sql.md").write_text(ROUTE_INVARIANT_SUPERSET, encoding="utf-8")
     (src_dir / "cached_invariant_shards.sql.md").write_text(ROUTE_INVARIANT_SHARDS, encoding="utf-8")
 
+    (src_dir / "readme_child.toml").write_text(ROUTE_DEP_CHILD_TOML + "\n", encoding="utf-8")
+    (src_dir / "readme_child.sql").write_text(ROUTE_DEP_CHILD_SQL + "\n", encoding="utf-8")
+    (src_dir / "readme_parent.toml").write_text(ROUTE_DEP_PARENT_TOML + "\n", encoding="utf-8")
+    (src_dir / "readme_parent.sql").write_text(ROUTE_DEP_PARENT_SQL + "\n", encoding="utf-8")
+    (src_dir / "readme_parent.md").write_text("# Parent documentation\n", encoding="utf-8")
+
     compile_routes(src_dir, build_dir)
     compile_routes(src_dir, rebuild_dir)
+
+    source_pairs: dict[str, dict[str, bool]] = {}
+    for toml_path in sorted(src_dir.rglob("*.toml")):
+        data = tomllib.loads(toml_path.read_text(encoding="utf-8"))
+        route_id = str(data.get("id", toml_path.stem))
+        source_pairs[route_id] = {
+            "toml": toml_path.exists(),
+            "sql": toml_path.with_suffix(".sql").exists(),
+            "md": toml_path.with_suffix(".md").exists(),
+            "legacy_sql_md": toml_path.with_suffix(".sql.md").exists(),
+        }
 
     def _hash_dir(path: Path) -> dict[str, str]:
         hashes: dict[str, str] = {}
@@ -269,6 +340,9 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
     recompiled_hashes = _hash_dir(rebuild_dir)
 
     routes = load_compiled_routes(build_dir)
+    route_cache_modes = {route.id: route.cache_mode for route in routes}
+    route_returns = {route.id: route.returns for route in routes}
+    route_uses = {route.id: list(route.uses) for route in routes}
     config = load_config(None)
     config.server.storage_root = storage_root
     config.auth.mode = "pseudo"
@@ -298,6 +372,8 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
             response = getattr(client, method)(path, **kwargs)
         duckdb_connect_counts.append(call_count)
         return response
+
+    composition_payload: dict = {}
 
     with TestClient(app) as client:
         login = client.post("/auth/pseudo/session", json={"email": "user@example.com"})
@@ -360,6 +436,15 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
         invariant_shard_counts.append(duckdb_connect_counts[-1])
         invariant_combined_payload = shard_combined.json()
 
+        composition_response = request_with_tracking(
+            client,
+            "get",
+            "/readme_parent",
+            params={"format": "json", "label": "beta"},
+        )
+        assert composition_response.status_code == 200
+        composition_payload = composition_response.json()
+
         override_response = client.post(
             "/routes/hello/overrides",
             json={"column": "note", "key": {"greeting": "Hello, DuckDB!"}, "value": "annotated"},
@@ -395,6 +480,8 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
             build_dir=build_dir,
         )
     )
+
+    parquet_artifacts = list((storage_root / "cache").rglob("*.parquet"))
 
     share_db_path = storage_root / "runtime" / "meta.sqlite3"
     with sqlite3.connect(share_db_path) as conn:
@@ -487,6 +574,12 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
         assets_registry_size=len(getattr(assets_plugins, "_REGISTRY", {})),
         charts_registry_size=len(getattr(charts_plugins, "_RENDERERS", {})),
         duckdb_connect_counts=duckdb_connect_counts,
+        source_pairs=source_pairs,
+        route_cache_modes=route_cache_modes,
+        route_returns=route_returns,
+        route_uses=route_uses,
+        composition_payload=composition_payload,
+        parquet_artifacts=parquet_artifacts,
         cache_enforced_payload=paged_payload,
         cache_config=config.cache,
         invariant_superset_payload=invariant_superset_payload,
@@ -544,10 +637,12 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
             ctx.repo_structure["docs"] and ctx.repo_structure["examples"], s
         )),
         (lambda s: bool(re.match(r"^\d+\. \[", s)), lambda s: None),
-        (lambda s: s.startswith("- Each `.sql.md` file is a contract"), lambda s: _ensure(
-            bool(ctx.compiled_routes), s
+        (lambda s: s.startswith("- Each route lives in `routes_src/` as a `<stem>.toml`"), lambda s: _ensure(
+            all(pair["toml"] and pair["sql"] for pair in ctx.source_pairs.values())
+            and any(pair["legacy_sql_md"] for pair in ctx.source_pairs.values()),
+            s,
         )),
-        (lambda s: s.startswith("- The compiler translates those contracts"), lambda s: _ensure(
+        (lambda s: s.startswith("- The compiler translates those sources"), lambda s: _ensure(
             ctx.compiled_hashes == ctx.recompiled_hashes, s
         )),
         (lambda s: s.startswith("- The runtime ships the results"), lambda s: _ensure(
@@ -592,7 +687,7 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
             "Download this slice" in ctx.html_text and "Download this slice" in ctx.cards_text,
             s,
         )),
-        (lambda s: s.startswith("- Drop `.sql.md` files into a folder"), lambda s: _ensure(
+        (lambda s: s.startswith("- Drop TOML/SQL pairs into a folder"), lambda s: _ensure(
             ctx.repo_structure["routes_src"] and ctx.repo_structure["routes_build"], s
         )),
         (lambda s: s.startswith("- Designed for operational"), lambda s: None),
@@ -629,6 +724,12 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         (lambda s: s.startswith("- The compiler scans the source tree"), lambda s: _ensure(
             len(ctx.compiled_routes) >= 1, s
         )),
+        (lambda s: s.startswith("- Each TOML file carries the metadata"), lambda s: _ensure(
+            "readme_parent" in ctx.route_cache_modes
+            and ctx.route_cache_modes["readme_parent"] == "passthrough"
+            and bool(ctx.route_uses.get("readme_parent")),
+            s,
+        )),
         (lambda s: s.startswith("- Frontmatter declares the route `id`"), lambda s: _ensure(
             any(item["name"] == "name" for item in ctx.schema_payload.get("form", [])), s
         )),
@@ -641,7 +742,7 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         (lambda s: s.startswith("- Parameters are declared"), lambda s: _ensure(
             any(item["name"] == "name" for item in ctx.schema_payload.get("form", [])), s
         )),
-        (lambda s: s.startswith("- Within the SQL block"), lambda s: _ensure(
+        (lambda s: s.startswith("- Within the SQL body"), lambda s: _ensure(
             bool(getattr(ctx.compiled_routes[0], "param_order", [])), s
         )),
         (lambda s: s.startswith("- At request time the runtime reads"), lambda s: _ensure(
@@ -650,7 +751,28 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         (lambda s: s.startswith("- Additional runtime controls"), lambda s: None),
         (lambda s: s.startswith("- `?limit=`"), lambda s: None),
         (lambda s: s.startswith("- `?column=`"), lambda s: None),
-        (lambda s: s.startswith("- Cache settings come from `[cache]` frontmatter"), lambda s: _ensure(
+        (lambda s: s.startswith("- `cache_mode` in the TOML metadata"), lambda s: _ensure(
+            ctx.route_cache_modes.get("readme_child") == "materialize"
+            and ctx.route_cache_modes.get("readme_parent") == "passthrough",
+            s,
+        )),
+        (lambda s: s.startswith("- `returns` declares the default return style"), lambda s: _ensure(
+            ctx.route_returns.get("readme_child") == "parquet"
+            and ctx.route_returns.get("readme_parent") == "relation",
+            s,
+        )),
+        (lambda s: s.startswith("- Each `[[uses]]` block defines an upstream dependency"), lambda s: _ensure(
+            ctx.route_uses.get("readme_parent")
+            and ctx.route_uses["readme_parent"][0].alias == "child_cache"
+            and ctx.route_uses["readme_parent"][0].mode in {"relation", "parquet_path"},
+            s,
+        )),
+        (lambda s: s.startswith("- When `mode = \"parquet_path\"`"), lambda s: _ensure(
+            any("readme_child" in str(path) for path in ctx.parquet_artifacts)
+            and ctx.composition_payload.get("rows") == [{"id": 2, "label": "beta"}],
+            s,
+        )),
+        (lambda s: s.startswith("- Cache settings come from the `[cache]` table in each route's TOML metadata"), lambda s: _ensure(
             hasattr(ctx.cache_config, "ttl_seconds")
             and any(((route.metadata or {}).get("cache") is not None) for route in ctx.compiled_routes),
             s,
@@ -718,6 +840,12 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
             ctx.duckdb_connect_counts and ctx.duckdb_connect_counts[0] >= 1,
             s,
         )),
+        (lambda s: s.startswith("Each compiled route honours runtime format negotiation"), lambda s: _ensure(
+            "content-type" in ctx.csv_headers
+            and "content-type" in ctx.parquet_headers
+            and ctx.arrow_headers["content-type"].startswith("application/vnd.apache.arrow.stream"),
+            s,
+        )),
         (lambda s: s.startswith("All of the following formats work today"), lambda s: _ensure(
             ctx.arrow_headers["content-type"].startswith("application/vnd.apache.arrow.stream"), s
         )),
@@ -743,6 +871,82 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         )),
         (lambda s: s.startswith("- Routes that define `[append]` metadata"), lambda s: _ensure(
             ctx.append_path.exists(), s
+        )),
+        (lambda s: s.startswith("Route parameters affect both cache determinism"), lambda s: _ensure(
+            any(route.params for route in ctx.compiled_routes), s
+        )),
+        (lambda s: s.startswith("- Bind everything that comes from the request context"), lambda s: _ensure(
+            "?" in ctx.compiled_routes[0].prepared_sql, s
+        )),
+        (lambda s: s.startswith("If a value is fixed in TOML"), lambda s: _ensure(
+            any(
+                arg == "US01"
+                for use in ctx.route_uses.get("readme_parent", [])
+                for arg in use.args.values()
+            ),
+            s,
+        )),
+        (lambda s: s.startswith("- Constants baked into the route definition"), lambda s: _ensure(
+            any(route.id == "readme_parent" and "'US01'" in route.raw_sql for route in ctx.compiled_routes),
+            s,
+        )),
+        (lambda s: s.startswith("- DuckDB accepts sequence parameters directly"), lambda s: _ensure(
+            ctx.invariant_combined_payload["rows"]
+            and {row["product_code"] for row in ctx.invariant_combined_payload["rows"]} == {"widget", "gadget"},
+            s,
+        )),
+        (lambda s: s.startswith("- Never build comma-separated lists manually"), lambda s: _ensure(
+            ctx.invariant_shard_counts == [1, 1, 0], s
+        )),
+        (lambda s: s.startswith("- Named bindings keep long queries readable"), lambda s: _ensure(
+            any(route.id == "readme_parent" and "$label" in route.raw_sql for route in ctx.compiled_routes),
+            s,
+        )),
+        (lambda s: s.startswith("- Pagination, sorting, and debug toggles do not influence"), lambda s: _ensure(
+            ctx.cache_enforced_payload["offset"] == 2 and ctx.cache_enforced_payload["limit"] == 2,
+            s,
+        )),
+        (lambda s: s.startswith("- ✅"), lambda s: None),
+        (lambda s: s.startswith("- ❌"), lambda s: None),
+        (lambda s: s.startswith("A route now spans up to three sibling files"), lambda s: _ensure(
+            any(pair["toml"] and pair["sql"] for pair in ctx.source_pairs.values()), s
+        )),
+        (lambda s: s.startswith("1. **`<stem>.toml`"), lambda s: _ensure(
+            any(pair["toml"] for pair in ctx.source_pairs.values()), s
+        )),
+        (lambda s: s.startswith("2. **`<stem>.sql`"), lambda s: _ensure(
+            any(pair["sql"] for pair in ctx.source_pairs.values()), s
+        )),
+        (lambda s: s.startswith("3. **`<stem>.md`"), lambda s: _ensure(
+            any(pair["md"] for pair in ctx.source_pairs.values()), s
+        )),
+        (lambda s: s.startswith("Legacy `<stem>.sql.md` files can still live"), lambda s: _ensure(
+            any(pair["legacy_sql_md"] for pair in ctx.source_pairs.values()), s
+        )),
+        (lambda s: s.startswith("Common keys inside `<stem>.toml` include:"), lambda s: None),
+        (lambda s: s.startswith("- `[params]`"), lambda s: _ensure(
+            any(route.params for route in ctx.compiled_routes), s
+        )),
+        (lambda s: s.startswith("- `[cache]`"), lambda s: _ensure(
+            any((route.metadata or {}).get("cache") for route in ctx.compiled_routes), s
+        )),
+        (lambda s: s.startswith("- `cache_mode`"), lambda s: _ensure(
+            ctx.route_cache_modes.get("readme_child") == "materialize", s
+        )),
+        (lambda s: s.startswith("- `returns`"), lambda s: _ensure(
+            ctx.route_returns.get("readme_child") == "parquet", s
+        )),
+        (lambda s: s.startswith("- `[[uses]]`"), lambda s: _ensure(
+            bool(ctx.route_uses.get("readme_parent")), s
+        )),
+        (lambda s: s.startswith("- Presentation metadata"), lambda s: _ensure(
+            ctx.override_payload["column"] == "note", s
+        )),
+        (lambda s: s.startswith("`routes_src/production/workstation_line.toml`"), lambda s: None),
+        (lambda s: s.startswith("`routes_src/production/workstation_line.sql`"), lambda s: None),
+        (lambda s: s.startswith("`routes_src/production/workstation_line.md`"), lambda s: None),
+        (lambda s: s.startswith("This trio mirrors the canonical on-disk structure"), lambda s: _ensure(
+            any(pair["md"] for pair in ctx.source_pairs.values()), s
         )),
         (lambda s: s.startswith("* **Markdown + SQL compiler**"), lambda s: _ensure(
             ctx.compiled_hashes == ctx.recompiled_hashes, s
@@ -919,12 +1123,18 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
             ctx.override_payload["column"] == "note" and ctx.append_path.exists(), s
         )),
         (lambda s: s.startswith("- `[[preprocess]]` entries"), lambda s: None),
-        (lambda s: s.startswith("- Unexpected frontmatter keys trigger compile-time warnings"), lambda s: _ensure(
+        (lambda s: s.startswith("- Unexpected keys trigger compile-time warnings"), lambda s: _ensure(
             _frontmatter_warning_emitted(), s
         )),
-        (lambda s: s.startswith("- Write DuckDB SQL inside"), lambda s: None),
-        (lambda s: s.startswith("- Interpolate declared parameters"), lambda s: None),
-        (lambda s: s.startswith("- Do not concatenate user input"), lambda s: None),
+        (lambda s: s.startswith("- Write DuckDB SQL in `<stem>.sql`"), lambda s: _ensure(
+            any(pair["sql"] for pair in ctx.source_pairs.values()), s
+        )),
+        (lambda s: s.startswith("- Reference parameters registered in TOML"), lambda s: _ensure(
+            any("$label" in route.raw_sql for route in ctx.compiled_routes), s
+        )),
+        (lambda s: s.startswith("- Dependencies declared via `[[uses]]`"), lambda s: _ensure(
+            bool(ctx.composition_payload.get("rows")), s
+        )),
         (lambda s: s.startswith("Routes can further customise behaviour"), lambda s: _ensure(
             ctx.override_payload["column"] == "note", s
         )),
