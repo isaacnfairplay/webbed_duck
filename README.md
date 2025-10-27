@@ -375,6 +375,13 @@ Routes can further customise behaviour via presentation metadata—e.g., `[html_
   listed there render controls; the rest are preserved as hidden inputs so
   filter submissions keep pagination or additional query values intact.
 
+  HTML table and card responses also surface the development HTTP banner when
+  `ui.show_http_warning` is enabled and reuse the error taxonomy banner toggle
+  so operators see consistent guidance. Every response embeds a
+  `<script id="wd-rpc-config">` payload alongside a “Download this slice
+  (Arrow)” link, making it easy to resume the RPC flow programmatically while
+  keeping the rendered form in sync with pagination state.
+
 - Table (`html_t`) and card (`html_c`) responses now emit pagination metadata
   and an embedded `<script id="wd-rpc-config">` block describing the current
   slice (`offset`, `limit`, `total_rows`) plus a ready-to-use Arrow RPC
@@ -409,7 +416,7 @@ MVP 0.4 is the first release we expect to hand to an ops lead with no extra scaf
 
 - **Preprocessors:** Register callables (e.g., `myapp.preprocess.resolve_shift_window`) and reference them in TOML metadata to derive or validate parameters before the SQL runs.
 - **Postprocessors and presentation:** Use `[html_t]`, `[html_c]`, `[feed]`, and `[[charts]]` to pass configuration into the built-in renderers. Custom renderers can be registered via the plugin registries in `webbed_duck.plugins.*`.
-- **Assets and overlays:** `[assets]` metadata controls how related images are resolved; `[overrides]` enables per-cell overrides with audit trails managed by the overlay store.
+- **Assets and overlays:** `[assets]` metadata controls how related images are resolved; use `base_path = "media"` (or similar) to prefix relative card thumbnails before they flow through the configured `image_getter`. `[overrides]` enables per-cell overrides with audit trails managed by the overlay store.
 - **Local execution:** `webbed_duck.core.local.run_route("route_id", params={...}, format="arrow")` executes a compiled route entirely in-process, useful for testing or batch jobs.
 
 As the plugin hooks stabilise, expect additional documentation and examples demonstrating custom formatters, enrichment joins, and sharing adapters that slot into the compile/serve lifecycle without forking the framework.
