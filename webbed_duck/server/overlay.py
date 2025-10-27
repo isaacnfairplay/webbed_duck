@@ -6,7 +6,7 @@ import threading
 import time
 from dataclasses import dataclass, asdict
 from pathlib import Path
-from typing import Any, Iterable, Mapping, MutableMapping, Sequence
+from typing import Any, Callable, Iterable, Mapping, MutableMapping, Sequence
 
 import pyarrow as pa
 
@@ -33,11 +33,19 @@ class OverrideRecord:
 class OverlayStore:
     """Persist per-cell overrides under the configured storage root."""
 
-    def __init__(self, storage_root: Path) -> None:
+    def __init__(
+        self,
+        storage_root: Path,
+        *,
+        time_fn: Callable[[], float] | None = None,
+        hash_fn: Callable[[str], str] | None = None,
+    ) -> None:
         self._path = Path(storage_root) / "runtime" / "overrides.json"
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._data: MutableMapping[str, list[dict[str, Any]]] = self._load()
+        self._time_fn = time_fn or time.time
+        self._hash_fn = hash_fn or _hash_author
 
     def list_for_route(self, route_id: str) -> list[OverrideRecord]:
         with self._lock:
@@ -74,9 +82,9 @@ class OverlayStore:
             column=column,
             value=value,
             reason=reason,
-            author_hash=_hash_author(author) if author else None,
+            author_hash=self._hash_fn(author) if author else None,
             author_user_id=author_user_id,
-            created_ts=time.time(),
+            created_ts=self._time_fn(),
         )
         payload = record.to_dict()
         with self._lock:
