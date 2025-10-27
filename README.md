@@ -31,6 +31,8 @@
    - `--watch` keeps the compiler running and reloads routes in-place when `.toml`, `.sql`, or legacy `.sql.md` files change.
    - Pass `--no-auto-compile` to serve pre-built `routes_build/` artifacts without touching the source tree.
    - Watching performs filesystem polls once per second by default; disable it (or raise `server.watch_interval`) if you run on slower hardware where constant polling is undesirable.
+   - File watching relies on timestamp and size fingerprints of matching route files, so ensure your editor writes changes to disk (saving partial files can trigger reload attempts).
+   - The `webbed-duck perf` helper expects compiled routes in the build directory, uses PyArrow tables to compute latency statistics, and accepts repeated `--param name=value` overrides for the target route.
 
 > **Testing note:** The integration tests exercise the FastAPI stack via `fastapi.testclient`. If you install `webbed-duck` in a minimal environment without FastAPI (for example by vendoring only `webbed_duck/`), expect those tests to be skipped.
 

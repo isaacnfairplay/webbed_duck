@@ -14,6 +14,7 @@ from typing import Callable
 
 import pytest
 
+from webbed_duck import cli as cli_module
 from webbed_duck.config import Config, load_config
 from webbed_duck.core.compiler import compile_route_file, compile_routes
 from webbed_duck.core.incremental import run_incremental
@@ -701,6 +702,16 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         (lambda s: s.startswith("- Pass `--no-auto-compile`"), lambda s: None),
         (lambda s: s.startswith("- Watching performs filesystem polls once per second"), lambda s: _ensure(
             ctx.reload_capable and Config().server.watch_interval == pytest.approx(1.0), s
+        )),
+        (lambda s: s.startswith("- File watching relies on timestamp"), lambda s: _ensure(
+            hasattr(cli_module, "SourceFingerprint")
+            and hasattr(cli_module, "build_source_fingerprint")
+            and hasattr(cli_module.SourceFingerprint, "has_changed"),
+            s,
+        )),
+        (lambda s: s.startswith("- The `webbed-duck perf` helper expects"), lambda s: _ensure(
+            hasattr(cli_module, "_cmd_perf") and hasattr(cli_module, "_parse_param_assignments"),
+            s,
         )),
         (lambda s: s.startswith("> **Testing note:** The integration tests exercise the FastAPI stack"), lambda s: _ensure(
             TestClient is not None, s
