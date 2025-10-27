@@ -34,7 +34,7 @@
    - File watching relies on timestamp and size fingerprints of matching route files, so ensure your editor writes changes to disk (saving partial files can trigger reload attempts). Network or synced file systems that coalesce timestamp updates may require a longer `watch_interval`.
    - The `webbed-duck perf` helper expects compiled routes in the build directory, uses PyArrow tables to compute latency statistics, and accepts repeated `--param name=value` overrides for the target route.
 
-> **Testing note:** The integration tests exercise the FastAPI stack via `fastapi.testclient`. If you install `webbed-duck` in a minimal environment without FastAPI (for example by vendoring only `webbed_duck/`), expect those tests to be skipped. Install the optional server dependencies (`pip install fastapi uvicorn`) when you want the suite to cover the HTTP APIs; skipping them reduces confidence in auth, overlays, and cache behaviour.
+> **Testing note:** The integration tests exercise the FastAPI stack via `fastapi.testclient`. If you install `webbed-duck` in a minimal environment without FastAPI (for example by vendoring only `webbed_duck/`), expect those tests to be skipped. Install the optional server dependencies (`pip install fastapi uvicorn`) when you want the suite to cover the HTTP APIs; skipping them reduces confidence in auth, overlays, and cache behaviour and should be treated as "partial coverage" when assessing deployment readiness.
 
 5. **Browse the routes.** Open `http://127.0.0.1:8000/hello` (or your route path) in a browser, or request alternate formats with `?format=csv`, `?format=parquet`, etc.
 
