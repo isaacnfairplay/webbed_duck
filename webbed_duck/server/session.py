@@ -26,6 +26,7 @@ class SessionStore:
     def __init__(self, store: MetaStore, config: AuthConfig) -> None:
         self._store = store
         self._config = config
+        self._allowed_domains = {item.lower() for item in config.allowed_domains}
 
     def create(
         self,
@@ -104,19 +105,13 @@ class SessionStore:
             conn.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
             conn.commit()
 
-    def clear_expired(self) -> None:
-        now = serialize_datetime(_utcnow())
-        with self._store.connect() as conn:
-            conn.execute("DELETE FROM sessions WHERE expires_at < ?", (now,))
-            conn.commit()
-
     def validate_email(self, email: str) -> str:
         email_norm = email.strip().lower()
         if not email_norm or "@" not in email_norm:
             raise ValueError("Email address is required")
-        if self._config.allowed_domains:
+        if self._allowed_domains:
             domain = email_norm.split("@", 1)[1]
-            if domain not in {item.lower() for item in self._config.allowed_domains}:
+            if domain not in self._allowed_domains:
                 raise ValueError("Email domain is not allowed")
         return email_norm
 
