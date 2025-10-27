@@ -239,46 +239,20 @@ class RouteExecutor:
             raise RouteExecutionError(
                 f"Route '{route.id}' references unknown dependency '{use.call}'"
             )
+        handler = self._select_dependency_handler(use.mode)
+        if handler is None:
+            raise RouteExecutionError(
+                f"Route '{route.id}' dependency '{use.alias}' uses unsupported mode '{use.mode}'"
+            )
         resolved_args = self._resolve_dependency_args(use, params)
-        if use.mode == "relation":
-            prepared = self._prepare(
-                target,
-                resolved_args,
-                ordered=None,
-                preprocessed=False,
-                request=request,
-            )
-            result = self._run_relation(target, prepared, offset=0, limit=None, request=request)
-            con.register(use.alias, result.table)
-            return
-        if use.mode == "parquet_path":
-            prepared = self._prepare(
-                target,
-                resolved_args,
-                ordered=None,
-                preprocessed=False,
-                request=request,
-            )
-            try:
-                artifacts = materialize_parquet_artifacts(
-                    target,
-                    prepared.params,
-                    prepared.ordered,
-                    store=self._cache_store,
-                    config=self._cache_config,
-                    reader_factory=self._make_reader_factory(target, prepared, request=request),
-                )
-            except RuntimeError as exc:
-                raise RouteExecutionError(str(exc)) from exc
-            if artifacts.paths:
-                relation = con.read_parquet([str(path) for path in artifacts.paths])
-                relation.create_view(use.alias, replace=True)
-            else:
-                empty = pa.Table.from_batches([], schema=artifacts.schema)
-                con.register(use.alias, empty)
-            return
-        raise RouteExecutionError(
-            f"Route '{route.id}' dependency '{use.alias}' uses unsupported mode '{use.mode}'"
+        prepared = self._prepare_dependency_route(target, resolved_args, request=request)
+        handler(
+            con,
+            route,
+            use,
+            target,
+            prepared,
+            request=request,
         )
 
     def _resolve_dependency_args(
@@ -293,6 +267,72 @@ class RouteExecutor:
             else:
                 resolved[key] = value
         return resolved
+
+    def _prepare_dependency_route(
+        self,
+        target: RouteDefinition,
+        args: Mapping[str, object],
+        *,
+        request: Request | None,
+    ) -> _PreparedRoute:
+        return self._prepare(
+            target,
+            args,
+            ordered=None,
+            preprocessed=False,
+            request=request,
+        )
+
+    def _select_dependency_handler(
+        self, mode: str
+    ) -> Callable[..., None] | None:
+        mode_normalized = mode.lower()
+        if mode_normalized == "relation":
+            return self._handle_relation_dependency
+        if mode_normalized == "parquet_path":
+            return self._handle_parquet_dependency
+        return None
+
+    def _handle_relation_dependency(
+        self,
+        con: duckdb.DuckDBPyConnection,
+        route: RouteDefinition,
+        use: RouteUse,
+        target: RouteDefinition,
+        prepared: _PreparedRoute,
+        *,
+        request: Request | None,
+    ) -> None:
+        result = self._run_relation(target, prepared, offset=0, limit=None, request=request)
+        con.register(use.alias, result.table)
+
+    def _handle_parquet_dependency(
+        self,
+        con: duckdb.DuckDBPyConnection,
+        route: RouteDefinition,
+        use: RouteUse,
+        target: RouteDefinition,
+        prepared: _PreparedRoute,
+        *,
+        request: Request | None,
+    ) -> None:
+        try:
+            artifacts = materialize_parquet_artifacts(
+                target,
+                prepared.params,
+                prepared.ordered,
+                store=self._cache_store,
+                config=self._cache_config,
+                reader_factory=self._make_reader_factory(target, prepared, request=request),
+            )
+        except RuntimeError as exc:
+            raise RouteExecutionError(str(exc)) from exc
+        if artifacts.paths:
+            relation = con.read_parquet([str(path) for path in artifacts.paths])
+            relation.create_view(use.alias, replace=True)
+            return
+        empty = pa.Table.from_batches([], schema=artifacts.schema)
+        con.register(use.alias, empty)
 
 
 __all__ = ["RouteExecutionError", "RouteExecutor"]
