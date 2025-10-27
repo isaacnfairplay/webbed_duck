@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Hardened CLI ergonomics by extracting a reusable source fingerprint helper and
+  adding unit tests around CLI parameter parsing, date validation, and watcher
+  change detection.
+- Documented CLI `perf` dependencies and the file-fingerprint watch strategy in
+  the README so contributors understand the prerequisites for latency testing
+  and hot reloads.
 - Hardened executor and append coverage: added failure-path tests for parameter
   coercion, parquet dependencies with empty results, append misconfiguration
   flows, and MetaStore schema upgrades; refactored DuckDB execution helpers to

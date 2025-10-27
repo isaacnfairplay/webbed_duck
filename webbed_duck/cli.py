@@ -7,6 +7,7 @@ import statistics
 import sys
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -14,6 +15,18 @@ from .config import load_config
 from .core.compiler import compile_routes
 from .core.incremental import run_incremental
 from .core.local import run_route
+
+
+@dataclass(frozen=True)
+class SourceFingerprint:
+    """Filesystem fingerprint for a route source directory."""
+
+    files: Mapping[str, tuple[float, int]]
+
+    def has_changed(self, other: "SourceFingerprint") -> bool:
+        """Return ``True`` when ``other`` differs from this snapshot."""
+
+        return dict(self.files) != dict(other.files)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -206,10 +219,10 @@ def _start_watcher(app, source_dir: Path, build_dir: Path, interval: float) -> t
 def _watch_source(app, source_dir: Path, build_dir: Path, interval: float, stop_event: threading.Event) -> None:
     from .core.routes import load_compiled_routes
 
-    snapshot = _snapshot_source(source_dir)
+    snapshot = build_source_fingerprint(source_dir)
     while not stop_event.wait(interval):
-        current = _snapshot_source(source_dir)
-        if current == snapshot:
+        current = build_source_fingerprint(source_dir)
+        if not snapshot.has_changed(current):
             continue
         snapshot = current
         try:
@@ -229,21 +242,23 @@ def _watch_source(app, source_dir: Path, build_dir: Path, interval: float, stop_
         print(f"[webbed-duck] Reloaded {len(routes)} route(s) from {source_dir}")
 
 
-def _snapshot_source(source_dir: Path) -> dict[str, tuple[float, int]]:
-    snapshot: dict[str, tuple[float, int]] = {}
-    if not source_dir.exists():
-        return snapshot
-    patterns = ("*.toml", "*.sql", "*.sql.md")
+def build_source_fingerprint(
+    source_dir: Path, *, patterns: Sequence[str] = ("*.toml", "*.sql", "*.sql.md")
+) -> SourceFingerprint:
+    files: dict[str, tuple[float, int]] = {}
+    root = Path(source_dir)
+    if not root.exists():
+        return SourceFingerprint(files)
     for pattern in patterns:
-        for path in sorted(source_dir.rglob(pattern)):
+        for path in sorted(root.rglob(pattern)):
             if not path.is_file():
                 continue
             try:
                 stat = path.stat()
             except FileNotFoundError:  # pragma: no cover - filesystem race
                 continue
-            snapshot[str(path.relative_to(source_dir))] = (stat.st_mtime, stat.st_size)
-    return snapshot
+            files[str(path.relative_to(root))] = (stat.st_mtime, stat.st_size)
+    return SourceFingerprint(files)
 
 
 def _parse_param_assignments(pairs: Sequence[str]) -> Mapping[str, str]:
