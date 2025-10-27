@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from ..config import Config
 from ..core.routes import RouteDefinition
 from ..plugins.charts import render_route_charts
-from .analytics import AnalyticsStore
+from .analytics import AnalyticsStore, ExecutionMetrics
 from .cache import CacheStore
 from .execution import RouteExecutionError, RouteExecutor
 from .csv import append_record
@@ -628,11 +628,12 @@ def _render_route_response(
 
     if record_analytics and getattr(request.app.state.config.analytics, "enabled", True):
         interactions = request.app.state.overlays.count_for_route(route.id)
-        request.app.state.analytics.record(
+        request.app.state.analytics.record_execution(
             route.id,
-            rows_returned=result.total_rows,
-            latency_ms=result.elapsed_ms,
-            interactions=interactions,
+            ExecutionMetrics.from_execution_result(
+                result,
+                interactions=interactions,
+            ),
         )
 
     return _format_response(
