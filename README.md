@@ -2,12 +2,12 @@
 
 ## What is webbed_duck?
 
-`webbed_duck` is a self-contained data server that turns declarative `.sql.md` files into live DuckDB-backed web endpoints.
+`webbed_duck` is a self-contained data server that turns declarative TOML + SQL route definitions into live DuckDB-backed web endpoints.
 
-- Each `.sql.md` file is a contract for one route: business context, parameter specification, presentation hints, and the SQL relation itself.
-- The compiler translates those contracts into executable Python modules and registers them as HTTP endpoints.
+- Each route lives in `routes_src/` as a `<stem>.toml` metadata file paired with a `<stem>.sql` query (with optional `<stem>.md` documentation). Legacy `.sql.md` files can be imported once, but the TOML + SQL pair is the canonical representation.
+- The compiler translates those sources into executable Python modules and registers them as HTTP endpoints.
 - The runtime ships the results as styled HTML tables or cards, JSON payloads, CSV and Parquet downloads, or Arrow streams—no custom FastAPI or Flask code required.
-- Drop `.sql.md` files into a folder, run the bundled CLI, and immediately browse or export the data surfaces.
+- Drop TOML/SQL pairs into a folder, run the bundled CLI, and immediately browse or export the data surfaces.
 - Designed for operational, quality, and manufacturing review workflows where trustworthy tables with traceability matter more than bespoke UI code.
 
 ## Quick start
@@ -17,7 +17,7 @@
    pip install webbed-duck
    ```
 
-2. **Create your route source directory** (default is `routes_src/`) and add `.sql.md` contracts (see [Writing a `.sql.md` route](#writing-a-sqlmd-route)).
+2. **Create your route source directory** (default is `routes_src/`) and add paired route files (see [Authoring a route](#authoring-a-route)). Each route needs `<stem>.toml` for metadata and `<stem>.sql` for the query. Add `<stem>.md` when you want extra documentation. If you still have legacy `.sql.md` files, the compiler will import them into the new layout on first run.
 
 3. **Compile the contracts into runnable manifests (optional when auto-compile is enabled).**
    ```bash
@@ -28,7 +28,7 @@
    ```bash
    webbed-duck serve --config config.toml --watch
    ```
-   - `--watch` keeps the compiler running and reloads routes in-place when `.sql.md` files change.
+   - `--watch` keeps the compiler running and reloads routes in-place when `.toml`, `.sql`, or legacy `.sql.md` files change.
    - Pass `--no-auto-compile` to serve pre-built `routes_build/` artifacts without touching the source tree.
 
 5. **Browse the routes.** Open `http://127.0.0.1:8000/hello` (or your route path) in a browser, or request alternate formats with `?format=csv`, `?format=parquet`, etc.
@@ -38,25 +38,32 @@
 ### Runtime startup
 
 - `webbed-duck serve` loads configuration from `config.toml` (defaults to host `127.0.0.1`, port `8000`, storage under `./storage`) and resolves `server.source_dir` / `server.build_dir`.
-- With `server.auto_compile = true` (the default) the CLI compiles every `*.sql.md` contract in the configured source directory before starting Uvicorn.
+- With `server.auto_compile = true` (the default) the CLI compiles every `<stem>.toml` + `<stem>.sql` pair in the configured source directory before starting Uvicorn. Legacy `*.sql.md` files are converted into sibling TOML/SQL/MD files the first time they are encountered.
 - Enabling watch mode (`server.watch = true` or the `--watch` flag) keeps a background poller running so route edits trigger re-compilation and live reloading without restarting the process.
 - The server is a FastAPI application exposed via Uvicorn. No additional framework integration is necessary for development deployments.
 
 ### Route discovery and mapping
 
-- The compiler scans the source tree for `*.sql.md` files. Each file must begin with TOML frontmatter between `+++` delimiters.
-- Frontmatter declares the route `id`, HTTP `path`, optional `version`, default and allowed formats, parameters, and metadata.
+- The compiler scans the source tree for `<stem>.toml` files and requires a sibling `<stem>.sql`. Optional `<stem>.md` prose is bundled alongside the SQL body. Legacy `*.sql.md` files are skipped once their TOML/SQL counterparts exist.
+- Each TOML file carries the metadata that previously lived in frontmatter: route `id`, HTTP `path`, optional `version`, formats, `[params]`, `[cache]`, preprocessors, postprocessors, and display metadata. New fields such as `cache_mode`, `returns`, and declarative `[[uses]]` dependencies control execution and composition.
 - Compiled artifacts are written to the `--build` directory, mirroring the source folder structure but with `.py` files. These contain serialised `ROUTE` dictionaries consumed at runtime.
 - At boot—and after each live reload triggered by the watcher—the server imports every compiled module and registers the route path on the FastAPI app. The `id` doubles as the logical identifier for `/routes/{id}` helper endpoints.
 
 ### Parameter binding
 
-- Parameters are declared under `[params.<name>]` in the frontmatter with `type` (`str`, `int`, `float`, or `bool`), `required`, `default`, and `description`.
-- Within the SQL block, use `{{name}}` placeholders. During compilation each placeholder becomes a positional `?` parameter to DuckDB, preserving type safety.
-- At request time the runtime reads query string values, validates types (including boolean coercion for `true`/`false`, `1`/`0`), applies defaults, and rejects missing required parameters.
+- Parameters are declared under `[params]` in the TOML file. Each entry can be a table (with `type`, `required`, `default`, `description`, and extra metadata) or a string shorthand when you only need to annotate the DuckDB type.
+- Within the SQL body, use `{{name}}` or `$name` placeholders. During compilation each placeholder becomes a bound parameter in the prepared statement, preserving type safety while keeping the SQL readable.
+- At request time the runtime reads query string values, validates types (including boolean coercion for `true`/`false`, `1`/`0`), applies defaults, and rejects missing required parameters. Ephemeral controls like pagination and sorting stay out of `[params]` and are applied after the core relation is resolved.
 - Additional runtime controls:
   - `?limit=` and `?offset=` apply post-query pagination without changing the SQL.
   - `?column=` can be repeated to restrict returned columns.
+
+### Route dependencies and execution modes
+
+- `cache_mode` in the TOML metadata (`materialize`, `passthrough`, or `force_live`) governs how the executor interacts with cached parquet artifacts when serving HTTP requests or answering internal calls.
+- `returns` declares the default return style for internal callers: `relation` (Arrow table), `parquet` (materialized artifact), or `error_frame` (schema-compatible error payload).
+- Each `[[uses]]` block defines an upstream dependency with an `alias`, the downstream route to `call`, an execution `mode` (`relation` or `parquet_path`), and an `[uses.args]` table for pass-through, renamed, or literal parameters. The executor resolves these dependencies before your SQL runs and registers them under the provided alias.
+- When `mode = "parquet_path"`, the executor materializes the upstream route (using its cache settings) and exposes a DuckDB view built from the parquet paths, enabling composable, cache-aware joins without additional Python code.
 
 ### Request lifecycle and paged caches
 
@@ -74,7 +81,7 @@ flowchart LR
   I --> J[Response]
 ```
 
-- Cache settings come from `[cache]` frontmatter (per route) merged with the global `[cache]` section in `config.toml`.
+- Cache settings come from the `[cache]` table in each route's TOML metadata merged with the global `[cache]` section in `config.toml`.
 - Routes must declare `cache.order_by` with one or more result columns; cache population validates the schema and every cache hit
   (including superset/shard reuse) re-sorts combined pages on those columns before applying offsets.
 - The executor snaps requested offsets to cache-friendly pages when a route enforces a `rows_per_page` limit, ensuring subsequent requests reuse the same Parquet artifacts.
@@ -97,14 +104,14 @@ All of the following formats work today, provided the route either allows them e
 | `?format=arrow`    | Arrow IPC stream for programmatic consumers.              |
 | `?format=arrow_rpc`| Arrow IPC stream with pagination headers.                 |
 
-Routes may set `default_format` in frontmatter to choose the response when `?format` is omitted.
+Routes may set `default_format` in TOML to choose the response when `?format` is omitted.
 
 ### Data sources and execution model
 
 - Every cache miss opens a fresh DuckDB connection, streams the prepared SQL with bound parameters, materialises Parquet pages under `storage_root/cache/<route>/<hash>/`, and then closes the connection.
 - Cache hits reuse those Parquet pages (validated against the route signature and TTL) without touching DuckDB, so most requests read only the slice they need from disk.
 - You can query DuckDB-native sources such as Parquet, CSV, or Iceberg directly inside the SQL (`SELECT * FROM read_parquet('data/orders.parquet')`).
-- For derived inputs, register preprocessors in the `.sql.md` file to inject computed parameters (e.g., resolve the latest production date) before SQL execution.
+- For derived inputs, register preprocessors in the TOML metadata to inject computed parameters (e.g., resolve the latest production date) before SQL execution.
 - After loading the cached (or freshly queried) page, server-side overlays (cell-level overrides) and append metadata apply automatically when configured in the contract.
 - When a route defines `cache.rows_per_page`, the backend overrides ad-hoc `limit`/`offset` requests so every consumer sees cache-aligned slices—helpful for HTML pagination and CLI batch jobs alike.
 - When invariant filters are configured, cached pages include value indexes so follow-up requests with the same `rows_per_page`
@@ -119,47 +126,132 @@ Routes may set `default_format` in frontmatter to choose the response when `?for
 - Users with a pseudo-session can request `/routes/{id}/share` to email HTML/CSV/Parquet snapshots using the configured email adapter.
 - Routes that define `[append]` metadata accept JSON payloads at `/routes/{id}/append` to persist rows into CSV logs stored under the configured storage root.
 
-## Writing a `.sql.md` route
+## How parameters work
 
-A `.sql.md` file is the single source of truth for a route: metadata, parameter definitions, documentation, and SQL live together. The structure is:
+Route parameters affect both cache determinism and SQL safety. Follow these guardrails when writing `.toml` and `.sql` files:
 
-1. **Frontmatter (`+++ … +++`):** TOML describing route metadata and behaviour.
-2. **Markdown body:** Human-facing documentation explaining the purpose, context, and usage.
-3. **SQL code block:** A fenced ```sql``` block containing the relation definition.
+### Rule A — Use bound parameters for any runtime/user input
 
-### Frontmatter contract
+```python
+con.sql(
+    "SELECT * FROM base_cost WHERE product = $product AND effective_date <= $as_of_date",
+    {"product": product, "as_of_date": as_of_date},
+)
+```
 
-Common keys include:
+- Bind everything that comes from the request context. Bound parameters eliminate SQL injection risk and ensure cache keys include the values that change the result set.
+
+### Rule B — Use literal interpolation only for compile-time constants
+
+If a value is fixed in TOML (for example `plant = "US01"` in `[uses.args]`), keep it literal in SQL:
+
+```sql
+WHERE plant = 'US01'
+```
+
+- Constants baked into the route definition are safe to inline because the compiler writes them, not the end user.
+
+### Rule C — Handle multi-value parameters (IN filters) using named array bindings
+
+```python
+con.sql(
+    "SELECT * FROM products WHERE product IN $products",
+    {"products": product_list},
+)
+```
+
+- DuckDB accepts sequence parameters directly. Use `IN $param` or `= ANY($param)` and pass a Python list/tuple. The executor expands these to a safe tuple internally, keeps the binding named, and folds the entire sequence into the cache key.
+- Never build comma-separated lists manually (for example `','.join(...)`)—that defeats injection protection and breaks cache determinism.
+
+### Rule D — Prefer named parameters in complex queries
+
+```python
+con.sql(
+    """
+    SELECT *
+    FROM routed
+    WHERE route IN $routes
+      AND operation = $operation
+      AND as_of_date BETWEEN $start AND $end
+    """,
+    {
+        "routes": ["R1", "R2", "R3"],
+        "operation": "OP10",
+        "start": start_date,
+        "end": end_date,
+    },
+)
+```
+
+- Named bindings keep long queries readable and allow you to reuse fragments safely. DuckDB will bind each occurrence by name.
+
+### Rule E — Keep ephemeral parameters out of `[params]`
+
+- Pagination, sorting, and debug toggles do not influence the cached dataset. Apply them after the core relation is resolved and continue to bind values where possible (for example `?limit=` is still bound when the executor applies it).
+
+### Summary table
+
+| Type                     | Example                       | Cache impact | Binding style       |
+| ------------------------ | ----------------------------- | ------------ | ------------------- |
+| Data-affecting parameter | `$product`, `$as_of_date`     | ✅ Included  | Named binding       |
+| Constant from TOML       | `'US01'`                      | Fixed        | Inline literal      |
+| Multi-value filter       | `$products` (list/tuple)      | ✅ Included  | Named array binding |
+| UI/ephemeral parameter   | `$limit`, `$sort`             | ❌ Excluded  | Bound post-query    |
+
+### Good vs bad patterns
+
+- ✅ `WHERE r.route = $route` — named, cached, and bound.
+- ✅ `WHERE plant = 'US01'` — static literal from TOML.
+- ✅ `WHERE product IN $products` — bound array sequence.
+- ❌ `f"WHERE product IN ({','.join(products)})"` — unsafe and non-deterministic.
+
+## Authoring a route
+
+A route now spans up to three sibling files in `routes_src/`:
+
+1. **`<stem>.toml` (required):** Metadata, parameters, cache rules, preprocessors, postprocessors, and declarative dependencies.
+2. **`<stem>.sql` (required):** The DuckDB relation that consumes registered dependencies and bound parameters.
+3. **`<stem>.md` (optional):** Additional prose documentation shown in tooling or docs.
+
+Legacy `<stem>.sql.md` files can still live in the tree. The compiler will split them into the three canonical files on first encounter and ignore the Markdown version afterwards.
+
+### TOML contract
+
+Common keys inside `<stem>.toml` include:
 
 - `id`: Stable identifier used for compilation, local runners, and helper endpoints.
 - `path`: HTTP path to mount (e.g., `/ops/smt/daily`).
 - `title`, `description`: Display metadata for HTML responses and route listings.
 - `version`: Optional semantic or document version string.
-- `default_format`: Default response format when `?format` is not supplied.
-- `allowed_formats`: Restricts runtime formats (values from the table above).
-- `[params.<name>]`: Parameter declaration blocks with `type`, `required`, `default`, `description`, and arbitrary extra keys.
-- `[cache]`: Enables on-disk pagination; set `rows_per_page`, optional TTLs, and **must** provide `order_by = ["column"]` so the
-  runtime can validate the schema and keep cached shards in deterministic order when they are recombined.
-- Presentation metadata blocks such as `[html_t]`, `[html_c]`, `[feed]`, `[overrides]`, `[append]`, `[charts]`, and `[assets]` configure post-processors, override policies, append targets, charts, and asset lookup hints.
-- `[[preprocess]]` entries or `[preprocess]` tables list callables (`module:function` or dotted paths) that massage parameters prior to execution.
-- Unexpected frontmatter keys trigger compile-time warnings so you can catch typos before shipping a route.
+- `default_format` / `allowed_formats`: Format negotiation defaults and restrictions.
+- `[params]`: Parameter declarations (see [How parameters work](#how-parameters-work)). String values become DuckDB type hints; tables support `type`, `required`, `default`, `description`, and custom keys.
+- `[cache]`: On-disk pagination and TTL controls. Set `order_by = ["column"]` so cached shards recombine deterministically and consider `invariant_filters` for safe superset reuse.
+- `cache_mode`: Choose how the executor interacts with the cache (`materialize`, `passthrough`, `force_live`).
+- `returns`: Default return style for internal callers (`relation`, `parquet`, or `error_frame`).
+- `[[uses]]`: Declarative route dependencies with optional `[uses.args]` tables that map or override parameters when invoking the upstream route.
+- Presentation metadata (`[html_t]`, `[html_c]`, `[feed]`, `[overrides]`, `[append]`, `[charts]`, `[assets]`) configuring built-in renderers and workflows.
+- `[[preprocess]]` entries that call into trusted Python helpers before SQL execution.
+- Unexpected keys trigger compile-time warnings so you can catch typos early.
 
 ### SQL placeholders
 
-- Write DuckDB SQL inside a fenced ```sql``` block.
-- Interpolate declared parameters with `{{param_name}}`. The compiler enforces that every placeholder corresponds to a declared parameter and converts it to a bound parameter in the prepared statement.
-- Do not concatenate user input manually—let the compiler handle binding to avoid injection risks.
+- Write DuckDB SQL in `<stem>.sql`.
+- Reference parameters registered in TOML using `{{param_name}}` or `$param_name`. The compiler validates every placeholder and replaces it with bound parameters in the generated Python.
+- Dependencies declared via `[[uses]]` are registered under their aliases before the SQL runs, so you can `SELECT * FROM upstream_alias` directly.
 
-### Example route
+### Example route trio
 
-```markdown
-+++
+`routes_src/production/workstation_line.toml`
+
+```toml
 id = "workstation_line"
 path = "/ops/workstations"
 title = "Workstation production by line"
 description = "Hourly production roll-up with scrap and labour attribution."
 default_format = "html_t"
 allowed_formats = ["html_t", "csv", "parquet", "json"]
+cache_mode = "materialize"
+returns = "relation"
 
 [cache]
 rows_per_page = 200
@@ -169,15 +261,9 @@ invariant_filters = [
   { param = "line", column = "line" }
 ]
 
-[params.plant_day]
-type = "str"
-required = true
-description = "Production day in YYYY-MM-DD format"
-
-[params.line]
-type = "str"
-required = false
-description = "Optional production line code"
+[params]
+plant_day = { type = "str", required = true, description = "Production day in YYYY-MM-DD format" }
+line = { type = "str", description = "Optional production line code" }
 
 [html_t]
 title_col = "line"
@@ -188,18 +274,23 @@ id = "throughput"
 type = "line"
 x = "hour"
 y = "units"
-+++
 
-# Workstation line throughput
+[[uses]]
+alias = "workstations"
+call = "production_base"
+mode = "parquet_path"
 
-Use this surface to reconcile hourly throughput, scrap, and labour time.
-Parameters are documented above; default charts plot `units` per hour.
+[uses.args]
+plant_day = "plant_day"
+```
+
+`routes_src/production/workstation_line.sql`
 
 ```sql
 WITH source AS (
   SELECT *
-  FROM read_parquet('data/workstations.parquet')
-  WHERE plant_day = {{plant_day}}
+  FROM workstations
+  WHERE plant_day = $plant_day
 )
 SELECT
   plant_day,
@@ -210,16 +301,22 @@ SELECT
   AVG(labour_hours) AS labour_hours,
   ANY_VALUE(supervisor) AS supervisor
 FROM source
-WHERE {{line}} IS NULL OR line = {{line}}
+WHERE $line IS NULL OR line = $line
 GROUP BY ALL
 ORDER BY plant_day, line, hour;
 ```
+
+`routes_src/production/workstation_line.md`
+
+```markdown
+# Workstation line throughput
+
+Use this surface to reconcile hourly throughput, scrap, and labour time.
+Parameters are documented in `workstation_line.toml`; the upstream `production_base`
+route provides the source relation as parquet-backed views.
 ```
 
-This single file defines documentation, parameter validation, output formatting, charts, override rules, and the actual dataset. The compiler consumes it directly—there are no auxiliary `.sql` or `.yaml` files.
-
-`[cache.invariant_filters]` entries accept optional `separator` strings for clients that send comma-separated values (e.g., `?line=assembly,packing`) and a `case_insensitive = true` flag when downstream filters should ignore casing differences.
-
+This trio mirrors the canonical on-disk structure: metadata in TOML, SQL in its own file, and optional Markdown for human context.
 ## Auto-compile and serve model
 
 - **Default behaviour:** `webbed-duck serve` compiles the configured source directory before launching so you always run with fresh artifacts.
@@ -248,7 +345,7 @@ Routes can further customise behaviour via presentation metadata—e.g., `[html_
 
 ### UI filters and Arrow RPC slices
 
-- Declare parameter controls in frontmatter so HTML responses surface filters:
+- Declare parameter controls in the TOML metadata so HTML responses surface filters:
 
   ```toml
   [params.name]
@@ -280,12 +377,12 @@ Routes can further customise behaviour via presentation metadata—e.g., `[html_
 
 ## MVP 0.4 — One-stop-shop data server
 
-> **Promise:** By 0.4, `webbed_duck` is the standalone app for data surfaces. Drop `.sql.md` files into a folder, start the server, and you get working web endpoints with HTML/CSV/Parquet/JSON output, parameter forms, lightweight auth, and optional cached snapshots. No hand-written FastAPI, no manual HTML, no bespoke export logic—just `.sql.md` contracts.
+> **Promise:** By 0.4, `webbed_duck` is the standalone app for data surfaces. Drop TOML + SQL route pairs into a folder, start the server, and you get working web endpoints with HTML/CSV/Parquet/JSON output, parameter forms, lightweight auth, and optional cached snapshots. No hand-written FastAPI, no manual HTML, no bespoke export logic—just declarative route definitions.
 
 ### Highlights in 0.4
 
 - Auto-compiling `webbed-duck serve` command with config-driven `source_dir` / `build_dir` defaults and a `--no-auto-compile` escape hatch for frozen artifacts.
-- Built-in watch mode (`server.watch` / `--watch`) that recompiles `.sql.md` files and hot-reloads FastAPI routes without restarting Uvicorn.
+- Built-in watch mode (`server.watch` / `--watch`) that recompiles `.toml` / `.sql` sources (and imports legacy `.sql.md` files) while hot-reloading FastAPI routes without restarting Uvicorn.
 - Dynamic route registry inside the FastAPI app so helpers such as `/routes/{id}` and sharing workflows immediately reflect newly compiled contracts.
 - CLI and docs tuned for a zero-config quick start: install, drop a contract in `routes_src/`, and run `webbed-duck serve --config config.toml --watch` to explore.
 
@@ -299,7 +396,7 @@ MVP 0.4 is the first release we expect to hand to an ops lead with no extra scaf
 
 ## Extending webbed_duck
 
-- **Preprocessors:** Register callables (e.g., `myapp.preprocess.resolve_shift_window`) and reference them in frontmatter to derive or validate parameters before the SQL runs.
+- **Preprocessors:** Register callables (e.g., `myapp.preprocess.resolve_shift_window`) and reference them in TOML metadata to derive or validate parameters before the SQL runs.
 - **Postprocessors and presentation:** Use `[html_t]`, `[html_c]`, `[feed]`, and `[[charts]]` to pass configuration into the built-in renderers. Custom renderers can be registered via the plugin registries in `webbed_duck.plugins.*`.
 - **Assets and overlays:** `[assets]` metadata controls how related images are resolved; `[overrides]` enables per-cell overrides with audit trails managed by the overlay store.
 - **Local execution:** `webbed_duck.core.local.run_route("route_id", params={...}, format="arrow")` executes a compiled route entirely in-process, useful for testing or batch jobs.

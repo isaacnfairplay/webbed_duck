@@ -9,6 +9,15 @@ from webbed_duck.core.routes import load_compiled_routes
 from webbed_duck.server.app import create_app
 from webbed_duck.config import load_config
 
+
+def _write_pair(tmp_path: Path, stem: str, toml: str, sql: str, doc: str | None = None) -> None:
+    toml_path = tmp_path / f"{stem}.toml"
+    toml_path.write_text(toml, encoding="utf-8")
+    sql_path = tmp_path / f"{stem}.sql"
+    sql_path.write_text(sql, encoding="utf-8")
+    if doc:
+        (tmp_path / f"{stem}.md").write_text(doc, encoding="utf-8")
+
 try:
     from fastapi.testclient import TestClient
 except ModuleNotFoundError:  # pragma: no cover - allow import error during type checking
@@ -98,6 +107,90 @@ def test_compile_route(tmp_path: Path) -> None:
     loaded = load_compiled_routes(build_dir)
     assert loaded[0].id == "sample"
 
+
+def test_compile_from_toml_sql_pair(tmp_path: Path) -> None:
+    _write_pair(
+        tmp_path,
+        "cost_lookup",
+        """
+path = "/cost_lookup"
+title = "Cost lookup by date"
+returns = "relation"
+cache_mode = "materialize"
+
+[params]
+as_of_date = "DATE"
+product = "VARCHAR"
+""".strip(),
+        """
+SELECT *
+FROM base
+WHERE product = $product AND as_of_date = $as_of_date
+""".strip(),
+    )
+
+    build_dir = tmp_path / "build"
+    compiled = compile_routes(tmp_path, build_dir)
+    assert compiled[0].id == "cost_lookup"
+    assert compiled[0].path == "/cost_lookup"
+    param = compiled[0].find_param("product")
+    assert param is not None
+    assert param.extra.get("duckdb_type") == "VARCHAR"
+    assert compiled[0].cache_mode == "materialize"
+    assert compiled[0].returns == "relation"
+
+
+def test_compile_parses_uses(tmp_path: Path) -> None:
+    _write_pair(
+        tmp_path,
+        "parent",
+        """
+path = "/parent"
+
+[[uses]]
+alias = "child_view"
+call = "child_route"
+mode = "parquet_path"
+
+[uses.args]
+value = "filter_value"
+
+[params]
+filter_value = "VARCHAR"
+""".strip(),
+        """
+SELECT *
+FROM child_view
+""".strip(),
+    )
+
+    build_dir = tmp_path / "build"
+    compiled = compile_routes(tmp_path, build_dir)
+    parent = compiled[0]
+    assert parent.uses
+    use = parent.uses[0]
+    assert use.alias == "child_view"
+    assert use.call == "child_route"
+    assert use.mode == "parquet_path"
+    assert use.args["value"] == "filter_value"
+
+
+def test_compile_imports_legacy_markdown(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"legacy\"\n"
+        "path = \"/legacy\"\n"
+        "+++\n\n"
+        "```sql\nSELECT 1\n```\n"
+    )
+    legacy_path = write_route(tmp_path, route_text)
+    build_dir = tmp_path / "build"
+    compile_routes(tmp_path, build_dir)
+
+    toml_path = legacy_path.with_suffix("").with_suffix(".toml")
+    sql_path = legacy_path.with_suffix("").with_suffix(".sql")
+    assert toml_path.exists()
+    assert sql_path.exists()
 
 def test_compile_extracts_directive_sections(tmp_path: Path) -> None:
     route_text = (
