@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import inspect
 from dataclasses import dataclass
 from typing import Callable, Dict, Protocol, runtime_checkable
 
@@ -79,10 +80,7 @@ def _load_external_adapter(path: str, config: Config) -> AuthAdapter:
         module_name, attr = path.rsplit(".", 1)
     module = importlib.import_module(module_name)
     factory = getattr(module, attr)
-    try:
-        adapter = factory(config)
-    except TypeError:
-        adapter = factory()
+    adapter = _call_external_adapter_factory(factory, config)
     if not isinstance(adapter, AuthAdapter):
         raise TypeError("External adapter factory must return an AuthAdapter")
     return adapter
@@ -92,6 +90,32 @@ def _require_session_store(store: SessionStore | None) -> SessionStore:
     if store is None:
         raise RuntimeError("Pseudo auth requires a session store")
     return store
+
+
+def _call_external_adapter_factory(factory: object, config: Config) -> AuthAdapter:
+    if not callable(factory):
+        raise TypeError("External adapter reference must be callable")
+
+    signature = inspect.signature(factory)  # type: ignore[arg-type]
+    parameters = list(signature.parameters.values())
+
+    accepts_config_positional = any(
+        param.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+        for param in parameters
+    )
+    has_var_positional = any(param.kind == inspect.Parameter.VAR_POSITIONAL for param in parameters)
+    has_var_keyword = any(param.kind == inspect.Parameter.VAR_KEYWORD for param in parameters)
+    accepts_config_keyword = "config" in signature.parameters and (
+        signature.parameters["config"].kind
+        in (inspect.Parameter.KEYWORD_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    )
+
+    if accepts_config_positional or has_var_positional:
+        return factory(config)  # type: ignore[call-arg]
+    if accepts_config_keyword or has_var_keyword:
+        return factory(config=config)  # type: ignore[call-arg]
+
+    return factory()  # type: ignore[call-arg]
 
 
 __all__ = [

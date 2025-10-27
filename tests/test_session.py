@@ -221,6 +221,55 @@ def test_resolve_auth_adapter_validates_external_factory(monkeypatch) -> None:
         resolve_auth_adapter("external", config=config, session_store=None)
 
 
+def test_resolve_auth_adapter_external_factory_accepts_config(monkeypatch) -> None:
+    module_name = "tests.fake_external_success"
+    module = ModuleType(module_name)
+
+    captured: dict[str, object] = {}
+
+    class DummyAdapter:
+        def __init__(self, cfg: Config) -> None:
+            self.config = cfg
+
+        async def authenticate(self, request):  # pragma: no cover - simple passthrough
+            return None
+
+    def build_adapter(config: Config) -> DummyAdapter:
+        captured["config"] = config
+        return DummyAdapter(config)
+
+    module.build_adapter = build_adapter  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, module_name, module)
+
+    config = Config()
+    config.auth.mode = "external"
+    config.auth.external_adapter = f"{module_name}:build_adapter"
+
+    adapter = resolve_auth_adapter("external", config=config, session_store=None)
+    assert isinstance(adapter, DummyAdapter)
+    assert captured["config"] is config
+    assert adapter.config is config
+
+
+def test_resolve_auth_adapter_external_factory_type_error_propagates(monkeypatch) -> None:
+    module_name = "tests.fake_external_failure"
+    module = ModuleType(module_name)
+
+    def build_adapter(config: Config):
+        raise TypeError("boom")
+
+    module.build_adapter = build_adapter  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, module_name, module)
+
+    config = Config()
+    config.auth.mode = "external"
+    config.auth.external_adapter = f"{module_name}:build_adapter"
+
+    with pytest.raises(TypeError) as excinfo:
+        resolve_auth_adapter("external", config=config, session_store=None)
+    assert "boom" in str(excinfo.value)
+
+
 def test_resolve_auth_adapter_falls_back_to_anonymous() -> None:
     config = Config()
     adapter = resolve_auth_adapter("unknown", config=config, session_store=None)
