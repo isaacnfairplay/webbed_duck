@@ -159,6 +159,29 @@ If a value is fixed in TOML (for example `plant = "US01"` in `[uses.args]`), kee
 WHERE plant = 'US01'
 ```
 
+### Binding DuckDB file paths safely
+
+DuckDB allows parameter binding for table functions, but file paths and lists require explicit typing so the engine does not
+interpret them as SQL identifiers. Use `TEXT` parameters (or arrays) alongside casts:
+
+```sql
+SELECT *
+FROM read_parquet(?::TEXT)
+```
+
+To pass multiple artifacts, bind a Python list and cast to a DuckDB array:
+
+```sql
+SELECT *
+FROM read_parquet(?::TEXT[])
+```
+
+When the list needs to be composed dynamically (for example, calling another route to discover shard files), prefer a
+preprocessor that returns the file list so the executor binds the resolved values rather than string-concatenating paths.
+This keeps cache keys deterministic and avoids SQL injection hazards.
+
+Executors treat sequences returned by preprocessors as DuckDB arrays automatically, so returning `list[str]` values from a preprocessor works seamlessly with `read_parquet($files::TEXT[])` without additional string manipulation.
+
 - Constants baked into the route definition are safe to inline because the compiler writes them, not the end user.
 
 ### Rule C — Handle multi-value parameters (IN filters) using named array bindings
