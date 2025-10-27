@@ -29,6 +29,36 @@ class SourceFingerprint:
         return dict(self.files) != dict(other.files)
 
 
+@dataclass(frozen=True)
+class PerfStats:
+    """Summarised latency metrics for ``webbed-duck perf``."""
+
+    iterations: int
+    rows_returned: int
+    average_ms: float
+    p95_ms: float
+
+    @classmethod
+    def from_timings(cls, timings: Sequence[float], rows_returned: int) -> "PerfStats":
+        if not timings:
+            raise ValueError("timings must contain at least one value")
+        ordered = sorted(timings)
+        average = statistics.fmean(ordered)
+        p95_index = int(round(0.95 * (len(ordered) - 1)))
+        p95 = ordered[p95_index]
+        return cls(iterations=len(ordered), rows_returned=rows_returned, average_ms=average, p95_ms=p95)
+
+    def format_report(self, route_id: str) -> str:
+        lines = [
+            f"Route: {route_id}",
+            f"Iterations: {self.iterations}",
+            f"Rows (last run): {self.rows_returned}",
+            f"Average latency: {self.average_ms:.3f} ms",
+            f"95th percentile latency: {self.p95_ms:.3f} ms",
+        ]
+        return "\n".join(lines)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="webbed-duck", description="webbed_duck developer tools")
     subparsers = parser.add_subparsers(dest="command")
@@ -191,15 +221,8 @@ def _cmd_perf(args: argparse.Namespace) -> int:
         elapsed = (time.perf_counter() - start) * 1000
         timings.append(elapsed)
         rows_returned = getattr(table, "num_rows", rows_returned)
-    timings.sort()
-    average = statistics.fmean(timings)
-    p95_index = int(round(0.95 * (len(timings) - 1)))
-    p95 = timings[p95_index]
-    print(f"Route: {args.route_id}")
-    print(f"Iterations: {iterations}")
-    print(f"Rows (last run): {rows_returned}")
-    print(f"Average latency: {average:.3f} ms")
-    print(f"95th percentile latency: {p95:.3f} ms")
+    stats = PerfStats.from_timings(timings, rows_returned)
+    print(stats.format_report(args.route_id))
     return 0
 
 
@@ -217,8 +240,6 @@ def _start_watcher(app, source_dir: Path, build_dir: Path, interval: float) -> t
 
 
 def _watch_source(app, source_dir: Path, build_dir: Path, interval: float, stop_event: threading.Event) -> None:
-    from .core.routes import load_compiled_routes
-
     snapshot = build_source_fingerprint(source_dir)
     while not stop_event.wait(interval):
         current = build_source_fingerprint(source_dir)
@@ -226,20 +247,31 @@ def _watch_source(app, source_dir: Path, build_dir: Path, interval: float, stop_
             continue
         snapshot = current
         try:
-            compile_routes(source_dir, build_dir)
-            routes = load_compiled_routes(build_dir)
+            count = _compile_and_reload(app, source_dir, build_dir)
         except Exception as exc:  # pragma: no cover - runtime safeguard
             print(f"[webbed-duck] Watcher failed to compile routes: {exc}", file=sys.stderr)
             continue
-        try:
-            reload_fn = getattr(app.state, "reload_routes", None)
-            if reload_fn is None:
-                raise RuntimeError("Application does not expose a reload_routes handler")
-            reload_fn(routes)
-        except Exception as exc:  # pragma: no cover - runtime safeguard
-            print(f"[webbed-duck] Watcher failed to reload routes: {exc}", file=sys.stderr)
-            continue
-        print(f"[webbed-duck] Reloaded {len(routes)} route(s) from {source_dir}")
+        print(f"[webbed-duck] Reloaded {count} route(s) from {source_dir}")
+
+
+def _compile_and_reload(
+    app,
+    source_dir: Path,
+    build_dir: Path,
+    *,
+    compile_fn=compile_routes,
+    load_fn=None,
+) -> int:
+    from .core.routes import load_compiled_routes
+
+    loader = load_fn or load_compiled_routes
+    compile_fn(source_dir, build_dir)
+    routes = loader(build_dir)
+    reload_fn = getattr(app.state, "reload_routes", None)
+    if reload_fn is None:
+        raise RuntimeError("Application does not expose a reload_routes handler")
+    reload_fn(routes)
+    return len(routes)
 
 
 def build_source_fingerprint(
