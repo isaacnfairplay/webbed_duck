@@ -233,6 +233,9 @@ class ReadmeContext:
     append_path: Path
     share_payload: dict
     share_db_hashes: tuple[str, str]
+    auth_allowed_domains: list[str]
+    email_bind_to_user_agent: bool
+    email_bind_to_ip_prefix: bool
     local_resolve_payload: dict
     incremental_rows: list
     checkpoints_exists: bool
@@ -562,6 +565,9 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
         append_path=Path(append_response.json()["path"]),
         share_payload={"meta": share_payload, "resolved": shared_response.json()},
         share_db_hashes=(share_hash, session_hash),
+        auth_allowed_domains=list(config.auth.allowed_domains),
+        email_bind_to_user_agent=config.email.bind_share_to_user_agent,
+        email_bind_to_ip_prefix=config.email.bind_share_to_ip_prefix,
         local_resolve_payload=local_resolve.json(),
         incremental_rows=incremental_rows,
         checkpoints_exists=checkpoints_path.exists(),
@@ -885,6 +891,14 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         )),
         (lambda s: s.startswith("- Authentication modes are controlled via `config.toml`"), lambda s: _ensure(
             ctx.share_payload["meta"]["token"] is not None, s
+        )),
+        (lambda s: s.startswith("- Pseudo sessions enforce the `auth.allowed_domains`"), lambda s: _ensure(
+            ctx.auth_allowed_domains == ["example.com"]
+            and ctx.share_db_hashes[0] != ctx.share_payload["meta"]["token"]
+            and ctx.share_db_hashes[1] != ""
+            and ctx.email_bind_to_user_agent is False
+            and ctx.email_bind_to_ip_prefix is False,
+            s,
         )),
         (lambda s: s.startswith("- Users with a pseudo-session"), lambda s: _ensure(
             ctx.share_payload["meta"]["rows_shared"] >= 1, s

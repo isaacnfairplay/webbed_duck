@@ -129,6 +129,7 @@ Routes may set `default_format` in TOML to choose the response when `?format` is
 ### Auth, sharing, and append workflows
 
 - Authentication modes are controlled via `config.toml`. The default mode is `none`. Enabling `auth.mode="pseudo"` activates the pseudo-session API (`/auth/pseudo/session`) and share endpoints.
+- Pseudo sessions enforce the `auth.allowed_domains` allow list and store only hashed session tokens/email addresses in `runtime/meta.sqlite3` for auditability. Optional bindings (`email.bind_share_to_user_agent`, `email.bind_share_to_ip_prefix`) ensure shares and sessions are tied to browser fingerprints when enabled.
 - Users with a pseudo-session can request `/routes/{id}/share` to email HTML/CSV/Parquet snapshots using the configured email adapter.
 - Routes that define `[append]` metadata accept JSON payloads at `/routes/{id}/append` to persist rows into CSV logs stored under the configured storage root.
 
