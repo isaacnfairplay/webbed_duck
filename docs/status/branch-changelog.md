@@ -1,5 +1,13 @@
 # Branch-level Changelog
 
+## Auth adapter robustness (work branch)
+
+- Harden external auth adapter loading by inspecting adapter factory signatures
+  before invocation so genuine `TypeError`s bubble up instead of being masked by
+  retry logic.
+- Document the external adapter contract in the README and add regression tests
+  covering config-aware factories and error propagation.
+
 ## Plugin registry reset + local runner guardrails (work branch)
 
 - Expose `reset_image_getters` / `reset_chart_renderers` helpers so tests and
