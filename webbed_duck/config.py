@@ -154,7 +154,10 @@ def _parse_server(data: Mapping[str, Any], base: ServerConfig) -> ServerConfig:
     if "host" in data:
         overrides["host"] = str(data["host"])
     if "port" in data:
-        overrides["port"] = int(data["port"])
+        port = int(data["port"])
+        if port <= 0 or port >= 65536:
+            raise ValueError("server.port must be between 1 and 65535")
+        overrides["port"] = port
     if "source_dir" in data:
         overrides["source_dir"] = (
             None if data["source_dir"] is None else _as_path(data["source_dir"])
@@ -166,7 +169,10 @@ def _parse_server(data: Mapping[str, Any], base: ServerConfig) -> ServerConfig:
     if "watch" in data:
         overrides["watch"] = bool(data["watch"])
     if "watch_interval" in data:
-        overrides["watch_interval"] = float(data["watch_interval"])
+        interval = float(data["watch_interval"])
+        if interval <= 0:
+            raise ValueError("server.watch_interval must be greater than zero")
+        overrides["watch_interval"] = interval
     if not overrides:
         return base
     return replace(base, **overrides)
@@ -200,8 +206,11 @@ def _parse_auth(data: Mapping[str, Any], base: AuthConfig) -> AuthConfig:
         overrides["mode"] = str(data["mode"])
     if "external_adapter" in data:
         overrides["external_adapter"] = str(data["external_adapter"]) if data["external_adapter"] is not None else None
-    if "allowed_domains" in data and isinstance(data["allowed_domains"], Sequence):
-        overrides["allowed_domains"] = [str(item) for item in data["allowed_domains"]]
+    if "allowed_domains" in data:
+        domains = data["allowed_domains"]
+        if isinstance(domains, (str, bytes)) or not isinstance(domains, Sequence):
+            raise ValueError("auth.allowed_domains must be a sequence of domain strings")
+        overrides["allowed_domains"] = [str(item).strip() for item in domains if str(item).strip()]
     if "session_ttl_minutes" in data:
         overrides["session_ttl_minutes"] = int(data["session_ttl_minutes"])
     if "remember_me_days" in data:
