@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 from pathlib import Path
 
+import sys
 import types
 
 import pytest
@@ -135,6 +136,181 @@ def test_cmd_perf_reports_stats(monkeypatch: pytest.MonkeyPatch, capsys: pytest.
     assert any("Rows (last run): 4" in line for line in lines)
 
 
+def test_cmd_compile_reports_count(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_compile(source: str | Path, build: str | Path) -> list[str]:
+        captured["source"] = source
+        captured["build"] = build
+        return ["a", "b", "c"]
+
+    monkeypatch.setattr(cli, "compile_routes", fake_compile)
+
+    code = cli._cmd_compile("src", "build")
+    assert code == 0
+    assert captured == {"source": "src", "build": "build"}
+    out = capsys.readouterr().out.strip()
+    assert out == "Compiled 3 route(s) to build"
+
+
+def test_cmd_run_incremental_invokes_runner(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    args = types.SimpleNamespace(
+        route_id="demo",
+        param="cursor",
+        start="2024-01-01",
+        end="2024-01-03",
+        build="build",
+        config="config.toml",
+    )
+    config_obj = object()
+    monkeypatch.setattr(cli, "load_config", lambda path: config_obj)
+
+    captured: dict[str, object] = {}
+    results = [
+        types.SimpleNamespace(route_id="demo", cursor_param="cursor", value="2024-01-01", rows_returned=5),
+        types.SimpleNamespace(route_id="demo", cursor_param="cursor", value="2024-01-02", rows_returned=7),
+    ]
+
+    def fake_run_incremental(
+        route_id: str,
+        *,
+        cursor_param: str,
+        start: dt.date,
+        end: dt.date,
+        config,
+        build_dir,
+    ):
+        captured["route_id"] = route_id
+        captured["cursor_param"] = cursor_param
+        captured["start"] = start
+        captured["end"] = end
+        captured["config"] = config
+        captured["build_dir"] = build_dir
+        return results
+
+    monkeypatch.setattr(cli, "run_incremental", fake_run_incremental)
+
+    code = cli._cmd_run_incremental(args)
+    assert code == 0
+    assert captured == {
+        "route_id": "demo",
+        "cursor_param": "cursor",
+        "start": dt.date(2024, 1, 1),
+        "end": dt.date(2024, 1, 3),
+        "config": config_obj,
+        "build_dir": "build",
+    }
+    lines = capsys.readouterr().out.strip().splitlines()
+    assert lines == [
+        "demo cursor=2024-01-01 rows=5",
+        "demo cursor=2024-01-02 rows=7",
+    ]
+
+
+def test_cmd_serve_auto_compile_and_watch(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source_dir = tmp_path / "src"
+    source_dir.mkdir()
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+
+    server_config = types.SimpleNamespace(
+        build_dir=build_dir,
+        source_dir=None,
+        auto_compile=False,
+        watch=False,
+        watch_interval=1.5,
+        host="127.0.0.1",
+        port=8000,
+    )
+    config_obj = types.SimpleNamespace(server=server_config)
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config_obj)
+
+    compiled_routes: list[Path] = []
+
+    def fake_compile(source: Path, build: Path) -> list[str]:
+        compiled_routes.append(source)
+        assert build == build_dir
+        return ["route"]
+
+    monkeypatch.setattr(cli, "compile_routes", fake_compile)
+
+    def fake_load(build: Path) -> list[str]:
+        assert build == build_dir
+        return ["route"]
+
+    monkeypatch.setattr("webbed_duck.core.routes.load_compiled_routes", fake_load)
+
+    watcher_calls: dict[str, object] = {}
+
+    class _Stop:
+        def __init__(self) -> None:
+            self.set_called = False
+
+        def set(self) -> None:
+            self.set_called = True
+
+    class _Thread:
+        def __init__(self) -> None:
+            self.join_timeout: float | None = None
+
+        def join(self, timeout: float | None = None) -> None:
+            self.join_timeout = timeout
+
+    def fake_start_watcher(app, source: Path, build: Path, interval: float):  # type: ignore[no-untyped-def]
+        watcher_calls["app"] = app
+        watcher_calls["source"] = source
+        watcher_calls["build"] = build
+        watcher_calls["interval"] = interval
+        stop = _Stop()
+        thread = _Thread()
+        watcher_calls["stop"] = stop
+        watcher_calls["thread"] = thread
+        return stop, thread
+
+    monkeypatch.setattr(cli, "_start_watcher", fake_start_watcher)
+
+    app_obj = types.SimpleNamespace()
+    monkeypatch.setattr("webbed_duck.server.app.create_app", lambda routes, config: app_obj)
+
+    run_calls: dict[str, object] = {}
+
+    class _FakeUvicorn:
+        @staticmethod
+        def run(app, host: str, port: int) -> None:  # type: ignore[no-untyped-def]
+            run_calls["app"] = app
+            run_calls["host"] = host
+            run_calls["port"] = port
+
+    monkeypatch.setitem(sys.modules, "uvicorn", _FakeUvicorn)
+
+    args = types.SimpleNamespace(
+        build=None,
+        source=str(source_dir),
+        config="config.toml",
+        host=None,
+        port=None,
+        no_auto_compile=False,
+        watch=True,
+        no_watch=False,
+        watch_interval=None,
+    )
+
+    code = cli._cmd_serve(args)
+    assert code == 0
+    assert compiled_routes == [source_dir]
+    assert watcher_calls["source"] == source_dir
+    assert watcher_calls["build"] == build_dir
+    assert watcher_calls["interval"] == 1.5
+    assert watcher_calls["stop"].set_called is True
+    assert watcher_calls["thread"].join_timeout == 2
+    assert run_calls == {"app": app_obj, "host": "127.0.0.1", "port": 8000}
+    err = capsys.readouterr().err
+    assert "Auto-compile" not in err
 def test_compile_and_reload_invokes_reload(tmp_path: Path) -> None:
     called: dict[str, object] = {}
 

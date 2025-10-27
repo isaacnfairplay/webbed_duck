@@ -1,5 +1,13 @@
 # Branch-level Changelog
 
+## CLI coverage hardening (work branch)
+
+- Add direct unit coverage for `webbed-duck compile`, `run-incremental`, and `serve`
+  entry points by monkeypatching compiler, executor, and uvicorn dependencies.
+- Remove the unused `EmailSender` import from `server.app` to keep runtime imports tidy.
+- Call out the optional FastAPI/Uvicorn extras next to the CLI docs so developers
+  know which packages are required for end-to-end HTTP testing.
+
 ## Email adapter validation (work branch)
 
 - Extracted email adapter loading into `webbed_duck.server.email.load_email_sender`

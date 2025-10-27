@@ -21,7 +21,7 @@ from .analytics import AnalyticsStore, ExecutionMetrics
 from .auth import resolve_auth_adapter
 from .cache import CacheStore
 from .csv import append_record
-from .email import EmailSender, load_email_sender
+from .email import load_email_sender
 from .execution import RouteExecutionError, RouteExecutor
 from .meta import MetaStore, _utcnow
 from .overlay import (
