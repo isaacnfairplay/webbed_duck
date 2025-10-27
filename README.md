@@ -17,7 +17,7 @@
    pip install webbed-duck
    ```
 
-2. **Create your route source directory** (default is `routes_src/`) and add paired route files (see [Authoring a route](#authoring-a-route)). Each route needs `<stem>.toml` for metadata and `<stem>.sql` for the query. Add `<stem>.md` when you want extra documentation. If you still have legacy `.sql.md` files, the compiler will import them into the new layout on first run.
+2. **Create your route source directory** (default is `routes_src/`) and add paired route files (see [Authoring a route](#authoring-a-route)). Each route needs `<stem>.toml` for metadata and `<stem>.sql` for the query. Add `<stem>.md` when you want extra documentation. If you still have legacy `.sql.md` files, the compiler will import them into the new layout on first run—after that conversion the TOML/SQL pair becomes the source of truth, so keep those files checked in and stop editing the old `.sql.md` artifact.
 
 3. **Compile the contracts into runnable manifests (optional when auto-compile is enabled).**
    ```bash
@@ -31,7 +31,7 @@
    - `--watch` keeps the compiler running and reloads routes in-place when `.toml`, `.sql`, or legacy `.sql.md` files change.
    - Pass `--no-auto-compile` to serve pre-built `routes_build/` artifacts without touching the source tree.
    - Watching performs filesystem polls once per second by default; disable it (or raise `server.watch_interval`) if you run on slower hardware where constant polling is undesirable.
-   - File watching relies on timestamp and size fingerprints of matching route files, so ensure your editor writes changes to disk (saving partial files can trigger reload attempts).
+   - File watching relies on timestamp and size fingerprints of matching route files, so ensure your editor writes changes to disk (saving partial files can trigger reload attempts). Network or synced file systems that coalesce timestamp updates may require a longer `watch_interval`.
    - The `webbed-duck perf` helper expects compiled routes in the build directory, uses PyArrow tables to compute latency statistics, and accepts repeated `--param name=value` overrides for the target route.
 
 > **Testing note:** The integration tests exercise the FastAPI stack via `fastapi.testclient`. If you install `webbed-duck` in a minimal environment without FastAPI (for example by vendoring only `webbed_duck/`), expect those tests to be skipped.
@@ -239,6 +239,8 @@ Common keys inside `<stem>.toml` include:
 - Presentation metadata (`[html_t]`, `[html_c]`, `[feed]`, `[overrides]`, `[append]`, `[charts]`, `[assets]`) configuring built-in renderers and workflows.
 - `[[preprocess]]` entries that call into trusted Python helpers before SQL execution.
 - Unexpected keys trigger compile-time warnings so you can catch typos early.
+
+> Legacy HTML comment directives (e.g., `<!-- @postprocess ... -->`) still parse for backwards compatibility, but new routes should express the same metadata directly in TOML. Mixing the styles makes diffs harder to audit and can hide typos that TOML validation would otherwise catch.
 
 ### SQL placeholders
 

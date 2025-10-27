@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable, Dict, Iterable, Mapping
+from typing import Callable, Dict, Iterable, Mapping, MutableMapping
 
 import pyarrow as pa
 
@@ -81,4 +81,24 @@ def _render_line(table: pa.Table, spec: Mapping[str, object]) -> str:
     )
 
 
-__all__ = ["register_chart_renderer", "render_route_charts"]
+def list_chart_renderers() -> MutableMapping[str, ChartRenderer]:
+    """Return a snapshot of the current renderer registry."""
+
+    return dict(_RENDERERS)
+
+
+def reset_chart_renderers(include_defaults: bool = True) -> None:
+    """Clear the registry and optionally reinstall built-in renderers."""
+
+    _RENDERERS.clear()
+    if include_defaults:
+        _RENDERERS["line"] = _render_line
+
+
+__all__ = [
+    "register_chart_renderer",
+    "render_route_charts",
+    "get_chart_renderer",
+    "list_chart_renderers",
+    "reset_chart_renderers",
+]

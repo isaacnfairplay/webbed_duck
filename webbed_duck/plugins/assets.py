@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Callable, Dict
+from typing import Callable, Dict, Mapping
 
 ImageGetter = Callable[[str, str], str]
 
@@ -31,4 +31,24 @@ def static_fallback(name: str, route_id: str) -> str:  # pragma: no cover - triv
     return f"/static/{name}"
 
 
-__all__ = ["register_image_getter", "get_image_getter", "resolve_image"]
+def list_image_getters() -> Mapping[str, ImageGetter]:
+    """Return a shallow copy of the current registry."""
+
+    return dict(_REGISTRY)
+
+
+def reset_image_getters(include_defaults: bool = True) -> None:
+    """Clear the registry and optionally reinstall built-in getters."""
+
+    _REGISTRY.clear()
+    if include_defaults:
+        _REGISTRY["static_fallback"] = static_fallback
+
+
+__all__ = [
+    "register_image_getter",
+    "get_image_getter",
+    "resolve_image",
+    "list_image_getters",
+    "reset_image_getters",
+]

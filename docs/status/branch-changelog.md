@@ -1,5 +1,17 @@
 # Branch-level Changelog
 
+## Plugin registry reset + local runner guardrails (work branch)
+
+- Expose `reset_image_getters` / `reset_chart_renderers` helpers so tests and
+  extensions can temporarily swap registries without poking private module
+  globals.
+- Expand plugin tests to cover registry resets and keep coverage focused on the
+  fallback image getter.
+- Add local-runner regression cases for unknown routes and invalid formats to
+  lock down error semantics used by docs and CLI helpers.
+- Refresh README guidance on canonical TOML/SQL route sources, filesystem watch
+  caveats, and the deprecation status of HTML comment directives.
+
 ## Route authoring guidance refresh (work branch)
 
 - Rewrite the README around the new TOML + SQL route layout, covering
