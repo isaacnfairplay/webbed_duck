@@ -16,7 +16,6 @@ class ServerConfig:
     """HTTP server configuration."""
 
     storage_root: Path = Path("storage")
-    theme: str = "system"
     host: str = "127.0.0.1"
     port: int = 8000
     source_dir: Path | None = Path("routes_src")
@@ -58,7 +57,6 @@ class EmailConfig:
     """Outbound email adapter configuration."""
 
     adapter: str | None = None
-    from_address: str = "no-reply@company.local"
     share_token_ttl_minutes: int = 90
     bind_share_to_user_agent: bool = False
     bind_share_to_ip_prefix: bool = False
@@ -153,8 +151,6 @@ def _parse_server(data: Mapping[str, Any], base: ServerConfig) -> ServerConfig:
     overrides: MutableMapping[str, Any] = {}
     if "storage_root" in data:
         overrides["storage_root"] = _as_path(data["storage_root"])
-    if "theme" in data:
-        overrides["theme"] = str(data["theme"])
     if "host" in data:
         overrides["host"] = str(data["host"])
     if "port" in data:
@@ -219,8 +215,6 @@ def _parse_email(data: Mapping[str, Any], base: EmailConfig) -> EmailConfig:
     overrides: MutableMapping[str, Any] = {}
     if "adapter" in data:
         overrides["adapter"] = str(data["adapter"]) if data["adapter"] is not None else None
-    if "from_address" in data:
-        overrides["from_address"] = str(data["from_address"])
     if "share_token_ttl_minutes" in data:
         overrides["share_token_ttl_minutes"] = int(data["share_token_ttl_minutes"])
     if "bind_share_to_user_agent" in data:

@@ -140,7 +140,6 @@ webbed_duck/
 ```toml
 [server]
 storage_root = "./storage"
-theme = "system"                      # system | light | dark
 
 [transport]
 mode = "insecure_http"                # or "tls_terminated_proxy"
@@ -158,7 +157,6 @@ cookie_name = "duckserv_sid"
 
 [email]
 adapter = "custom:examples.emailer.send_email"
-from_address = "no-reply@example.local"
 share_token_ttl_minutes = 90
 bind_share_to_user_agent = false
 bind_share_to_ip_prefix = false
@@ -691,7 +689,6 @@ gantt
 ```toml
 [server]
 storage_root = "./storage"
-theme = "system"
 
 [transport]
 mode = "insecure_http"
@@ -708,7 +705,6 @@ remember_me_days = 14
 
 [email]
 adapter = "custom:examples.emailer.send_email"
-from_address = "no-reply@company.local"
 share_token_ttl_minutes = 90
 bind_share_to_user_agent = false
 bind_share_to_ip_prefix = false
