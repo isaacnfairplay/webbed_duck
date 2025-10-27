@@ -60,35 +60,31 @@ def render_table_html(
     if config.ui.show_http_warning:
         banners.append("<p class='banner warning'>Development mode – HTTP only</p>")
     if config.ui.error_taxonomy_banner:
-        banners.append("<p class='banner info'>Errors follow the webbed_duck taxonomy (see docs).</p>")
+        banners.append(
+            "<p class='banner info'>Errors follow the webbed_duck taxonomy (see docs).</p>"
+        )
     chart_html = "".join(item["html"] for item in charts or [])
-    watermark_html = (
-        f"<div class='watermark'>{html.escape(watermark)}</div>" if watermark else ""
-    )
+    watermark_html = _render_watermark_html(watermark)
     styles = (
         "body{font-family:system-ui,sans-serif;margin:1.5rem;}"
         "table{border-collapse:collapse;width:100%;}"
         "th,td{border:1px solid #e5e7eb;padding:0.5rem;text-align:left;}"
         "tr:nth-child(even){background:#f9fafb;}"
-        ".cards{display:grid;gap:1rem;}"
         f"{_PARAMS_STYLES}"
         ".banner.warning{color:#b91c1c;}"
         ".banner.info{color:#2563eb;}"
         ".watermark{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-24deg);"
         "font-size:3.5rem;color:rgba(37,99,235,0.12);letter-spacing:0.2rem;pointer-events:none;user-select:none;}"
     )
-    return (
-        "<html><head><style>"
-        + styles
-        + "</style></head><body>"
-        + watermark_html
-        + "".join(banners)
-        + chart_html
-        + params_html
-        + summary_html
-        + f"<table><thead><tr>{header_html}</tr></thead><tbody>{rows_html}</tbody></table>"
-        + rpc_html
-        + "</body></html>"
+    return _render_html_document(
+        styles=styles,
+        watermark_html=watermark_html,
+        banners_html="".join(banners),
+        chart_html=chart_html,
+        params_html=params_html,
+        summary_html=summary_html,
+        content_html=f"<table><thead><tr>{header_html}</tr></thead><tbody>{rows_html}</tbody></table>",
+        rpc_html=rpc_html,
     )
 
 
@@ -158,13 +154,13 @@ def render_cards_html_with_assets(
             + f"<ul>{meta_items}</ul>"
             + "</article>"
         )
-    banners = ""
+    banners: list[str] = []
+    if config.ui.show_http_warning:
+        banners.append("<p class='banner warning'>Development mode – HTTP only</p>")
     if config.ui.error_taxonomy_banner:
-        banners = "<p class='banner info'>Error taxonomy: user, data, system.</p>"
+        banners.append("<p class='banner info'>Error taxonomy: user, data, system.</p>")
     chart_html = "".join(item["html"] for item in charts or [])
-    watermark_html = (
-        f"<div class='watermark'>{html.escape(watermark)}</div>" if watermark else ""
-    )
+    watermark_html = _render_watermark_html(watermark)
     styles = (
         "body{font-family:system-ui,sans-serif;margin:1.5rem;}"
         ".cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1.25rem;}"
@@ -177,18 +173,15 @@ def render_cards_html_with_assets(
         ".watermark{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-24deg);"
         "font-size:3.5rem;color:rgba(37,99,235,0.12);letter-spacing:0.2rem;pointer-events:none;user-select:none;}"
     )
-    return (
-        "<html><head><style>"
-        + styles
-        + "</style></head><body>"
-        + watermark_html
-        + banners
-        + chart_html
-        + params_html
-        + summary_html
-        + f"<section class='cards'>{''.join(cards)}</section>"
-        + rpc_html
-        + "</body></html>"
+    return _render_html_document(
+        styles=styles,
+        watermark_html=watermark_html,
+        banners_html="".join(banners),
+        chart_html=chart_html,
+        params_html=params_html,
+        summary_html=summary_html,
+        content_html=f"<section class='cards'>{''.join(cards)}</section>",
+        rpc_html=rpc_html,
     )
 
 
@@ -216,6 +209,38 @@ _PARAMS_STYLES = (
     ".pagination a{color:#2563eb;text-decoration:none;font-weight:600;}"
     ".pagination a:hover{text-decoration:underline;}"
 )
+
+
+def _render_watermark_html(watermark: str | None) -> str:
+    if not watermark:
+        return ""
+    return f"<div class='watermark'>{html.escape(watermark)}</div>"
+
+
+def _render_html_document(
+    *,
+    styles: str,
+    watermark_html: str,
+    banners_html: str,
+    chart_html: str,
+    params_html: str,
+    summary_html: str,
+    content_html: str,
+    rpc_html: str,
+) -> str:
+    return (
+        "<html><head><style>"
+        + styles
+        + "</style></head><body>"
+        + watermark_html
+        + banners_html
+        + chart_html
+        + params_html
+        + summary_html
+        + content_html
+        + rpc_html
+        + "</body></html>"
+    )
 
 
 def _merge_view_metadata(

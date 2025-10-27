@@ -668,6 +668,28 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
             "name='offset'" in ctx.html_text or "name=\"offset\"" in ctx.html_text,
             s,
         )),
+        (lambda s: s.startswith("HTML table and card responses also surface the development HTTP banner when"), lambda s: _ensure(
+            "Development mode" in ctx.html_text and "Development mode" in ctx.cards_text,
+            s,
+        )),
+        (lambda s: s.startswith("`ui.show_http_warning` is enabled and reuse the error taxonomy banner toggle"), lambda s: None),
+        (lambda s: s.startswith("so operators see consistent guidance. Every response embeds a"), lambda s: _ensure(
+            "Errors follow the webbed_duck taxonomy" in ctx.html_text
+            and "Error taxonomy" in ctx.cards_text,
+            s,
+        )),
+        (lambda s: s.startswith("`<script id=\"wd-rpc-config\">` payload alongside a"), lambda s: _ensure(
+            "wd-rpc-config" in ctx.html_text and "wd-rpc-config" in ctx.cards_text,
+            s,
+        )),
+        (lambda s: s.startswith("“Download this slice (Arrow)” link, making it easy"), lambda s: _ensure(
+            "Download this slice" in ctx.html_text and "Download this slice" in ctx.cards_text,
+            s,
+        )),
+        (lambda s: s.startswith("keeping the rendered form in sync"), lambda s: _ensure(
+            "name='offset'" in ctx.cards_text or "name=\"offset\"" in ctx.cards_text,
+            s,
+        )),
         (lambda s: s.startswith("- Table (`html_t`) and card (`html_c`) responses now emit"), lambda s: _ensure(
             ctx.html_rpc_payload and ctx.cards_rpc_payload, s
         )),
