@@ -157,3 +157,25 @@ def test_resolve_reference_alias_rejects_blank_string() -> None:
     detail = excinfo.value.detail
     assert detail["code"] == "invalid_parameter"
     assert "non-empty" in detail["message"]
+
+
+def test_parse_local_reference_merges_columns() -> None:
+    parsed = server_app._parse_local_reference(
+        "local:hello?column=one&columns=two, three ,,&format=JSON&limit=5&offset=2&extra=value"
+    )
+
+    assert isinstance(parsed, server_app.ParsedLocalReference)
+    assert parsed.route_id == "hello"
+    assert parsed.params == {"extra": "value"}
+    assert parsed.columns == ("one", "two", "three")
+    assert parsed.format == "JSON"
+    assert parsed.limit == "5"
+    assert parsed.offset == "2"
+
+
+def test_parse_local_reference_requires_local_prefix() -> None:
+    with pytest.raises(ValueError):
+        server_app._parse_local_reference("hello")
+
+    with pytest.raises(ValueError):
+        server_app._parse_local_reference("local:")
