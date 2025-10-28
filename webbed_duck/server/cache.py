@@ -636,6 +636,36 @@ def _canonicalize_invariant_mapping(
     return canonical
 
 
+def _normalize_casefold_text(value: str, *, case_insensitive: bool) -> str:
+    """Return ``value`` lower-cased when ``case_insensitive`` is enabled."""
+
+    return value.lower() if case_insensitive else value
+
+
+def _prepare_invariant_filter_values(
+    values: Sequence[object],
+    column: pa.ChunkedArray,
+    setting: InvariantFilterSetting,
+) -> tuple[list[object], bool, bool]:
+    """Normalise requested values for invariant filtering.
+
+    Returns ``(normalised_values, include_null, use_casefold)`` where ``use_casefold``
+    indicates the column should be lower-cased to match the values.
+    """
+
+    include_null = any(value is None for value in values)
+    non_null = [value for value in values if value is not None]
+    use_casefold = setting.case_insensitive and pa.types.is_string(column.type)
+    if use_casefold:
+        normalised = [
+            _normalize_casefold_text(str(item), case_insensitive=True)
+            for item in non_null
+        ]
+    else:
+        normalised = non_null
+    return normalised, include_null, use_casefold
+
+
 def _canonicalize_value_for_setting(value: object, setting: InvariantFilterSetting) -> str:
     if value is None:
         token = "__null__"
@@ -653,7 +683,7 @@ def _canonicalize_value_for_setting(value: object, setting: InvariantFilterSetti
     else:
         token = "str:" + str(value)
     if setting.case_insensitive and token.startswith("str:"):
-        token = "str:" + token[4:].lower()
+        token = "str:" + _normalize_casefold_text(token[4:], case_insensitive=True)
     return token
 
 
@@ -721,20 +751,15 @@ def _apply_invariant_filters(
         if setting.column not in result.column_names:
             continue
         column = result.column(setting.column)
-        non_null_values = [value for value in values if value is not None]
-        include_null = any(value is None for value in values)
-        if not non_null_values and not include_null:
+        normalized_values, include_null, use_casefold = _prepare_invariant_filter_values(
+            values,
+            column,
+            setting,
+        )
+        if not normalized_values and not include_null:
             return pa.Table.from_batches([], schema=result.schema)
-        if setting.case_insensitive and pa.types.is_string(column.type):
-            column_data = pc.utf8_lower(column)
-            value_set = (
-                pa.array([str(item).lower() for item in non_null_values])
-                if non_null_values
-                else None
-            )
-        else:
-            column_data = column
-            value_set = pa.array(non_null_values) if non_null_values else None
+        column_data = pc.utf8_lower(column) if use_casefold else column
+        value_set = pa.array(normalized_values) if normalized_values else None
         mask = None
         if value_set is not None and len(value_set) > 0:
             mask = pc.is_in(column_data, value_set=value_set)

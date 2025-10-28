@@ -1119,6 +1119,12 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
             and [row["product_code"] for row in ctx.invariant_superset_payload["rows"]] == ["gadget"],
             s,
         )),
+        (lambda s: s.startswith("> **Testing reminder:**"), lambda s: _ensure(
+            {"duckdb", "pyarrow", "fastapi", "uvicorn"}.issubset(
+                _dependency_names(ctx.dependencies)
+            ),
+            s,
+        )),
         (lambda s: s.startswith("- When invariant filters are configured"), lambda s: _ensure(
             ctx.invariant_shard_counts == [1, 1, 0]
             and {row["product_code"] for row in ctx.invariant_combined_payload["rows"]} == {"widget", "gadget"}

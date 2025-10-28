@@ -107,7 +107,8 @@ flowchart LR
   (including superset/shard reuse) re-sorts combined pages on those columns before applying offsets.
 - The executor snaps requested offsets to cache-friendly pages when a route enforces a `rows_per_page` limit, ensuring subsequent requests reuse the same Parquet artifacts.
 - Cache hits skip DuckDB entirely and hydrate the response from on-disk Parquet pages while still applying overrides, analytics, and post-processing.
-- Transformation-invariant filters can be declared under `[cache.invariant_filters]` (with `param`, `column`, optional `separator`, and `case_insensitive` flags). The cache stores per-value page maps so a superset result can satisfy filtered requests, and disjoint shards (e.g., `product_code=widget` and `product_code=gadget`) can be combined when clients request multiple values within the cache TTL.
+- Transformation-invariant filters can be declared under `[cache.invariant_filters]` (with `param`, `column`, optional `separator`, and `case_insensitive` flags). The cache stores per-value page maps so a superset result can satisfy filtered requests, and disjoint shards (e.g., `product_code=widget` and `product_code=gadget`) can be combined when clients request multiple values within the cache TTL. When `case_insensitive = true`, both cached tokens and runtime filters are normalised to lowercase so callers may supply any casing without triggering a cache miss.
+  > **Testing reminder:** Install DuckDB, PyArrow, FastAPI, and Uvicorn before running the pytest suite so cache and HTTP coverage execute instead of skipping.
 
 ### Supported outputs
 
