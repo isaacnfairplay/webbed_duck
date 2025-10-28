@@ -55,6 +55,7 @@ class RouteExecutionResult:
     total_rows: int
     offset: int
     limit: int | None
+    meta: Mapping[str, object] | None
 
 
 @dataclass(slots=True, frozen=True)
@@ -122,7 +123,7 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
     if not routes:
         raise ValueError("At least one route must be provided to create the application")
 
-    app = FastAPI(title="webbed_duck", version="0.4.3")
+    app = FastAPI(title="webbed_duck", version="0.4.6")
     app.state.config = config
     app.state.analytics = AnalyticsStore(
         weight=config.analytics.weight_interactions,
@@ -621,6 +622,7 @@ def _render_route_response(
             total_rows=result.total_rows,
             offset=result.offset,
             limit=result.limit,
+            meta=result.meta,
         )
 
     metadata = route.metadata if isinstance(route.metadata, Mapping) else {}
@@ -745,6 +747,7 @@ def _execute_route(
         total_rows=cache_result.total_rows,
         offset=cache_result.applied_offset,
         limit=applied_limit,
+        meta=cache_result.meta,
     )
 
 
@@ -795,6 +798,7 @@ def _format_response(
             format_hint=fmt,
             pagination=pagination_values,
             rpc_payload=rpc_payload,
+            cache_meta=result.meta,
         )
         response = HTMLResponse(html)
         _attach_rpc_headers(response, result)
@@ -819,6 +823,7 @@ def _format_response(
             format_hint=fmt,
             pagination=pagination_values,
             rpc_payload=rpc_payload,
+            cache_meta=result.meta,
         )
         response = HTMLResponse(html)
         _attach_rpc_headers(response, result)
@@ -1108,6 +1113,7 @@ def _build_share_artifacts(
             charts_meta,
             postprocess=post_opts,
             watermark=watermark_text,
+            cache_meta=result.meta,
         )
 
     attachments: list[tuple[str, bytes]] = []
@@ -1130,6 +1136,7 @@ def _build_share_artifacts(
                     charts_meta,
                     postprocess=post_opts,
                     watermark=watermark_text,
+                    cache_meta=result.meta,
                 )
             attachments.append((f"{route.id}.html", html_body.encode("utf-8")))
 

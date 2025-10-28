@@ -10,6 +10,21 @@
 - Add a FastAPI regression test covering HTML table rendering with invariant
   filters and drop the temporary invariant filter bug report doc.
 
+## Dynamic invariant select options (work branch)
+
+- Allow parameter `options = "...unique_values..."` to populate `<select>`
+  controls with unique values derived from cached invariant metadata and the
+  current result set when other invariants are active.
+- Default invariant-backed parameters without explicit `options` to the same
+  dynamic list so HTML forms stay in sync with cached filter values.
+- Extend the postprocess helpers to reuse parsed invariant settings, decode
+  cached tokens, and expose the new behaviour through FastAPI regression tests.
+- Add coverage showing dynamic invariant options merge cleanly with additional
+  static choices so TOML `options = ["...unique_values...", { value = "Other" }]`
+  yields the expected select menu.
+- Document the sentinel workflow in the README and `docs/demos/invariant_select_options.md`
+  so route authors can adopt dynamic select lists without digging through tests.
+
 ## Local reference parser consolidation (work branch)
 
 - Convert `_parse_local_reference` into a structured dataclass so `/local/resolve`

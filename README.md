@@ -274,6 +274,12 @@ con.sql(
 
 - Pagination, sorting, and debug toggles do not influence the cached dataset. Apply them after the core relation is resolved and continue to bind values where possible (for example `?limit=` is still bound when the executor applies it).
 
+### Invariant parameters and HTML select options
+
+- Parameters registered under `[cache.invariant_filters]` automatically receive dynamic `<select>` options in the HTML views when no explicit `options` list is present. The runtime treats `"...unique_values..."` as a sentinel that expands to the unique invariant values visible to the current request, combining cached metadata with the live filtered table when other invariants are active.
+- Mix the sentinel with static choices to append fallback rows such as an "Other" bucket: `options = ["...unique_values...", { value = "Other", label = "Custom value" }]`. Duplicate values collapse during rendering so the merged list stays tidy.
+- When a caller supplies a value that is not part of the cached index (for example a brand-new invariant token), the current value is still injected into the select so the form reflects the request faithfully.
+
 ### Summary table
 
 | Type                     | Example                       | Cache impact | Binding style       |

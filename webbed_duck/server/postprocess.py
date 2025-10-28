@@ -5,13 +5,20 @@ import datetime as dt
 import html
 import json
 from decimal import Decimal
-from typing import Iterable, Mapping, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 import pyarrow as pa
+import pyarrow.compute as pc
 
 from ..config import Config
 from ..core.routes import ParameterSpec, ParameterType
 from ..plugins.assets import resolve_image
+from .cache import (
+    InvariantFilterSetting,
+    canonicalize_invariant_value,
+    normalize_invariant_value,
+    parse_invariant_filters,
+)
 from .vendor import DEFAULT_CHARTJS_SOURCE
 
 
@@ -36,6 +43,7 @@ def render_table_html(
     format_hint: str | None = None,
     pagination: Mapping[str, object] | None = None,
     rpc_payload: Mapping[str, object] | None = None,
+    cache_meta: Mapping[str, object] | None = None,
 ) -> str:
     headers = table.column_names
     records = table_to_records(table)
@@ -46,6 +54,9 @@ def render_table_html(
         param_values,
         format_hint=format_hint,
         pagination=pagination,
+        route_metadata=route_metadata,
+        cache_meta=cache_meta,
+        current_table=table,
     )
     summary_html = _render_summary_html(
         len(records),
@@ -105,6 +116,7 @@ def render_cards_html_with_assets(
     format_hint: str | None = None,
     pagination: Mapping[str, object] | None = None,
     rpc_payload: Mapping[str, object] | None = None,
+    cache_meta: Mapping[str, object] | None = None,
 ) -> str:
     metadata = route_metadata or {}
     cards_meta: dict[str, object] = {}
@@ -126,6 +138,9 @@ def render_cards_html_with_assets(
         param_values,
         format_hint=format_hint,
         pagination=pagination,
+        route_metadata=route_metadata,
+        cache_meta=cache_meta,
+        current_table=table,
     )
     summary_html = _render_summary_html(
         len(records),
@@ -265,6 +280,9 @@ def _render_params_ui(
     *,
     format_hint: str | None = None,
     pagination: Mapping[str, object] | None = None,
+    route_metadata: Mapping[str, object] | None = None,
+    cache_meta: Mapping[str, object] | None = None,
+    current_table: pa.Table | None = None,
 ) -> str:
     if not params:
         return ""
@@ -282,6 +300,7 @@ def _render_params_ui(
     if not selected_specs:
         return ""
     values = dict(param_values or {})
+    invariant_settings = _extract_invariant_settings(route_metadata, cache_meta)
     show_set = {spec.name for spec in selected_specs}
     hidden_inputs = []
     format_value = values.get("format") or format_hint
@@ -354,7 +373,15 @@ def _render_params_ui(
                 + "/>"
             )
         elif control == "select":
-            options = _normalize_options(spec.extra.get("options"))
+            raw_options = spec.extra.get("options")
+            options = _resolve_select_options(
+                spec,
+                values,
+                raw_options,
+                invariant_settings,
+                cache_meta,
+                current_table,
+            )
             field_html.append(
                 "<select id='param-"
                 + html.escape(spec.name)
@@ -435,6 +462,259 @@ def _normalize_options(options: object) -> list[tuple[str, str]]:
                 ))
     return normalized
 
+
+_UNIQUE_VALUES_SENTINEL = "...unique_values..."
+
+
+def _resolve_select_options(
+    spec: ParameterSpec,
+    current_values: Mapping[str, object],
+    raw_options: object,
+    invariant_settings: Mapping[str, InvariantFilterSetting],
+    cache_meta: Mapping[str, object] | None,
+    current_table: pa.Table | None,
+) -> list[tuple[str, str]]:
+    static_prefill: list[tuple[str, str]] = []
+    wants_dynamic = False
+    if isinstance(raw_options, Sequence) and not isinstance(raw_options, (str, bytes, bytearray)):
+        filtered_items: list[Any] = []
+        for item in raw_options:
+            if isinstance(item, str) and item.strip().lower() == _UNIQUE_VALUES_SENTINEL:
+                wants_dynamic = True
+                continue
+            filtered_items.append(item)
+        if wants_dynamic:
+            static_prefill = _normalize_options(filtered_items)
+    elif isinstance(raw_options, str):
+        if raw_options.strip().lower() == _UNIQUE_VALUES_SENTINEL:
+            wants_dynamic = True
+    elif raw_options is None and spec.name in invariant_settings:
+        wants_dynamic = True
+
+    if wants_dynamic:
+        dynamic = _unique_invariant_options(
+            spec.name,
+            invariant_settings,
+            cache_meta,
+            current_values,
+            current_table,
+        )
+        combined = _merge_option_lists(dynamic or [("", "")], static_prefill)
+        return combined or [("", "")]
+
+    return _normalize_options(raw_options)
+
+
+def _merge_option_lists(
+    dynamic: list[tuple[str, str]],
+    static: list[tuple[str, str]],
+) -> list[tuple[str, str]]:
+    merged: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for value, label in dynamic + static:
+        if value in seen:
+            continue
+        merged.append((value, label))
+        seen.add(value)
+    return merged
+
+
+def _unique_invariant_options(
+    param_name: str,
+    invariant_settings: Mapping[str, InvariantFilterSetting],
+    cache_meta: Mapping[str, object] | None,
+    current_values: Mapping[str, object],
+    current_table: pa.Table | None,
+) -> list[tuple[str, str]]:
+    setting = invariant_settings.get(param_name)
+    if setting is None:
+        return []
+    index = _coerce_invariant_index(cache_meta)
+    if not index:
+        return []
+    param_index = index.get(param_name)
+    if not isinstance(param_index, Mapping):
+        return []
+
+    allowed_pages, filters_applied = _pages_for_other_invariants(
+        param_name,
+        invariant_settings,
+        index,
+        current_values,
+    )
+    if allowed_pages is not None and len(allowed_pages) == 0:
+        return [("", "")]
+
+    table_values: set[str] | None = None
+    if filters_applied and current_table is not None:
+        table_values = _table_unique_values(current_table, setting.column)
+        if table_values is not None and not table_values:
+            table_values = None
+
+    options: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for token, entry in param_index.items():
+        if not isinstance(entry, Mapping):
+            continue
+        entry_pages = _coerce_page_set(entry.get("pages"))
+        if allowed_pages is not None and entry_pages is not None:
+            if not entry_pages & allowed_pages:
+                continue
+        value = _token_to_option_value(token, entry)
+        if table_values is not None and value not in table_values:
+            continue
+        if value in seen:
+            continue
+        label = _token_to_option_label(token, entry)
+        options.append((value, label))
+        seen.add(value)
+
+    options.sort(key=lambda item: item[1].lower())
+    if not any(value == "" for value, _ in options):
+        options.insert(0, ("", ""))
+
+    current_value = _stringify_param_value(current_values.get(param_name))
+    if current_value and current_value not in {value for value, _ in options}:
+        options.append((current_value, current_value))
+
+    return options
+
+
+def _coerce_invariant_index(
+    cache_meta: Mapping[str, object] | None,
+) -> Mapping[str, Mapping[str, Mapping[str, object]]] | None:
+    if not isinstance(cache_meta, Mapping):
+        return None
+    index = cache_meta.get("invariant_index")
+    if isinstance(index, Mapping):
+        return index  # type: ignore[return-value]
+    return None
+
+
+def _table_unique_values(table: pa.Table | None, column: str) -> set[str] | None:
+    if table is None or column not in table.column_names:
+        return None
+    try:
+        unique = pc.unique(table.column(column))
+    except Exception:  # pragma: no cover - defensive fallback
+        return None
+    values: set[str] = set()
+    for item in unique.to_pylist():
+        values.add(_stringify_param_value(item))
+    return values
+
+
+def _pages_for_other_invariants(
+    target_param: str,
+    invariant_settings: Mapping[str, InvariantFilterSetting],
+    index: Mapping[str, Mapping[str, Mapping[str, object]]],
+    current_values: Mapping[str, object],
+) -> tuple[set[int] | None, bool]:
+    pages: set[int] | None = None
+    filters_applied = False
+    for param, setting in invariant_settings.items():
+        if param == target_param:
+            continue
+        raw_value = current_values.get(param)
+        normalized_raw = normalize_invariant_value(raw_value, setting)
+        normalized = [
+            value
+            for value in normalized_raw
+            if not (isinstance(value, str) and value == "")
+        ]
+        if not normalized:
+            continue
+        filters_applied = True
+        tokens = {
+            canonicalize_invariant_value(value, setting)
+            for value in normalized
+        }
+        if not tokens:
+            continue
+        param_entry = index.get(param)
+        if not isinstance(param_entry, Mapping):
+            continue
+        token_pages: set[int] = set()
+        unknown = False
+        for token in tokens:
+            entry = param_entry.get(token)
+            if not isinstance(entry, Mapping):
+                continue
+            entry_pages = _coerce_page_set(entry.get("pages"))
+            if entry_pages is None:
+                unknown = True
+                continue
+            token_pages.update(entry_pages)
+        if not token_pages and not unknown:
+            return set(), True
+        if not token_pages and unknown:
+            continue
+        if pages is None:
+            pages = token_pages
+        else:
+            pages &= token_pages
+        if pages is not None and not pages:
+            return set(), True
+    return pages, filters_applied
+
+
+def _coerce_page_set(pages: object) -> set[int] | None:
+    if not isinstance(pages, Sequence):
+        return None
+    result: set[int] = set()
+    for page in pages:
+        try:
+            result.add(int(page))
+        except (TypeError, ValueError):
+            continue
+    return result or None
+
+
+def _token_to_option_value(token: str, entry: Mapping[str, object]) -> str:
+    sample = entry.get("sample")
+    sample_text = str(sample) if isinstance(sample, str) else None
+    if token == "__null__":
+        return ""
+    prefix, _, payload = token.partition(":")
+    if prefix == "str":
+        return sample_text if sample_text is not None else payload
+    if prefix in {"bool", "num", "datetime", "bytes"} and payload:
+        return payload
+    return sample_text if sample_text is not None else token
+
+
+def _token_to_option_label(token: str, entry: Mapping[str, object]) -> str:
+    sample = entry.get("sample")
+    if isinstance(sample, str) and sample:
+        return sample
+    if token == "__null__":
+        return "(null)"
+    if token.startswith("str:"):
+        return "(blank)"
+    prefix, _, payload = token.partition(":")
+    return payload or token
+
+
+def _extract_invariant_settings(
+    route_metadata: Mapping[str, object] | None,
+    cache_meta: Mapping[str, object] | None,
+) -> dict[str, InvariantFilterSetting]:
+    settings: dict[str, InvariantFilterSetting] = {}
+    if isinstance(route_metadata, Mapping):
+        cache_block = route_metadata.get("cache")
+        if isinstance(cache_block, Mapping):
+            raw_filters = cache_block.get("invariant_filters")
+            for setting in parse_invariant_filters(raw_filters):
+                settings[setting.param] = setting
+    if settings:
+        return settings
+    index = _coerce_invariant_index(cache_meta)
+    if not index:
+        return settings
+    for param in index.keys():
+        if param not in settings:
+            settings[param] = InvariantFilterSetting(param=param, column=str(param))
+    return settings
 
 def _stringify_param_value(value: object) -> str:
     if value is None:
