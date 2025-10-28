@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pyarrow as pa
 
+from tests.conftest import write_sidecar_route
 from webbed_duck.core.compiler import compile_routes
 from webbed_duck.core.routes import RouteDefinition, load_compiled_routes
 from webbed_duck.core.local import run_route
@@ -57,7 +58,7 @@ def test_run_preprocessors_integrates_with_local_runner(tmp_path: Path) -> None:
     src_dir = tmp_path / "src"
     build_dir = tmp_path / "build"
     src_dir.mkdir()
-    (src_dir / "pre.sql.md").write_text(route_text, encoding="utf-8")
+    write_sidecar_route(src_dir, "pre", route_text)
     compile_routes(src_dir, build_dir)
     routes = load_compiled_routes(build_dir)
 

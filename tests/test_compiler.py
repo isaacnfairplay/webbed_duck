@@ -9,6 +9,8 @@ from webbed_duck.core.routes import load_compiled_routes
 from webbed_duck.server.app import create_app
 from webbed_duck.config import load_config
 
+from tests.conftest import write_sidecar_route
+
 
 def _write_pair(tmp_path: Path, stem: str, toml: str, sql: str, doc: str | None = None) -> None:
     toml_path = tmp_path / f"{stem}.toml"
@@ -25,9 +27,8 @@ except ModuleNotFoundError:  # pragma: no cover - allow import error during type
 
 
 def write_route(tmp_path: Path, content: str) -> Path:
-    path = tmp_path / "sample.sql.md"
-    path.write_text(content, encoding="utf-8")
-    return path
+    write_sidecar_route(tmp_path, "sample", content)
+    return tmp_path / "sample.toml"
 
 
 def test_compile_collects_directives(tmp_path: Path) -> None:
@@ -81,7 +82,7 @@ def test_compile_warns_on_unexpected_frontmatter(tmp_path: Path, capsys: pytest.
     compile_route_file(write_route(tmp_path, route_text))
     captured = capsys.readouterr()
     assert "unexpected frontmatter key(s) surplus" in captured.err
-    assert "sample.sql.md" in captured.err
+    assert "sample.toml" in captured.err
 
 
 def test_compile_route(tmp_path: Path) -> None:
@@ -227,10 +228,10 @@ def test_compile_extracts_directive_sections(tmp_path: Path) -> None:
 
 
 def test_compile_fails_without_sql(tmp_path: Path) -> None:
-    route_text = "+++\nid = \"broken\"\npath = \"/broken\"\n+++\n"
-    path = write_route(tmp_path, route_text)
-    with pytest.raises(RouteCompilationError):
-        compile_route_file(path)
+    toml_path = tmp_path / "broken.toml"
+    toml_path.write_text("id = \"broken\"\npath = \"/broken\"\n", encoding="utf-8")
+    with pytest.raises(FileNotFoundError):
+        compile_route_file(toml_path)
 
 
 @pytest.mark.skipif(TestClient is None, reason="fastapi is not available")

@@ -8,7 +8,7 @@
 
 ## Developer Experience
 
-- CLI gains `--no-auto-compile`, `--watch`, and `--watch-interval` flags plus a built-in file watcher for `.sql.md` contracts.
+- CLI gains `--no-auto-compile`, `--watch`, and `--watch-interval` flags plus a built-in file watcher for TOML/SQL sidecar contracts.
 - README, quick start steps, and configuration examples document the zero-boilerplate workflow and live reload behaviour.
 
 ## Testing Summary

@@ -66,7 +66,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     subparsers = parser.add_subparsers(dest="command")
 
     compile_parser = subparsers.add_parser("compile", help="Compile Markdown routes into Python modules")
-    compile_parser.add_argument("--source", default="routes_src", help="Directory containing *.sql.md route files")
+    compile_parser.add_argument(
+        "--source",
+        default="routes_src",
+        help="Directory containing TOML/SQL route sidecars",
+    )
     compile_parser.add_argument("--build", default="routes_build", help="Destination directory for compiled routes")
 
     serve_parser = subparsers.add_parser("serve", help="Run the development server")
@@ -277,7 +281,7 @@ def _compile_and_reload(
 
 
 def build_source_fingerprint(
-    source_dir: Path, *, patterns: Sequence[str] = ("*.toml", "*.sql", "*.sql.md")
+    source_dir: Path, *, patterns: Sequence[str] = ("*.toml", "*.sql", "*.md")
 ) -> SourceFingerprint:
     files: dict[str, tuple[float, int]] = {}
     root = Path(source_dir)

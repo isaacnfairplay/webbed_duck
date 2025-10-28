@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import write_sidecar_route
 from webbed_duck.config import load_config
 from webbed_duck.core.compiler import compile_routes
 from webbed_duck.core.routes import load_compiled_routes
@@ -13,17 +14,13 @@ except ModuleNotFoundError:  # pragma: no cover
     TestClient = None  # type: ignore
 
 
-def _write_route(base: Path, name: str, content: str) -> None:
-    (base / f"{name}.sql.md").write_text(content, encoding="utf-8")
-
-
 @pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
 def test_append_route_requires_columns(tmp_path: Path) -> None:
     src = tmp_path / "src"
     src.mkdir()
     build = tmp_path / "build"
 
-    _write_route(
+    write_sidecar_route(
         src,
         "append_missing_columns",
         (
@@ -64,7 +61,7 @@ def test_append_route_rejects_escape_destination(tmp_path: Path) -> None:
     src.mkdir()
     build = tmp_path / "build"
 
-    _write_route(
+    write_sidecar_route(
         src,
         "append_escape",
         (
@@ -107,7 +104,7 @@ def test_append_route_missing_metadata_returns_404(tmp_path: Path) -> None:
     src.mkdir()
     build = tmp_path / "build"
 
-    _write_route(
+    write_sidecar_route(
         src,
         "no_append",
         (

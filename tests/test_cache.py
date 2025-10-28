@@ -5,6 +5,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
+from tests.conftest import write_sidecar_route
 from webbed_duck.config import load_config
 from webbed_duck.core.compiler import compile_routes
 from webbed_duck.core.routes import load_compiled_routes
@@ -14,10 +15,6 @@ try:
     from fastapi.testclient import TestClient
 except ModuleNotFoundError:  # pragma: no cover - optional dependency
     TestClient = None  # type: ignore
-
-
-def _write_route(base: Path, name: str, content: str) -> None:
-    (base / f"{name}.sql.md").write_text(content, encoding="utf-8")
 
 
 @pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
@@ -36,7 +33,7 @@ def test_cache_hit_skips_duckdb(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         "+++\n\n"
         "```sql\nSELECT 'duck' AS bird\n```\n"
     )
-    _write_route(src, "cached", route_text)
+    write_sidecar_route(src, "cached", route_text)
     compile_routes(src, build)
     routes = load_compiled_routes(build)
     config = load_config(None)
@@ -78,7 +75,7 @@ def test_cache_enforces_row_limit(tmp_path: Path) -> None:
         "+++\n\n"
         "```sql\nSELECT range as value FROM range(0,5) ORDER BY value\n```\n"
     )
-    _write_route(src, "paged", route_text)
+    write_sidecar_route(src, "paged", route_text)
     compile_routes(src, build)
     routes = load_compiled_routes(build)
     config = load_config(None)
@@ -118,7 +115,7 @@ def test_cache_respects_enforce_page_size_false(tmp_path: Path) -> None:
         "+++\n\n"
         "```sql\nSELECT range as value FROM range(0,8) ORDER BY value\n```\n"
     )
-    _write_route(src, "flex", route_text)
+    write_sidecar_route(src, "flex", route_text)
     compile_routes(src, build)
     routes = load_compiled_routes(build)
     config = load_config(None)
@@ -170,7 +167,7 @@ def test_invariant_filter_uses_superset_cache(tmp_path: Path, monkeypatch: pytes
         "ORDER BY seq\n"
         "```\n"
     )
-    _write_route(src, "inventory", route_text)
+    write_sidecar_route(src, "inventory", route_text)
     compile_routes(src, build)
     routes = load_compiled_routes(build)
     config = load_config(None)
@@ -235,7 +232,7 @@ def test_invariant_filter_case_insensitive_values(
         "ORDER BY seq\n"
         "```\n"
     )
-    _write_route(src, "inventory", route_text)
+    write_sidecar_route(src, "inventory", route_text)
     compile_routes(src, build)
     routes = load_compiled_routes(build)
     config = load_config(None)
@@ -306,7 +303,7 @@ def test_invariant_combines_filtered_caches(tmp_path: Path, monkeypatch: pytest.
         "ORDER BY seq\n"
         "```\n"
     )
-    _write_route(src, "inventory", route_text)
+    write_sidecar_route(src, "inventory", route_text)
     compile_routes(src, build)
     routes = load_compiled_routes(build)
     config = load_config(None)
@@ -382,7 +379,7 @@ def test_invariant_partial_cache_triggers_query(tmp_path: Path, monkeypatch: pyt
         "ORDER BY seq\n"
         "```\n"
     )
-    _write_route(src, "inventory_partial", route_text)
+    write_sidecar_route(src, "inventory_partial", route_text)
     compile_routes(src, build)
     routes = load_compiled_routes(build)
     config = load_config(None)

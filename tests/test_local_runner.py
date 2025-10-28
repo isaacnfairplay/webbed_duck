@@ -5,6 +5,7 @@ from pathlib import Path
 import pyarrow as pa
 import pytest
 
+from tests.conftest import write_sidecar_route
 from webbed_duck.config import load_config
 from webbed_duck.core.compiler import compile_routes
 from webbed_duck.core.local import LocalRouteRunner, RouteNotFoundError, run_route
@@ -33,7 +34,7 @@ def _build_runner(tmp_path: Path) -> LocalRouteRunner:
     storage_root = tmp_path / "storage"
     src_dir.mkdir()
     storage_root.mkdir()
-    (src_dir / "hello.sql.md").write_text(ROUTE_TEXT, encoding="utf-8")
+    write_sidecar_route(src_dir, "hello", ROUTE_TEXT)
     compile_routes(src_dir, build_dir)
     routes = load_compiled_routes(build_dir)
     config = load_config(None)
@@ -71,7 +72,7 @@ def test_run_route_preserves_existing_entrypoint(tmp_path: Path) -> None:
     storage_root = tmp_path / "storage"
     src_dir.mkdir()
     storage_root.mkdir()
-    (src_dir / "hello.sql.md").write_text(ROUTE_TEXT, encoding="utf-8")
+    write_sidecar_route(src_dir, "hello", ROUTE_TEXT)
     compile_routes(src_dir, build_dir)
     routes = load_compiled_routes(build_dir)
     config = load_config(None)

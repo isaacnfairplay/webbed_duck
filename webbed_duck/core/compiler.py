@@ -102,8 +102,6 @@ def compile_routes(source_dir: str | Path, build_dir: str | Path) -> List[RouteD
         raise FileNotFoundError(f"Route source directory not found: {src}")
     dest.mkdir(parents=True, exist_ok=True)
 
-    _import_legacy_markdown_routes(src)
-
     compiled: List[RouteDefinition] = []
     for source in _iter_route_sources(src):
         text = _compose_route_text(source)
@@ -114,10 +112,29 @@ def compile_routes(source_dir: str | Path, build_dir: str | Path) -> List[RouteD
 
 
 def compile_route_file(path: str | Path) -> RouteDefinition:
-    """Compile a single Markdown route file into a :class:`RouteDefinition`."""
+    """Compile a single TOML/SQL sidecar into a :class:`RouteDefinition`."""
 
-    text = Path(path).read_text(encoding="utf-8")
-    return compile_route_text(text, source_path=Path(path))
+    toml_path = Path(path)
+    if toml_path.suffix != ".toml":
+        raise RouteCompilationError("compile_route_file expects a .toml metadata path")
+
+    sql_path = toml_path.with_suffix(".sql")
+    if not sql_path.exists():
+        raise FileNotFoundError(f"Missing SQL file for {toml_path}")
+
+    doc_path = toml_path.with_suffix(".md")
+    doc_text = doc_path.read_text(encoding="utf-8").strip() if doc_path.exists() else ""
+
+    toml_text = toml_path.read_text(encoding="utf-8").strip()
+    sql_text = sql_path.read_text(encoding="utf-8").strip()
+
+    parts: list[str] = []
+    if doc_text:
+        parts.append(doc_text)
+    parts.append(f"```sql\n{sql_text}\n```")
+    body = "\n\n".join(parts)
+    text = f"{FRONTMATTER_DELIMITER}\n{toml_text}\n{FRONTMATTER_DELIMITER}\n\n{body}\n"
+    return compile_route_text(text, source_path=toml_path)
 
 
 def compile_route_text(text: str, *, source_path: Path) -> RouteDefinition:
@@ -644,24 +661,6 @@ def _normalize_order_by(raw: object) -> list[str]:
     raise RouteCompilationError("cache.order_by must be a string or list of column names")
 
 
-def _import_legacy_markdown_routes(src_root: Path) -> None:
-    for legacy in sorted(src_root.rglob("*.sql.md")):
-        stem = Path(str(legacy)[: -len(".sql.md")])
-        toml_path = stem.with_suffix(".toml")
-        sql_path = stem.with_suffix(".sql")
-        if toml_path.exists() or sql_path.exists():
-            continue
-        text = legacy.read_text(encoding="utf-8")
-        frontmatter, body = _split_frontmatter(text)
-        sql = _extract_sql(body)
-        toml_path.write_text(frontmatter.strip() + "\n", encoding="utf-8")
-        sql_path.write_text(sql.strip() + "\n", encoding="utf-8")
-        doc = _remove_sql_block(body)
-        if doc.strip():
-            doc_path = stem.with_suffix(".md")
-            doc_path.write_text(doc.strip() + "\n", encoding="utf-8")
-
-
 def _iter_route_sources(root: Path) -> list[_RouteSource]:
     sources: list[_RouteSource] = []
     seen: set[Path] = set()
@@ -712,15 +711,9 @@ def _compose_route_text(source: _RouteSource) -> str:
     return f"{FRONTMATTER_DELIMITER}\n{toml_text}\n{FRONTMATTER_DELIMITER}\n\n{body}\n"
 
 
-def _remove_sql_block(body: str) -> str:
-    return SQL_BLOCK_PATTERN.sub("", body, count=1)
-
-
 def _derive_route_id(path: Path) -> str:
     name = path.name
-    if name.endswith(".sql.md"):
-        name = name[: -len(".sql.md")]
-    elif path.suffix:
+    if path.suffix:
         name = path.stem
     name = re.sub(r"[^a-zA-Z0-9_]+", "_", name)
     name = name.strip("_")
@@ -728,11 +721,6 @@ def _derive_route_id(path: Path) -> str:
 
 
 def _target_module_path(relative: Path) -> Path:
-    suffixes = relative.suffixes
-    if suffixes[-2:] == [".sql", ".md"]:
-        base = relative.with_suffix("")
-        base = base.with_suffix("")
-        return base.with_suffix(".py")
     if relative.suffix == ".toml":
         return relative.with_suffix(".py")
     raise RouteCompilationError(f"Unsupported route source path: {relative}")
