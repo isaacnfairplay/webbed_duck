@@ -1,5 +1,20 @@
 # Branch-level Changelog
 
+## Chart.js vendor hardening (work branch)
+
+- Add deterministic unit coverage for `ensure_chartjs_vendor` (existing asset reuse,
+  environment skip, HTTP errors, write failures) plus the FastAPI helper that wires
+  the vendored script into application state.
+- Simplify the vendor result container to expose `prepared`/`skipped` flags instead
+  of an unused filesystem handle and factor Chart.js setup into
+  `server.app._prepare_chartjs_assets` for readability.
+- Document air-gapped guidance in the README so operators pre-populate
+  `storage_root/static/vendor/chartjs/` before disabling the download helper.
+- Vendor the upstream Chart.js 4.4.3 build inside `webbed_duck.static.chartjs`
+  so deployments without outbound network access can serve the asset directly
+  from the installed package, and guard it with a regression test that asserts
+  the script ships in wheels.
+
 ## Chart JS response format (work branch)
 
 - Add a `chart_js` response that turns route `[[charts]]` specs into Chart.js

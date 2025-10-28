@@ -4,6 +4,7 @@ import io
 import time
 from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Iterable, Mapping, MutableMapping, Sequence
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
@@ -92,6 +93,19 @@ _ERROR_TAXONOMY = {
 }
 
 
+def _prepare_chartjs_assets(app: FastAPI, storage_root: Path) -> None:
+    """Populate Chart.js vendor state on ``app.state``."""
+
+    vendor_result = ensure_chartjs_vendor(storage_root)
+    chartjs_path = Path(storage_root) / "static" / "vendor" / "chartjs" / CHARTJS_FILENAME
+    app.state.chartjs_asset_path = chartjs_path
+    app.state.chartjs_vendor_error = vendor_result.error
+    if vendor_result.prepared and chartjs_path.exists():
+        app.state.chartjs_script_url = f"/vendor/{CHARTJS_FILENAME}?v={CHARTJS_VERSION}"
+    else:
+        app.state.chartjs_script_url = DEFAULT_CHARTJS_SOURCE
+
+
 def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
     if not routes:
         raise ValueError("At least one route must be provided to create the application")
@@ -116,21 +130,8 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
     )
 
     app.state.cache_store = CacheStore(config.server.storage_root)
-    vendor_result = ensure_chartjs_vendor(config.server.storage_root)
     chartjs_route = f"/vendor/{CHARTJS_FILENAME}"
-    chartjs_path = (
-        config.server.storage_root
-        / "static"
-        / "vendor"
-        / "chartjs"
-        / CHARTJS_FILENAME
-    )
-    app.state.chartjs_asset_path = chartjs_path
-    app.state.chartjs_vendor_error = vendor_result.error
-    if chartjs_path.exists():
-        app.state.chartjs_script_url = f"{chartjs_route}?v={CHARTJS_VERSION}"
-    else:
-        app.state.chartjs_script_url = DEFAULT_CHARTJS_SOURCE
+    _prepare_chartjs_assets(app, config.server.storage_root)
     app.state._dynamic_route_handles = _register_dynamic_routes(app, app.state.routes)
 
     @app.get(chartjs_route)

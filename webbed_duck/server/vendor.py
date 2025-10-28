@@ -20,8 +20,9 @@ CHARTJS_FILENAME: Final[str] = SCRIPT_NAME
 class ChartJSVendorResult:
     """Outcome for preparing the Chart.js runtime asset."""
 
-    path: Path | None
+    prepared: bool
     error: str | None = None
+    skipped: bool = False
 
 
 def ensure_chartjs_vendor(
@@ -47,25 +48,25 @@ def ensure_chartjs_vendor(
     vendor_dir.mkdir(parents=True, exist_ok=True)
     target = vendor_dir / CHARTJS_FILENAME
     if target.exists():
-        return ChartJSVendorResult(path=target)
+        return ChartJSVendorResult(prepared=True)
 
     skip_env = os.getenv("WEBDUCK_SKIP_CHARTJS_DOWNLOAD", "").lower()
     if skip_env in {"1", "true", "yes"}:
-        return ChartJSVendorResult(path=None, error="Chart.js download skipped via environment override")
+        return ChartJSVendorResult(prepared=False, error="Chart.js download skipped via environment override", skipped=True)
 
     try:
         with httpx.Client(timeout=timeout) as client:
             response = client.get(source_url)
             response.raise_for_status()
     except Exception as exc:  # pragma: no cover - network failure safety
-        return ChartJSVendorResult(path=None, error=f"{exc}")
+        return ChartJSVendorResult(prepared=False, error=f"{exc}")
 
     try:
         target.write_bytes(response.content)
     except OSError as exc:
-        return ChartJSVendorResult(path=None, error=f"{exc}")
+        return ChartJSVendorResult(prepared=False, error=f"{exc}")
 
-    return ChartJSVendorResult(path=target)
+    return ChartJSVendorResult(prepared=True)
 
 
 __all__ = [

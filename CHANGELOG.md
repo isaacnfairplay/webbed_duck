@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Hardened the Chart.js vendor bootstrap with deterministic unit tests, a
+  simplified result container, and a shared setup helper that drives the
+  FastAPI state plus README guidance for air-gapped deployments.
+- Bundled the Chart.js 4.4.3 runtime under `webbed_duck.static.chartjs` so the
+  package can serve the asset without downloading it at startup, and added a
+  regression test that verifies the script ships in the wheel.
 - Added a `chart_js` response format that converts route `[[charts]]` metadata into
   Chart.js canvases, including an embeddable `?embed=1` snippet, vendored
   runtime assets served from `/vendor/chart.umd.min.js`, and configurable
