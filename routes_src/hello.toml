@@ -1,10 +1,10 @@
-+++
 id = "hello_world"
 path = "/hello"
 title = "Hello world"
 description = "Return a greeting using DuckDB"
 methods = ["GET"]
 
+[params]
 [params.name]
 type = "str"
 required = false
@@ -44,16 +44,3 @@ destination = "hello_appends.csv"
 id = "greeting_length"
 type = "line"
 y = "greeting_length"
-+++
-
-# Hello world
-
-This route uses DuckDB string concatenation to produce a greeting.
-
-```sql
-SELECT
-  'Hello, ' || {{name}} || '!' AS greeting,
-  'Personalized greeting rendered by DuckDB' AS note,
-  LENGTH('Hello, ' || {{name}} || '!')::INT AS greeting_length,
-  CURRENT_TIMESTAMP AS created_at;
-```

@@ -1,5 +1,15 @@
 # Branch-level Changelog
 
+## DuckDB failure guardrails + canonical route layout (work branch)
+
+- Add a FastAPI regression test that forces a `duckdb.Error` during execution and
+  asserts the server returns the documented 500 response payload.
+- Convert the bundled `hello` sample into a TOML/SQL/MD triplet and regenerate
+  the compiled artifact so contributors see the canonical layout instead of the
+  deprecated `.sql.md` format.
+- Call out the refreshed sample in the README quick start to steer route authors
+  away from legacy Markdown frontmatter files.
+
 ## Local reference coverage + CLI guardrails (work branch)
 
 - Factor `/local/resolve` payload parsing into a typed helper reused by the endpoint so validation and formatting stay aligned with share flows.

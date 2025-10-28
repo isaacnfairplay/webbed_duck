@@ -17,7 +17,7 @@
    pip install webbed-duck
    ```
 
-2. **Create your route source directory** (default is `routes_src/`) and add paired route files (see [Authoring a route](#authoring-a-route)). Each route needs `<stem>.toml` for metadata and `<stem>.sql` for the query. Add `<stem>.md` when you want extra documentation. If you still have legacy `.sql.md` files, the compiler will import them into the new layout on first run—after that conversion the TOML/SQL pair becomes the source of truth, so keep those files checked in and stop editing the old `.sql.md` artifact.
+2. **Create your route source directory** (default is `routes_src/`) and add paired route files (see [Authoring a route](#authoring-a-route)). Each route needs `<stem>.toml` for metadata and `<stem>.sql` for the query. Add `<stem>.md` when you want extra documentation. If you still have legacy `.sql.md` files, the compiler will import them into the new layout on first run—after that conversion the TOML/SQL pair becomes the source of truth, so keep those files checked in and stop editing the old `.sql.md` artifact. The repository ships `routes_src/hello.toml` + `hello.sql` as a living example of the canonical layout so new contributors do not accidentally recreate `.sql.md` routes.
 
 3. **Compile the contracts into runnable manifests (optional when auto-compile is enabled).**
    ```bash
