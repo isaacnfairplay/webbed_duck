@@ -33,11 +33,6 @@ class LocalRouteRunner:
         self._config = config
         self._cache_store = CacheStore(self._config.server.storage_root)
         self._overlay_store = OverlayStore(self._config.server.storage_root)
-        self._executor = RouteExecutor(
-            self._routes,
-            cache_store=self._cache_store,
-            config=self._config,
-        )
 
     def run(
         self,
@@ -52,8 +47,14 @@ class LocalRouteRunner:
         route = self._routes.get(route_id)
         if route is None:
             raise RouteNotFoundError(route_id)
+        executor = RouteExecutor(
+            self._routes,
+            cache_store=self._cache_store,
+            config=self._config,
+        )
+
         try:
-            cache_result = self._executor.execute_relation(
+            cache_result = executor.execute_relation(
                 route,
                 params,
                 offset=0,
