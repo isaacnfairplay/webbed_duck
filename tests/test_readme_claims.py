@@ -294,6 +294,7 @@ class ReadmeContext:
     invariant_shard_counts: list[int]
     duckdb_binding_checks: dict[str, bool]
     external_adapter_checks: dict[str, bool]
+    share_config: object
 
 
 def _inject_file_list_preprocessor(params, *, context, files):
@@ -791,6 +792,7 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
         cache_enforced_payload=paged_payload,
         cache_flexible_payload=flex_payload,
         cache_config=config.cache,
+        share_config=config.share,
         invariant_superset_payload=invariant_superset_payload,
         invariant_superset_counts=invariant_superset_counts,
         invariant_combined_payload=invariant_combined_payload,
@@ -1158,6 +1160,12 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
             ctx.cache_enforced_payload["offset"] == 2 and ctx.cache_enforced_payload["limit"] == 2,
             s,
         )),
+        (lambda s: s.startswith("- The global `[cache]` configuration exposes"), lambda s: _ensure(
+            hasattr(ctx.cache_config, "page_rows")
+            and hasattr(ctx.cache_config, "enforce_global_page_size")
+            and ctx.cache_config.page_rows == Config().cache.page_rows,
+            s,
+        )),
         (lambda s: s.startswith("- Authentication modes are controlled via `config.toml`"), lambda s: _ensure(
             ctx.share_payload["meta"]["token"] is not None, s
         )),
@@ -1178,6 +1186,13 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
                 ).value,
                 TypeError,
             ),
+            s,
+        )),
+        (lambda s: s.startswith("- Shares enforce the global `share.max_total_size_mb`"), lambda s: _ensure(
+            hasattr(ctx.share_config, "max_total_size_mb")
+            and ctx.share_config.max_total_size_mb >= 1
+            and ctx.share_payload["meta"]["attachments"] == []
+            and ctx.share_payload["meta"]["zipped"] is False,
             s,
         )),
         (lambda s: s.startswith("- Internal tooling can reuse share-safe validation"), lambda s: _ensure(

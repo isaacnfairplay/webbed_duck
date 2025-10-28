@@ -3,11 +3,12 @@ from __future__ import annotations
 import sqlite3
 import sys
 import types
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
-from webbed_duck.config import load_config
+from webbed_duck.config import Config, load_config
 from webbed_duck.core.compiler import compile_routes
 from webbed_duck.core.routes import load_compiled_routes
 from webbed_duck.server.app import create_app
@@ -37,7 +38,13 @@ SELECT 'Hello, ' || {{name}} || '!' AS greeting ORDER BY greeting;
 """
 
 
-def _prepare_app(tmp_path: Path, email_module: str, *, route_text: str = ROUTE_TEXT) -> TestClient:
+def _prepare_app(
+    tmp_path: Path,
+    email_module: str,
+    *,
+    route_text: str = ROUTE_TEXT,
+    config_hook: Callable[[Config], None] | None = None,
+) -> TestClient:
     src_dir = tmp_path / "src"
     build_dir = tmp_path / "build"
     storage_root = tmp_path / "storage"
@@ -52,6 +59,8 @@ def _prepare_app(tmp_path: Path, email_module: str, *, route_text: str = ROUTE_T
     config.email.adapter = f"{email_module}:send_email"
     config.email.bind_share_to_user_agent = False
     config.email.bind_share_to_ip_prefix = False
+    if config_hook is not None:
+        config_hook(config)
     app = create_app(routes, config)
     return TestClient(app)
 
@@ -187,6 +196,46 @@ def test_share_with_attachments_and_redaction(tmp_path: Path) -> None:
     assert len(records) == 1
     _, _, _, _, attachments = records[-1]
     assert attachments and attachments[0][0].endswith(".zip")
+
+
+@pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
+def test_share_rejects_oversized_attachments(monkeypatch, tmp_path: Path) -> None:
+    records: list[tuple] = []
+    module_name = _install_email_adapter(records)
+
+    def _limit_budget(config: Config) -> None:
+        config.share.max_total_size_mb = 1
+        config.share.zip_attachments = False
+
+    client = _prepare_app(
+        tmp_path,
+        module_name,
+        route_text=ROUTE_ATTACH_TEXT,
+        config_hook=_limit_budget,
+    )
+
+    monkeypatch.setattr(
+        "webbed_duck.server.app._table_to_csv_bytes",
+        lambda table: b"x" * (2 * 1024 * 1024),
+    )
+
+    login = client.post("/auth/pseudo/session", json={"email": "user@example.com"})
+    assert login.status_code == 200
+
+    failure = client.post(
+        "/routes/report/share",
+        json={
+            "emails": ["friend@example.com"],
+            "params": {"name": "Duck"},
+            "attachments": ["csv"],
+            "zip": False,
+        },
+    )
+
+    assert failure.status_code == 400
+    detail = failure.json()["detail"]
+    assert detail["code"] == "invalid_parameter"
+    assert "Attachments exceed" in detail["message"]
 
 
 @pytest.mark.skipif(TestClient is None, reason="fastapi is not available")

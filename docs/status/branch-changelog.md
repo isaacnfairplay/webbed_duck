@@ -1,5 +1,16 @@
 # Branch-level Changelog
 
+## Share attachment safeguards + compiler guardrails (work branch)
+
+- Add regression tests covering share attachment size budgets, config parsing
+  for email/share overrides, and compiler orphan `.sql` detection so future
+  refactors preserve validation messages.
+- Extract a helper inside `server.app` to centralise share attachment size
+  enforcement, trimming duplication across raw and zipped responses.
+- Document the global cache pagination knobs and share size limits in the README
+  so operators configure limits intentionally instead of learning via runtime
+  errors.
+
 ## Cache invariant casefold coverage (work branch)
 
 - Add a FastAPI regression test proving case-insensitive invariant filters reuse

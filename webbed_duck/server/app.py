@@ -935,6 +935,11 @@ def _apply_column_redaction(table: pa.Table, redacted_columns: Sequence[str]) ->
     return table.select(keep), sorted(present)
 
 
+def _enforce_share_size(total_bytes: int, max_bytes: int) -> None:
+    if total_bytes > max_bytes:
+        raise _http_error("invalid_parameter", "Attachments exceed configured share size limit")
+
+
 def _zip_attachments(
     route_id: str, attachments: Sequence[tuple[str, bytes]], passphrase: object
 ) -> tuple[str, bytes, bool]:
@@ -1044,8 +1049,7 @@ def _build_share_artifacts(
 
     max_bytes = max(1, int(config.share.max_total_size_mb)) * 1024 * 1024
     total_size = sum(len(content) for _, content in attachments)
-    if total_size > max_bytes:
-        raise _http_error("invalid_parameter", "Attachments exceed configured share size limit")
+    _enforce_share_size(total_size, max_bytes)
 
     zip_requested = payload.get("zip")
     if zip_requested is None:
@@ -1059,8 +1063,7 @@ def _build_share_artifacts(
         if config.share.zip_passphrase_required and not zip_passphrase:
             raise _http_error("missing_parameter", "zip_passphrase is required for attachments")
         zip_name, zip_bytes, zip_encrypted = _zip_attachments(route.id, attachments, zip_passphrase)
-        if len(zip_bytes) > max_bytes:
-            raise _http_error("invalid_parameter", "Attachments exceed configured share size limit")
+        _enforce_share_size(len(zip_bytes), max_bytes)
         attachments_payload = [(zip_name, zip_bytes)]
         attachment_names = [zip_name]
         zipped = True
