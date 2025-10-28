@@ -70,3 +70,34 @@ allowed_domains = "example.com"
     with pytest.raises(ValueError, match="allowed_domains"):
         load_config(path)
 
+
+def test_load_config_parses_share_and_email_overrides(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path,
+        """
+[email]
+adapter = "tests.emailer:send"
+bind_share_to_user_agent = true
+bind_share_to_ip_prefix = true
+share_token_ttl_minutes = 45
+
+[share]
+max_total_size_mb = 2
+zip_attachments = false
+zip_passphrase_required = true
+watermark = false
+""".strip(),
+    )
+
+    config = load_config(path)
+
+    assert config.email.adapter == "tests.emailer:send"
+    assert config.email.bind_share_to_user_agent is True
+    assert config.email.bind_share_to_ip_prefix is True
+    assert config.email.share_token_ttl_minutes == 45
+
+    assert config.share.max_total_size_mb == 2
+    assert config.share.zip_attachments is False
+    assert config.share.zip_passphrase_required is True
+    assert config.share.watermark is False
+

@@ -140,6 +140,16 @@ WHERE product = $product AND as_of_date = $as_of_date
     assert compiled[0].returns == "relation"
 
 
+def test_compile_rejects_orphan_sql(tmp_path: Path) -> None:
+    build_dir = tmp_path / "build"
+    (tmp_path / "lonely.sql").write_text("SELECT 1", encoding="utf-8")
+
+    with pytest.raises(RouteCompilationError) as excinfo:
+        compile_routes(tmp_path, build_dir)
+
+    assert "Found SQL files without matching TOML" in str(excinfo.value)
+
+
 def test_compile_parses_uses(tmp_path: Path) -> None:
     _write_pair(
         tmp_path,
