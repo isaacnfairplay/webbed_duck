@@ -10,6 +10,10 @@
   `server.app._prepare_chartjs_assets` for readability.
 - Document air-gapped guidance in the README so operators pre-populate
   `storage_root/static/vendor/chartjs/` before disabling the download helper.
+- Vendor the upstream Chart.js 4.4.3 build inside `webbed_duck.static.chartjs`
+  so deployments without outbound network access can serve the asset directly
+  from the installed package, and guard it with a regression test that asserts
+  the script ships in wheels.
 
 ## Chart JS response format (work branch)
 

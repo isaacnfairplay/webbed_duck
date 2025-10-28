@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import importlib.resources as resources
 import types
 from pathlib import Path
 
@@ -13,7 +14,14 @@ from webbed_duck.server.vendor import (
     ChartJSVendorResult,
     ensure_chartjs_vendor,
 )
-from webbed_duck.static.chartjs import CHARTJS_VERSION
+from webbed_duck.static.chartjs import CHARTJS_VERSION, SCRIPT_NAME
+
+
+def test_bundled_chartjs_asset_present() -> None:
+    asset = resources.files("webbed_duck.static.chartjs").joinpath(SCRIPT_NAME)
+    assert asset.is_file(), "Packaged Chart.js asset missing"
+    content = asset.read_bytes()
+    assert len(content) > 100_000, "Packaged Chart.js asset unexpectedly small"
 
 
 class _Response:
