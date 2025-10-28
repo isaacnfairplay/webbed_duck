@@ -35,13 +35,9 @@
    - File watching relies on timestamp and size fingerprints of matching route files, so ensure your editor writes changes to disk (saving partial files can trigger reload attempts). Network or synced file systems that coalesce timestamp updates may require a longer `watch_interval`.
    - The `webbed-duck perf` helper expects compiled routes in the build directory, uses PyArrow tables to compute latency statistics, and accepts repeated `--param name=value` overrides for the target route.
 
-> **FastAPI extras required:** Install `fastapi` and `uvicorn` when you plan to run `webbed-duck serve` or execute the CLI-driven integration tests. Without those optional dependencies the HTTP coverage will be skipped, lowering confidence in auth, overlays, and caching flows.
+> **FastAPI runtime dependency:** The published wheel already includes `fastapi` and `uvicorn`. Treat them as core requirements for both development and production—removing them is only safe if you intentionally vendor `webbed_duck` inside another ASGI host and accept skipped HTTP coverage during tests.
 
-The published wheel currently depends on `fastapi` and `uvicorn` directly; if you later introduce a dedicated `server` optional dependency group or slim vendor builds, keep those extras aligned with this guidance so HTTP coverage remains installable.
-
-> **Testing note:** The integration tests exercise the FastAPI stack via `fastapi.testclient`. If you install `webbed-duck` in a minimal environment without FastAPI (for example by vendoring only `webbed_duck/`), expect those tests to be skipped. Install the optional server dependencies (`pip install fastapi uvicorn`) when you want the suite to cover the HTTP APIs; skipping them reduces confidence in auth, overlays, and cache behaviour and should be treated as "partial coverage" when assessing deployment readiness.
-
-> **Server optional dependencies:** The packaged wheel depends on `fastapi` and `uvicorn`. If you deliberately omit them (for example, when embedding the runtime into another ASGI host), remember that both the CLI and the regression suite will skip HTTP coverage. Always verify pseudo auth, share, and overlay flows inside an environment with the extras before promoting a build.
+> **Testing note:** The integration tests exercise the FastAPI stack via `fastapi.testclient`. When you purposefully uninstall the server stack (for example, in a trimmed-down tooling image) those tests will skip and coverage drops for auth, overlays, and caching flows. Reinstall `fastapi` and `uvicorn` whenever you need full confidence in HTTP behaviour.
 
 5. **Browse the routes.** Open `http://127.0.0.1:8000/hello` (or your route path) in a browser, or request alternate formats with `?format=csv`, `?format=parquet`, etc.
 
@@ -157,7 +153,7 @@ snippet still initialises the charts automatically.
 - Users with a pseudo-session can request `/routes/{id}/share` to email HTML/CSV/Parquet snapshots using the configured email adapter. The adapter is responsible for picking envelope details such as the sender address.
 - When configuring `email.adapter`, point to a callable via `module:function` or `module.attr`. The server validates the object is callable during startup/tests and raises a `TypeError` if a non-callable attribute is referenced, preventing silent share-delivery failures.
 - Shares enforce the global `share.max_total_size_mb` budget and honour `share.zip_attachments` / `share.zip_passphrase_required`. Oversized bundles return the documented `invalid_parameter` response before any email is queued, so raise the limit when exporting large CSV/Parquet attachments.
-- Internal tooling can reuse share-safe validation without sending mail by POSTing to `/local/resolve`. Supply a body such as `{"reference": "local:route-id?column=greeting", "params": {"name": "Ada"}, "columns": ["greeting"], "format": "json"}` to render the response. The endpoint reuses share parameter coercion, honours optional `redact_columns`, and defaults to JSON when no format is supplied.
+- Internal tooling can reuse share-safe validation without sending mail by POSTing to `/local/resolve`. Supply a body such as `{"reference": "local:route-id?column=greeting", "params": {"name": "Ada"}, "columns": ["greeting"], "format": "json"}` to render the response. The endpoint reuses share parameter coercion, honours optional `redact_columns`, and defaults to JSON when no format is supplied. Payloads may spell the reference as `reference`, `ref`, `target`, or `route`; whitespace is stripped and the value must be non-empty.
 - Routes that define `[append]` metadata accept JSON payloads at `/routes/{id}/append` to persist rows into CSV logs stored under the configured storage root.
 
 ## How parameters work

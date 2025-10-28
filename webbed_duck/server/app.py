@@ -470,19 +470,34 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
     return app
 
 
+_REFERENCE_KEYS = ("reference", "ref", "target", "route")
+
+
+def _resolve_reference_alias(payload: Mapping[str, object]) -> str:
+    for key in _REFERENCE_KEYS:
+        if key not in payload:
+            continue
+        value = payload[key]
+        if value is None:
+            continue
+        if not isinstance(value, str):
+            raise TypeError(f"{key} must be a string")
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError(f"{key} must be a non-empty string")
+        return stripped
+    raise KeyError("reference")
+
+
 def _build_local_reference_request(
     payload: Mapping[str, object], routes: Sequence[RouteDefinition]
 ) -> LocalReferenceRequest:
-    reference = (
-        payload.get("reference")
-        or payload.get("ref")
-        or payload.get("target")
-        or payload.get("route")
-    )
-    if reference is None:
-        raise _http_error("missing_parameter", "reference is required")
-    if not isinstance(reference, str):
-        raise _http_error("invalid_parameter", "reference must be a string")
+    try:
+        reference = _resolve_reference_alias(payload)
+    except KeyError as exc:
+        raise _http_error("missing_parameter", "reference is required") from exc
+    except (TypeError, ValueError) as exc:
+        raise _http_error("invalid_parameter", str(exc)) from exc
 
     try:
         (
