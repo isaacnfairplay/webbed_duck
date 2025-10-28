@@ -1,5 +1,11 @@
 # Branch-level Changelog
 
+## Cache pagination and analytics guardrails (work branch)
+
+- Document the CLI watch interval floor and cache enforcement toggle so route authors understand when limits are honoured.
+- Add FastAPI regression tests covering `[cache.enforce_page_size = false]` and analytics-disabled runs to keep behaviour from regressing.
+- Extracted a helper inside `server.app` that records analytics only when the feature is enabled, trimming direct state pokes and easing future refactors.
+
 ## Incremental runner resilience (work branch)
 
 - Refactored `core.incremental.run_incremental` to accept a pluggable runner, reuse

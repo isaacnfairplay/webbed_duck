@@ -16,6 +16,8 @@ from .core.compiler import compile_routes
 from .core.incremental import run_incremental
 from .core.local import run_route
 
+WATCH_INTERVAL_MIN = 0.2
+
 
 @dataclass(frozen=True)
 class SourceFingerprint:
@@ -143,7 +145,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
     watch_interval = config.server.watch_interval
     if args.watch_interval is not None:
-        watch_interval = max(0.2, float(args.watch_interval))
+        watch_interval = max(WATCH_INTERVAL_MIN, float(args.watch_interval))
 
     if auto_compile and source_dir is not None:
         try:
@@ -230,7 +232,7 @@ def _start_watcher(app, source_dir: Path, build_dir: Path, interval: float) -> t
     stop_event = threading.Event()
     thread = threading.Thread(
         target=_watch_source,
-        args=(app, source_dir, build_dir, max(0.2, float(interval)), stop_event),
+        args=(app, source_dir, build_dir, max(WATCH_INTERVAL_MIN, float(interval)), stop_event),
         daemon=True,
         name="webbed-duck-watch",
     )

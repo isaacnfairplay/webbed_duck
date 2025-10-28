@@ -102,6 +102,46 @@ def test_cache_enforces_row_limit(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
+def test_cache_respects_enforce_page_size_false(tmp_path: Path) -> None:
+    src = tmp_path / "src"
+    src.mkdir()
+    build = tmp_path / "build"
+    route_text = (
+        "+++\n"
+        "id = \"flex\"\n"
+        "path = \"/flex\"\n"
+        "title = \"Flexible paging\"\n"
+        "[cache]\n"
+        "rows_per_page = 2\n"
+        "enforce_page_size = false\n"
+        "order_by = [\"value\"]\n"
+        "+++\n\n"
+        "```sql\nSELECT range as value FROM range(0,8) ORDER BY value\n```\n"
+    )
+    _write_route(src, "flex", route_text)
+    compile_routes(src, build)
+    routes = load_compiled_routes(build)
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+    config.server.storage_root.mkdir()
+    config.cache.page_rows = 2
+    app = create_app(routes, config)
+    client = TestClient(app)
+
+    response = client.get(
+        "/flex",
+        params={"format": "json", "limit": 4, "offset": 1},
+    )
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["offset"] == 1
+    assert payload["limit"] == 4
+    assert payload["row_count"] == 4
+    values = [row["value"] for row in payload["rows"]]
+    assert values == [1, 2, 3, 4]
+
+
+@pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
 def test_invariant_filter_uses_superset_cache(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     src = tmp_path / "src"
     src.mkdir()

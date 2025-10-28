@@ -30,7 +30,8 @@
    ```
    - `--watch` keeps the compiler running and reloads routes in-place when `.toml`, `.sql`, or legacy `.sql.md` files change.
    - Pass `--no-auto-compile` to serve pre-built `routes_build/` artifacts without touching the source tree.
-   - Watching performs filesystem polls once per second by default; disable it (or raise `server.watch_interval`) if you run on slower hardware where constant polling is undesirable.
+- Watching performs filesystem polls once per second by default; disable it (or raise `server.watch_interval`) if you run on slower hardware where constant polling is undesirable.
+- The watch interval is clamped to a minimum of 0.2 seconds at runtime so accidental `--watch-interval 0` or extremely small values do not spin a tight loop.
    - File watching relies on timestamp and size fingerprints of matching route files, so ensure your editor writes changes to disk (saving partial files can trigger reload attempts). Network or synced file systems that coalesce timestamp updates may require a longer `watch_interval`.
    - The `webbed-duck perf` helper expects compiled routes in the build directory, uses PyArrow tables to compute latency statistics, and accepts repeated `--param name=value` overrides for the target route.
 
@@ -134,6 +135,7 @@ Routes may set `default_format` in TOML to choose the response when `?format` is
 - For derived inputs, register preprocessors in the TOML metadata to inject computed parameters (e.g., resolve the latest production date) before SQL execution.
 - After loading the cached (or freshly queried) page, server-side overlays (cell-level overrides) and append metadata apply automatically when configured in the contract.
 - When a route defines `cache.rows_per_page`, the backend overrides ad-hoc `limit`/`offset` requests so every consumer sees cache-aligned slices—helpful for HTML pagination and CLI batch jobs alike.
+- Set `[cache].enforce_page_size = false` in TOML when you need to honour caller-supplied `limit` values even though `rows_per_page` is configured; the executor keeps materialising pages of that size but skips the clamp when responding.
 - When invariant filters are configured, cached pages include value indexes so follow-up requests with the same `rows_per_page`
   setting can be resolved without re-querying DuckDB even if the client adds or removes filter values. The backend merges
   superset and shard caches, reorders the combined rows by `cache.order_by`, and then applies the requested offset/limit so HTML

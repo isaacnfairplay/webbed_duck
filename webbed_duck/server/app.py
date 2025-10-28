@@ -4,7 +4,7 @@ import io
 import time
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Iterable, Mapping, MutableMapping, Sequence
+from typing import Any, Iterable, Mapping, MutableMapping, Sequence
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import duckdb
@@ -546,15 +546,8 @@ def _render_route_response(
         charts_source = route.charts
     charts_meta = render_route_charts(result.table, charts_source)
 
-    if record_analytics and getattr(request.app.state.config.analytics, "enabled", True):
-        interactions = request.app.state.overlays.count_for_route(route.id)
-        request.app.state.analytics.record_execution(
-            route.id,
-            ExecutionMetrics.from_execution_result(
-                result,
-                interactions=interactions,
-            ),
-        )
+    if record_analytics:
+        _record_route_execution(request.app.state, route, result)
 
     return _format_response(
         result,
@@ -563,6 +556,24 @@ def _render_route_response(
         request,
         charts_meta,
         watermark=None,
+    )
+
+
+def _record_route_execution(state: Any, route: RouteDefinition, result: RouteExecutionResult) -> None:
+    analytics = getattr(state, "analytics", None)
+    config = getattr(state, "config", None)
+    overlays = getattr(state, "overlays", None)
+    if analytics is None or config is None or overlays is None:
+        return
+    if not getattr(getattr(config, "analytics", None), "enabled", True):
+        return
+    interactions = overlays.count_for_route(route.id)
+    analytics.record_execution(
+        route.id,
+        ExecutionMetrics.from_execution_result(
+            result,
+            interactions=interactions,
+        ),
     )
 
 

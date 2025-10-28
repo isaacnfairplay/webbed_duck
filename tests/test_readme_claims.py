@@ -118,6 +118,23 @@ SELECT range as value FROM range(0,5) ORDER BY value;
 """
 
 
+ROUTE_PAGED_FLEX = """+++
+id = "cached_page_flex"
+path = "/cached_page_flex"
+
+[cache]
+rows_per_page = 2
+enforce_page_size = false
+order_by = ["value"]
+
++++
+
+```sql
+SELECT range as value FROM range(0,8) ORDER BY value;
+```
+"""
+
+
 ROUTE_INVARIANT_SUPERSET = """+++
 id = "cached_invariant_superset"
 path = "/cached_invariant"
@@ -269,6 +286,7 @@ class ReadmeContext:
     composition_payload: dict
     parquet_artifacts: list[Path]
     cache_enforced_payload: dict
+    cache_flexible_payload: dict
     cache_config: object
     invariant_superset_payload: dict
     invariant_superset_counts: list[int]
@@ -332,6 +350,7 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
     (src_dir / "hello.sql.md").write_text(ROUTE_PRIMARY, encoding="utf-8")
     (src_dir / "by_date.sql.md").write_text(ROUTE_INCREMENTAL, encoding="utf-8")
     (src_dir / "cached_page.sql.md").write_text(ROUTE_PAGED, encoding="utf-8")
+    (src_dir / "cached_page_flex.sql.md").write_text(ROUTE_PAGED_FLEX, encoding="utf-8")
     (src_dir / "cached_invariant.sql.md").write_text(ROUTE_INVARIANT_SUPERSET, encoding="utf-8")
     (src_dir / "cached_invariant_shards.sql.md").write_text(ROUTE_INVARIANT_SHARDS, encoding="utf-8")
 
@@ -419,6 +438,12 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
             params={"format": "json", "limit": 1, "offset": 3},
         )
         paged_payload = paged_response.json()
+
+        flex_response = client.get(
+            "/cached_page_flex",
+            params={"format": "json", "limit": 4, "offset": 1},
+        )
+        flex_payload = flex_response.json()
 
         invariant_superset_counts: list[int] = []
         request_with_tracking(
@@ -756,6 +781,7 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
         composition_payload=composition_payload,
         parquet_artifacts=parquet_artifacts,
         cache_enforced_payload=paged_payload,
+        cache_flexible_payload=flex_payload,
         cache_config=config.cache,
         invariant_superset_payload=invariant_superset_payload,
         invariant_superset_counts=invariant_superset_counts,
@@ -928,6 +954,11 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         (lambda s: s.startswith("- Watching performs filesystem polls once per second"), lambda s: _ensure(
             ctx.reload_capable and Config().server.watch_interval == pytest.approx(1.0), s
         )),
+        (lambda s: s.startswith("- The watch interval is clamped to a minimum of 0.2 seconds"), lambda s: _ensure(
+            hasattr(cli_module, "WATCH_INTERVAL_MIN")
+            and cli_module.WATCH_INTERVAL_MIN == pytest.approx(0.2),
+            s,
+        )),
         (lambda s: s.startswith("- File watching relies on timestamp"), lambda s: _ensure(
             hasattr(cli_module, "SourceFingerprint")
             and hasattr(cli_module, "build_source_fingerprint")
@@ -1058,6 +1089,10 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         )),
         (lambda s: s.startswith("- The executor snaps requested offsets"), lambda s: _ensure(
             ctx.cache_enforced_payload["offset"] == 2 and ctx.cache_enforced_payload["limit"] == 2,
+            s,
+        )),
+        (lambda s: s.startswith("- Set `[cache].enforce_page_size = false`"), lambda s: _ensure(
+            ctx.cache_flexible_payload["offset"] == 1 and ctx.cache_flexible_payload["limit"] == 4,
             s,
         )),
         (lambda s: s.startswith("- Cache hits skip DuckDB entirely"), lambda s: _ensure(
