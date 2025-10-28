@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Hardened the Chart.js vendor bootstrap with deterministic unit tests, a
+  simplified result container, and a shared setup helper that drives the
+  FastAPI state plus README guidance for air-gapped deployments.
 - Added a `chart_js` response format that converts route `[[charts]]` metadata into
   Chart.js canvases, including an embeddable `?embed=1` snippet, vendored
   runtime assets served from `/vendor/chart.umd.min.js`, and configurable
