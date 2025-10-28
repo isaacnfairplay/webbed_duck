@@ -254,6 +254,19 @@ class CacheStore:
                     invariant_index,
                 )
                 pages_written += 1
+            invariant_values_meta: dict[str, list[str]] = {}
+            for param, entries in invariant_index.items():
+                if not isinstance(entries, Mapping):
+                    continue
+                tokens = sorted(
+                    str(token)
+                    for token, info in entries.items()
+                    if isinstance(info, Mapping)
+                    and int(info.get("rows", 0)) > 0
+                )
+                if tokens:
+                    invariant_values_meta[param] = tokens
+
             meta = {
                 "version": 1,
                 "created_at": time.time(),
@@ -264,7 +277,9 @@ class CacheStore:
                 "route_signature": route_signature,
                 "schema": base64.b64encode(schema.serialize().to_pybytes()).decode("ascii"),
                 "order_by": list(settings.order_by),
-                "invariant_values": _canonicalize_invariant_mapping(
+                "invariant_values": invariant_values_meta
+                if invariant_values_meta
+                else _canonicalize_invariant_mapping(
                     requested_invariants,
                     settings.invariant_filters,
                 ),
@@ -955,6 +970,18 @@ def fetch_cached_table(
             invariant_values=invariant_requests,
         )
         cache_hit = read.from_cache
+        if invariant_requests:
+            reread = store.try_read(
+                key,
+                route_signature=route_signature,
+                settings=settings,
+                offset=effective_offset,
+                limit=effective_limit,
+                invariant_filters=settings.invariant_filters,
+                requested_invariants=invariant_requests,
+            )
+            if reread is not None:
+                read = reread
 
     applied_limit = _finalize_limit(
         read.applied_limit,
