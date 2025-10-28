@@ -480,3 +480,170 @@ def test_invariant_filters_apply_to_html_views(tmp_path: Path) -> None:
     assert "Manufacturing" in html_text
     assert "<td>Engineering</td>" not in html_text
     assert "<td>Finance</td>" not in html_text
+
+
+@pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
+def test_invariant_select_defaults_to_unique_values(tmp_path: Path) -> None:
+    src = tmp_path / "src"
+    src.mkdir()
+    build = tmp_path / "build"
+    route_text = (
+        "+++\n"
+        "id = \"invariant_select_default\"\n"
+        "path = \"/invariant_select_default\"\n"
+        "title = \"Division selector\"\n"
+        "[params.division]\n"
+        "type = \"str\"\n"
+        "default = \"\"\n"
+        "ui_label = \"Division\"\n"
+        "ui_control = \"select\"\n"
+        "[cache]\n"
+        "rows_per_page = 50\n"
+        "order_by = [\"Division\", \"Department\"]\n"
+        "invariant_filters = [ { param = \"division\", column = \"Division\" } ]\n"
+        "[html_t]\n"
+        "show_params = [\"division\"]\n"
+        "+++\n\n"
+        "```sql\n"
+        "SELECT * FROM (VALUES\n"
+        "    ('ENG', 'Engineering', 'Mechanical Design'),\n"
+        "    ('FIN', 'Finance', 'Payroll'),\n"
+        "    ('MFG', 'Manufacturing', 'Assembly')\n"
+        ") AS t(Code, Division, Department)\n"
+        "WHERE {{ division }} = '' OR Division = {{ division }}\n"
+        "ORDER BY Division\n"
+        "```\n"
+    )
+    write_sidecar_route(src, "invariant_select_default", route_text)
+    compile_routes(src, build)
+    routes = load_compiled_routes(build)
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+    config.server.storage_root.mkdir()
+    app = create_app(routes, config)
+    client = TestClient(app)
+
+    response = client.get("/invariant_select_default", params={"format": "html_t"})
+    assert response.status_code == 200
+    text = response.text
+    assert "<option value='' selected>" in text
+    assert "<option value='Engineering'>Engineering</option>" in text
+    assert "<option value='Finance'>Finance</option>" in text
+    assert "<option value='Manufacturing'>Manufacturing</option>" in text
+
+
+@pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
+def test_invariant_unique_values_respect_filter_context(tmp_path: Path) -> None:
+    src = tmp_path / "src"
+    src.mkdir()
+    build = tmp_path / "build"
+    route_text = (
+        "+++\n"
+        "id = \"invariant_select_linked\"\n"
+        "path = \"/invariant_select_linked\"\n"
+        "title = \"Division and department\"\n"
+        "[params.division]\n"
+        "type = \"str\"\n"
+        "default = \"\"\n"
+        "ui_label = \"Division\"\n"
+        "ui_control = \"select\"\n"
+        "[params.department]\n"
+        "type = \"str\"\n"
+        "default = \"\"\n"
+        "ui_label = \"Department\"\n"
+        "ui_control = \"select\"\n"
+        "options = \"...unique_values...\"\n"
+        "[cache]\n"
+        "rows_per_page = 50\n"
+        "order_by = [\"Division\", \"Department\"]\n"
+        "invariant_filters = [\n"
+        "  { param = \"division\", column = \"Division\" },\n"
+        "  { param = \"department\", column = \"Department\" }\n"
+        "]\n"
+        "[html_t]\n"
+        "show_params = [\"division\", \"department\"]\n"
+        "+++\n\n"
+        "```sql\n"
+        "SELECT * FROM (VALUES\n"
+        "    ('Engineering', 'Mechanical Design'),\n"
+        "    ('Engineering', 'Electrical Systems'),\n"
+        "    ('Finance', 'Payroll'),\n"
+        "    ('Manufacturing', 'Assembly Line 1')\n"
+        ") AS t(Division, Department)\n"
+        "WHERE {{ division }} = '' OR Division = {{ division }}\n"
+        "ORDER BY Division, Department\n"
+        "```\n"
+    )
+    write_sidecar_route(src, "invariant_select_linked", route_text)
+    compile_routes(src, build)
+    routes = load_compiled_routes(build)
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+    config.server.storage_root.mkdir()
+    app = create_app(routes, config)
+    client = TestClient(app)
+
+    response = client.get(
+        "/invariant_select_linked",
+        params={"format": "html_t", "division": "Engineering"},
+    )
+    assert response.status_code == 200
+    text = response.text
+    assert "<option value='Engineering' selected>Engineering</option>" in text
+    department_select_start = text.index("<select id='param-department'")
+    department_select_end = text.index("</select>", department_select_start)
+    department_block = text[department_select_start:department_select_end]
+    assert "Mechanical Design" in department_block
+    assert "Electrical Systems" in department_block
+    assert "Payroll" not in department_block
+    assert "Assembly Line 1" not in department_block
+
+
+@pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
+def test_invariant_unique_values_merge_with_static_options(tmp_path: Path) -> None:
+    src = tmp_path / "src"
+    src.mkdir()
+    build = tmp_path / "build"
+    route_text = (
+        "+++\n"
+        "id = \"invariant_select_prefill\"\n"
+        "path = \"/invariant_select_prefill\"\n"
+        "title = \"Division selector\"\n"
+        "[params.division]\n"
+        "type = \"str\"\n"
+        "default = \"\"\n"
+        "ui_label = \"Division\"\n"
+        "ui_control = \"select\"\n"
+        "options = [\"...unique_values...\", { value = \"Other\", label = \"Custom\" }]\n"
+        "[cache]\n"
+        "rows_per_page = 50\n"
+        "order_by = [\"Division\"]\n"
+        "invariant_filters = [ { param = \"division\", column = \"Division\" } ]\n"
+        "[html_t]\n"
+        "show_params = [\"division\"]\n"
+        "+++\n\n"
+        "```sql\n"
+        "SELECT * FROM (VALUES\n"
+        "    ('ENG', 'Engineering'),\n"
+        "    ('FIN', 'Finance')\n"
+        ") AS t(Code, Division)\n"
+        "WHERE {{ division }} = '' OR Division = {{ division }}\n"
+        "ORDER BY Division\n"
+        "```\n"
+    )
+    write_sidecar_route(src, "invariant_select_prefill", route_text)
+    compile_routes(src, build)
+    routes = load_compiled_routes(build)
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+    config.server.storage_root.mkdir()
+    app = create_app(routes, config)
+    client = TestClient(app)
+
+    response = client.get("/invariant_select_prefill", params={"format": "html_t"})
+    assert response.status_code == 200
+    text = response.text
+    assert "<option value='' selected>" in text
+    assert "<option value='Engineering'>Engineering</option>" in text
+    assert "<option value='Finance'>Finance</option>" in text
+    assert "<option value='Other'>Custom</option>" in text

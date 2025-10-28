@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- _Nothing yet._
+
+## 0.4.6 - 2025-03-10
+
+- Default invariant-backed parameters to dynamic HTML select options powered by the
+  `"...unique_values..."` sentinel and document the workflow in the README and docs.
 - Hardened the Chart.js vendor bootstrap with deterministic unit tests, a
   simplified result container, and a shared setup helper that drives the
   FastAPI state plus README guidance for air-gapped deployments.

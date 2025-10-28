@@ -61,6 +61,7 @@ class CacheReadResult:
     applied_offset: int
     applied_limit: int | None
     from_cache: bool
+    meta: Mapping[str, object] | None = None
 
 
 @dataclass(slots=True)
@@ -71,6 +72,7 @@ class CacheQueryResult:
     applied_limit: int | None
     used_cache: bool
     cache_hit: bool
+    meta: Mapping[str, object] | None = None
 
 
 @dataclass(slots=True)
@@ -141,6 +143,7 @@ class CacheStore:
             applied_offset=applied_offset,
             applied_limit=applied_limit,
             from_cache=reused,
+            meta=meta,
         )
 
     def try_read(
@@ -279,7 +282,7 @@ class CacheStore:
                 "order_by": list(settings.order_by),
                 "invariant_values": invariant_values_meta
                 if invariant_values_meta
-                else _canonicalize_invariant_mapping(
+                else canonicalize_invariant_mapping(
                     requested_invariants,
                     settings.invariant_filters,
                 ),
@@ -372,6 +375,7 @@ class CacheStore:
                 applied_offset=applied_offset,
                 applied_limit=applied_limit,
                 from_cache=True,
+                meta=meta,
             )
 
         filters_to_apply: dict[str, Sequence[object]] = {}
@@ -380,7 +384,7 @@ class CacheStore:
             if not values:
                 continue
             requested_tokens = {
-                _canonicalize_value_for_setting(value, setting)
+                canonicalize_invariant_value(value, setting)
                 for value in values
             }
             meta_tokens = meta_values.get(setting.param)
@@ -400,6 +404,7 @@ class CacheStore:
                 applied_offset=applied_offset,
                 applied_limit=applied_limit,
                 from_cache=True,
+                meta=meta,
             )
 
         filtered = self._read_filtered_slice(
@@ -436,6 +441,7 @@ class CacheStore:
                 applied_offset=applied_offset,
                 applied_limit=applied_limit,
                 from_cache=True,
+                meta=meta,
             )
 
         relevant_filters = [f for f in invariant_filters if f.param in filter_values]
@@ -455,6 +461,7 @@ class CacheStore:
                 applied_offset=0,
                 applied_limit=applied_limit,
                 from_cache=True,
+                meta=meta,
             )
 
         filtered_tables: list[pa.Table] = []
@@ -506,6 +513,7 @@ class CacheStore:
             applied_offset=applied_offset,
             applied_limit=applied_limit,
             from_cache=True,
+            meta=meta,
         )
 
     def _load_meta(self, entry_path: Path) -> dict[str, object] | None:
@@ -540,7 +548,7 @@ def _parse_order_by(raw: object) -> list[str]:
     raise RuntimeError("cache.order_by must be a string or list of column names")
 
 
-def _parse_invariant_filters(raw: object) -> list[InvariantFilterSetting]:
+def parse_invariant_filters(raw: object) -> list[InvariantFilterSetting]:
     filters: list[InvariantFilterSetting] = []
     if isinstance(raw, Mapping):
         for key, value in raw.items():
@@ -599,13 +607,13 @@ def _collect_invariant_requests(
     collected: dict[str, tuple[object, ...]] = {}
     for setting in filters:
         raw_value = params.get(setting.param)
-        normalized = _normalize_invariant_value(raw_value, setting)
+        normalized = normalize_invariant_value(raw_value, setting)
         if normalized:
             collected[setting.param] = tuple(normalized)
     return collected
 
 
-def _normalize_invariant_value(
+def normalize_invariant_value(
     value: object,
     setting: InvariantFilterSetting,
 ) -> list[object]:
@@ -625,12 +633,12 @@ def _normalize_invariant_value(
     if isinstance(value, Sequence) and not isinstance(value, (str, bytes, bytearray)):
         flattened: list[object] = []
         for item in value:
-            flattened.extend(_normalize_invariant_value(item, setting))
+            flattened.extend(normalize_invariant_value(item, setting))
         return flattened
     return [value]
 
 
-def _canonicalize_invariant_mapping(
+def canonicalize_invariant_mapping(
     requested: Mapping[str, Sequence[object]] | None,
     filters: Sequence[InvariantFilterSetting],
 ) -> dict[str, list[str]]:
@@ -643,7 +651,7 @@ def _canonicalize_invariant_mapping(
         if setting is None:
             continue
         tokens = {
-            _canonicalize_value_for_setting(value, setting)
+            canonicalize_invariant_value(value, setting)
             for value in values
         }
         if tokens:
@@ -681,7 +689,7 @@ def _prepare_invariant_filter_values(
     return normalised, include_null, use_casefold
 
 
-def _canonicalize_value_for_setting(value: object, setting: InvariantFilterSetting) -> str:
+def canonicalize_invariant_value(value: object, setting: InvariantFilterSetting) -> str:
     if value is None:
         token = "__null__"
     elif isinstance(value, bool):
@@ -731,7 +739,7 @@ def _select_pages_for_invariants(
             return None
         value_pages: set[int] = set()
         for value in values:
-            token = _canonicalize_value_for_setting(value, setting)
+            token = canonicalize_invariant_value(value, setting)
             entry = param_index.get(token)
             if not isinstance(entry, Mapping):
                 return []
@@ -806,12 +814,22 @@ def _update_invariant_index(
         for item in counts.to_pylist():
             value = item.get("values")
             count = int(item.get("counts", 0))
-            token = _canonicalize_value_for_setting(value, setting)
-            entry = param_entry.setdefault(token, {"pages": [], "rows": 0})
+            token = canonicalize_invariant_value(value, setting)
+            display = "" if value is None else str(value)
+            entry = param_entry.setdefault(
+                token,
+                {
+                    "pages": [],
+                    "rows": 0,
+                    "sample": display,
+                },
+            )
             pages = entry.setdefault("pages", [])
             if page_index not in pages:
                 pages.append(page_index)
             entry["rows"] = int(entry.get("rows", 0)) + count
+            if "sample" not in entry and display:
+                entry["sample"] = display
 
 
 def _is_meta_valid(
@@ -870,7 +888,7 @@ def resolve_cache_settings(route: RouteDefinition, config: CacheConfig) -> Cache
             enforce_page_size = True
         invariants_meta = cache_meta.get("invariant_filters")
         if invariants_meta is not None:
-            invariant_filters = _parse_invariant_filters(invariants_meta)
+            invariant_filters = parse_invariant_filters(invariants_meta)
         raw_order = cache_meta.get("order_by")
         if raw_order is None and "order-by" in cache_meta:
             raw_order = cache_meta["order-by"]
@@ -927,6 +945,7 @@ def fetch_cached_table(
             applied_limit=applied_limit,
             used_cache=False,
             cache_hit=False,
+            meta=None,
         )
     route_signature = _route_signature(route)
     cache_params = _prepare_cache_params(params, settings.invariant_filters)
@@ -998,6 +1017,7 @@ def fetch_cached_table(
             applied_limit=applied_limit,
             used_cache=True,
             cache_hit=cache_hit,
+            meta=read.meta,
         ),
         settings.order_by,
     )
@@ -1091,6 +1111,7 @@ def _reuse_invariant_caches(
             applied_limit=applied_limit,
             used_cache=True,
             cache_hit=True,
+            meta=exact_hit.meta,
         )
 
     base_params = _drop_invariant_params(dict(cache_params), settings.invariant_filters)
@@ -1120,6 +1141,7 @@ def _reuse_invariant_caches(
                 applied_limit=applied_limit,
                 used_cache=True,
                 cache_hit=True,
+                meta=superset_hit.meta,
             )
 
     combinations = _generate_invariant_combinations(settings.invariant_filters, requested_invariants)
@@ -1168,6 +1190,7 @@ def _reuse_invariant_caches(
         applied_limit=applied_limit,
         used_cache=True,
         cache_hit=True,
+        meta=None,
     )
 
 
