@@ -14,6 +14,7 @@ except ImportError:  # pragma: no cover - optional dependency
 from webbed_duck.config import load_config
 from webbed_duck.core.routes import load_compiled_routes
 from webbed_duck.server.app import create_app
+from webbed_duck.static.chartjs import CHARTJS_FILENAME, CHARTJS_VERSION
 
 
 @pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
@@ -96,3 +97,33 @@ def test_html_cards_include_filters_and_rpc_metadata(tmp_path: Path) -> None:
     assert payload["limit"] == 1
     assert payload["offset"] == 0
     assert payload["total_rows"] == 1
+
+
+@pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
+def test_chart_js_format_supports_full_and_embed(tmp_path: Path) -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    routes = load_compiled_routes(repo_root / "routes_build")
+    config = load_config(None)
+    storage_root = tmp_path / "storage"
+    storage_root.mkdir()
+    vendor_dir = storage_root / "static" / "vendor" / "chartjs"
+    vendor_dir.mkdir(parents=True)
+    (vendor_dir / CHARTJS_FILENAME).write_text("window.Chart=function(){};")
+    config.server.storage_root = storage_root
+    app = create_app(routes, config)
+    client = TestClient(app)
+
+    response = client.get("/hello", params={"format": "chart_js"})
+    assert response.status_code == 200
+    assert response.headers["x-total-rows"] == "1"
+    assert f"/vendor/{CHARTJS_FILENAME}?v={CHARTJS_VERSION}" in response.text
+    assert "data-wd-chart='greeting_length-config'" in response.text
+
+    asset = client.get(f"/vendor/{CHARTJS_FILENAME}")
+    assert asset.status_code == 200
+    assert "window.Chart" in asset.text
+
+    embed = client.get("/hello", params={"format": "chart_js", "embed": "1"})
+    assert embed.status_code == 200
+    assert "<!doctype html>" not in embed.text
+    assert embed.text.count("<canvas") >= 1

@@ -4,7 +4,13 @@ import pyarrow as pa
 
 from webbed_duck.config import load_config
 from webbed_duck.core.routes import ParameterSpec, ParameterType
-from webbed_duck.server.postprocess import render_cards_html_with_assets, render_table_html
+from webbed_duck.server.postprocess import (
+    build_chartjs_configs,
+    render_cards_html_with_assets,
+    render_chartjs_html,
+    render_table_html,
+)
+from webbed_duck.static.chartjs import CHARTJS_FILENAME, CHARTJS_VERSION
 
 
 def test_render_table_html_renders_controls_and_rpc() -> None:
@@ -97,3 +103,52 @@ def test_render_cards_html_includes_assets_and_select_options() -> None:
     assert "Development mode – HTTP only" in html
     assert "Error taxonomy: user, data, system." in html
     assert "<div>chart</div>" in html
+
+
+def test_chartjs_build_and_render_embed_modes() -> None:
+    config = load_config(None)
+    config.ui.show_http_warning = True
+    config.ui.error_taxonomy_banner = True
+
+    table = pa.table({"day": ["Mon", "Tue"], "value": [1, 3]})
+    specs = [
+        {
+            "id": "trend",
+            "type": "line",
+            "x": "day",
+            "y": "value",
+            "title": "Values",
+        }
+    ]
+
+    charts = build_chartjs_configs(table, specs)
+    assert charts and charts[0]["config"]["type"] == "line"
+    assert charts[0]["config"]["data"]["labels"] == ["Mon", "Tue"]
+
+    full_html = render_chartjs_html(
+        charts,
+        config=config,
+        route_id="demo",
+        route_title="Demo",
+        route_metadata={"chart_js": {"canvas_height": 240}},
+        default_script_url=f"/vendor/{CHARTJS_FILENAME}?v={CHARTJS_VERSION}",
+        embed=False,
+    )
+    assert "<!doctype html>" in full_html
+    assert f"/vendor/{CHARTJS_FILENAME}?v={CHARTJS_VERSION}" in full_html
+    assert "data-wd-chart='trend-config'" in full_html
+    assert "Development mode – HTTP only" in full_html
+    assert "Charts suppress internal error details." in full_html
+
+    embed_html = render_chartjs_html(
+        charts,
+        config=config,
+        route_id="demo",
+        route_title="Demo",
+        route_metadata={},
+        default_script_url=f"/vendor/{CHARTJS_FILENAME}?v={CHARTJS_VERSION}",
+        embed=True,
+    )
+    assert "<!doctype html>" not in embed_html
+    assert embed_html.count("<canvas") == 1
+    assert "Charts suppress internal error details" not in embed_html

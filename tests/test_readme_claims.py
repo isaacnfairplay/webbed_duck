@@ -28,6 +28,7 @@ from webbed_duck.server.app import create_app
 from webbed_duck.server.auth import resolve_auth_adapter
 from webbed_duck.server.email import load_email_sender
 from webbed_duck.server.execution import RouteExecutor
+from webbed_duck.static.chartjs import CHARTJS_FILENAME, CHARTJS_VERSION
 
 try:
     from fastapi.testclient import TestClient
@@ -248,6 +249,9 @@ class ReadmeContext:
     cards_text: str
     cards_headers: dict[str, str]
     feed_text: str
+    chart_js_text: str
+    chart_js_headers: dict[str, str]
+    chart_js_embed_text: str
     html_rpc_payload: dict
     cards_rpc_payload: dict
     csv_headers: dict[str, str]
@@ -396,6 +400,10 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
     config.email.bind_share_to_user_agent = False
     config.email.bind_share_to_ip_prefix = False
 
+    vendor_dir = storage_root / "static" / "vendor" / "chartjs"
+    vendor_dir.mkdir(parents=True)
+    (vendor_dir / CHARTJS_FILENAME).write_text("window.Chart=function(){};")
+
     app = create_app(routes, config)
     reload_capable = hasattr(app.state, "reload_routes")
 
@@ -431,6 +439,11 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
         html_response = client.get("/hello", params={"format": "html_t"})
         cards_response = client.get("/hello", params={"format": "html_c"})
         feed_response = client.get("/hello", params={"format": "feed"})
+        chart_js_response = client.get("/hello", params={"format": "chart_js"})
+        chart_js_embed_response = client.get(
+            "/hello",
+            params={"format": "chart_js", "embed": "1"},
+        )
         csv_response = client.get("/hello", params={"format": "csv"})
         parquet_response = client.get("/hello", params={"format": "parquet"})
         arrow_response = client.get("/hello", params={"format": "arrow", "limit": 1})
@@ -754,6 +767,9 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
         cards_headers=dict(cards_response.headers),
         cards_rpc_payload=_rpc_payload_from(cards_response.text),
         feed_text=feed_response.text,
+        chart_js_text=chart_js_response.text,
+        chart_js_headers=dict(chart_js_response.headers),
+        chart_js_embed_text=chart_js_embed_response.text,
         csv_headers=dict(csv_response.headers),
         parquet_headers=dict(parquet_response.headers),
         arrow_headers=dict(arrow_response.headers),
@@ -1143,10 +1159,28 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
             and ctx.arrow_headers["content-type"].startswith("application/vnd.apache.arrow.stream"),
             s,
         )),
+        (lambda s: s.startswith("`?format=chart_js` renders"), lambda s: _ensure(
+            f"?v={CHARTJS_VERSION}" in ctx.chart_js_text,
+            s,
+        )),
+        (lambda s: s.startswith("Override it (and layout details like `canvas_height`)"), lambda s: None),
         (lambda s: s.startswith("All of the following formats work today"), lambda s: _ensure(
             ctx.arrow_headers["content-type"].startswith("application/vnd.apache.arrow.stream"), s
         )),
+        (lambda s: s.startswith("| `?format=chart_js`"), lambda s: _ensure(
+            "/vendor/" in ctx.chart_js_text and "data-wd-chart" in ctx.chart_js_text,
+            s,
+        )),
         (lambda s: s.startswith("|"), lambda s: None),
+        (lambda s: s.startswith("Append `?embed=1`"), lambda s: _ensure(
+            "<!doctype html>" not in ctx.chart_js_embed_text
+            and "data-wd-chart" in ctx.chart_js_embed_text,
+            s,
+        )),
+        (lambda s: s.startswith("snippet still initialises the charts automatically."), lambda s: _ensure(
+            "new Chart" in ctx.chart_js_text,
+            s,
+        )),
         (lambda s: s.startswith("Routes may set `default_format`"), lambda s: None),
         (lambda s: s.startswith("- You can query DuckDB-native sources"), lambda s: None),
         (lambda s: s.startswith("- For derived inputs"), lambda s: None),

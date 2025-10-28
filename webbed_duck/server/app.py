@@ -12,9 +12,10 @@ import pyarrow as pa
 import pyarrow.csv as pacsv
 import pyarrow.parquet as pq
 from fastapi import FastAPI, HTTPException, Request, Response
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 
 from ..config import Config
+from ..static.chartjs import CHARTJS_VERSION
 from ..core.routes import RouteDefinition
 from ..plugins.charts import render_route_charts
 from .analytics import AnalyticsStore, ExecutionMetrics
@@ -30,7 +31,9 @@ from .overlay import (
     compute_row_key_from_values,
 )
 from .postprocess import (
+    build_chartjs_configs,
     render_cards_html_with_assets,
+    render_chartjs_html,
     render_feed_html,
     render_table_html,
     table_to_records,
@@ -38,6 +41,7 @@ from .postprocess import (
 from .preprocess import run_preprocessors
 from .session import SESSION_COOKIE_NAME, SessionStore
 from .share import CreatedShare, ShareStore
+from .vendor import CHARTJS_FILENAME, DEFAULT_CHARTJS_SOURCE, ensure_chartjs_vendor
 
 
 @dataclass(slots=True)
@@ -112,7 +116,35 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
     )
 
     app.state.cache_store = CacheStore(config.server.storage_root)
+    vendor_result = ensure_chartjs_vendor(config.server.storage_root)
+    chartjs_route = f"/vendor/{CHARTJS_FILENAME}"
+    chartjs_path = (
+        config.server.storage_root
+        / "static"
+        / "vendor"
+        / "chartjs"
+        / CHARTJS_FILENAME
+    )
+    app.state.chartjs_asset_path = chartjs_path
+    app.state.chartjs_vendor_error = vendor_result.error
+    if chartjs_path.exists():
+        app.state.chartjs_script_url = f"{chartjs_route}?v={CHARTJS_VERSION}"
+    else:
+        app.state.chartjs_script_url = DEFAULT_CHARTJS_SOURCE
     app.state._dynamic_route_handles = _register_dynamic_routes(app, app.state.routes)
+
+    @app.get(chartjs_route)
+    async def serve_chartjs_asset() -> FileResponse:
+        path = app.state.chartjs_asset_path
+        if not path.exists():
+            raise HTTPException(
+                status_code=404,
+                detail={
+                    "code": "not_found",
+                    "message": "Chart.js asset has not been prepared",
+                },
+            )
+        return FileResponse(path, media_type="application/javascript")
 
     def _reload_routes(new_routes: Sequence[RouteDefinition]) -> None:
         _replace_dynamic_routes(app, list(new_routes))
@@ -585,6 +617,7 @@ def _render_route_response(
         route,
         request,
         charts_meta,
+        charts_source,
         watermark=None,
     )
 
@@ -608,7 +641,18 @@ def _record_route_execution(state: Any, route: RouteDefinition, result: RouteExe
 
 
 def _validate_format(fmt: str, route: RouteDefinition | None = None) -> str:
-    allowed = {"json", "table", "html_t", "html_c", "feed", "arrow", "arrow_rpc", "csv", "parquet"}
+    allowed = {
+        "json",
+        "table",
+        "html_t",
+        "html_c",
+        "feed",
+        "chart_js",
+        "arrow",
+        "arrow_rpc",
+        "csv",
+        "parquet",
+    }
     fmt = fmt.lower()
     if fmt not in allowed:
         raise _http_error("invalid_parameter", f"Unsupported format '{fmt}'")
@@ -689,6 +733,7 @@ def _format_response(
     route: RouteDefinition,
     request: Request,
     charts_meta: Sequence[Mapping[str, object]],
+    chart_specs: Sequence[Mapping[str, object]],
     *,
     watermark: str | None,
 ) -> Response:
@@ -769,6 +814,26 @@ def _format_response(
             postprocess=post_opts,
         )
         return HTMLResponse(html)
+    if fmt == "chart_js":
+        post_opts = route.postprocess.get("chart_js") if isinstance(route.postprocess, Mapping) else None
+        chart_configs = build_chartjs_configs(table, chart_specs)
+        embed_value = request.query_params.get("embed")
+        embed = False
+        if embed_value is not None:
+            embed = str(embed_value).lower() in {"1", "true", "yes"}
+        html = render_chartjs_html(
+            chart_configs,
+            config=request.app.state.config,
+            route_id=route.id,
+            route_title=route.title,
+            route_metadata=metadata,
+            postprocess=post_opts,
+            default_script_url=request.app.state.chartjs_script_url,
+            embed=embed,
+        )
+        response = HTMLResponse(html)
+        _attach_rpc_headers(response, result)
+        return response
     if fmt == "arrow":
         return _arrow_stream_response(table)
     if fmt == "arrow_rpc":

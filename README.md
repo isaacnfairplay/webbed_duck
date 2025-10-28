@@ -121,12 +121,17 @@ All of the following formats work today, provided the route either allows them e
 | `?format=html_t`   | Styled HTML table view with optional chart annotations.    |
 | `?format=html_c`   | Card-style HTML view honouring `[html_c]` metadata.        |
 | `?format=feed`     | Feed-style HTML view for narrative updates.               |
+| `?format=chart_js` | Chart.js-ready HTML with optional `?embed=1` snippets.    |
 | `?format=csv`      | Streaming CSV download with `text/csv` content type.      |
 | `?format=parquet`  | Parquet file stream generated via Apache Arrow.           |
 | `?format=arrow`    | Arrow IPC stream for programmatic consumers.              |
 | `?format=arrow_rpc`| Arrow IPC stream with pagination headers.                 |
 
 Routes may set `default_format` in TOML to choose the response when `?format` is omitted.
+
+`?format=chart_js` renders every `[[charts]]` specification as a Chart.js canvas. The server vendors Chart.js into `storage_root/static/vendor/chartjs/` on first run and serves it from `/vendor/chart.umd.min.js?v=4.4.3`, falling back to the CDN source only if the vendored copy cannot be prepared. Override the script URL (and layout details like `canvas_height`) via `[chart_js]` metadata or `@postprocess chart_js` overrides. Provide your own build by dropping a `chart.umd.min.js` into that directory (or set `WEBDUCK_SKIP_CHARTJS_DOWNLOAD=1` to skip the automatic fetch).
+Append `?embed=1` to receive a snippet that can be dropped into another page without the surrounding `<html>` wrapper; the
+snippet still initialises the charts automatically.
 
 ### Data sources and execution model
 

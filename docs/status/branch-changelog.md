@@ -1,5 +1,17 @@
 # Branch-level Changelog
 
+## Chart JS response format (work branch)
+
+- Add a `chart_js` response that turns route `[[charts]]` specs into Chart.js
+  canvases with share-aware headers and a vendored Chart.js runtime served from
+  `/vendor/chart.umd.min.js`.
+- Support `?embed=1` snippets and configurable script/canvas metadata via
+  `[chart_js]` TOML or `@postprocess chart_js` overrides so downstream pages can
+  embed charts without iframes while falling back to the CDN only when vendoring
+  fails.
+- Extend the README, changelog, and regression suite (postprocess, UI filters,
+  README claims) to cover the new format and ensure the embed flow stays stable.
+
 ## Share attachment safeguards + compiler guardrails (work branch)
 
 - Add regression tests covering share attachment size budgets, config parsing
