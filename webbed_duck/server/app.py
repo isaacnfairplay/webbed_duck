@@ -52,6 +52,20 @@ class RouteExecutionResult:
     limit: int | None
 
 
+@dataclass(slots=True)
+class LocalReferenceRequest:
+    """Parsed payload for ``/local/resolve`` requests."""
+
+    route: RouteDefinition
+    params: Mapping[str, object]
+    columns: list[str]
+    format: str
+    limit: int | None
+    offset: int | None
+    redacted_columns: list[str] | None
+    record_analytics: bool
+
+
 _ERROR_TAXONOMY = {
     "missing_parameter": {
         "message": "A required parameter was not provided.",
@@ -406,85 +420,101 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
         if not isinstance(payload, Mapping):
             raise _http_error("invalid_parameter", "Request body must be a JSON object")
 
-        reference = (
-            payload.get("reference")
-            or payload.get("ref")
-            or payload.get("target")
-            or payload.get("route")
-        )
-        if reference is None:
-            raise _http_error("missing_parameter", "reference is required")
-        if not isinstance(reference, str):
-            raise _http_error("invalid_parameter", "reference must be a string")
-
-        try:
-            (
-                route_id,
-                ref_params,
-                ref_columns,
-                ref_format,
-                ref_limit,
-                ref_offset,
-            ) = _parse_local_reference(reference)
-        except ValueError as exc:
-            raise _http_error("invalid_parameter", str(exc)) from exc
-
-        route = _get_route(app.state.routes, route_id)
-
-        raw_params: dict[str, object] = dict(ref_params)
-        if "params" in payload:
-            params_override = payload["params"]
-            if params_override is None:
-                params_override = {}
-            if not isinstance(params_override, Mapping):
-                raise _http_error("invalid_parameter", "params must be an object")
-            for key, value in params_override.items():
-                raw_params[str(key)] = value
-        try:
-            params = _prepare_share_params(route, raw_params)
-        except ValueError as exc:
-            message = str(exc).replace("for share", "for local reference")
-            raise _http_error("invalid_parameter", message) from exc
-
-        columns = list(ref_columns)
-        if "columns" in payload:
-            columns = _normalize_columns(payload["columns"])
-        limit = _parse_optional_int(ref_limit) if ref_limit is not None else None
-        offset = _parse_optional_int(ref_offset) if ref_offset is not None else None
-        if "limit" in payload:
-            limit = _coerce_int(payload["limit"], "limit")
-        if "offset" in payload:
-            offset = _coerce_int(payload["offset"], "offset")
-
-        fmt = ref_format or route.default_format or "json"
-        if "format" in payload:
-            fmt_value = payload["format"]
-            if fmt_value is None:
-                fmt = route.default_format or "json"
-            elif isinstance(fmt_value, str):
-                fmt = fmt_value
-            else:
-                raise _http_error("invalid_parameter", "format must be a string")
-
-        record_analytics = bool(payload.get("record_analytics", False))
-
-        redacted_columns = None
-        if "redact_columns" in payload and payload["redact_columns"] is not None:
-            redacted_columns = _normalize_columns(payload["redact_columns"])
+        parsed = _build_local_reference_request(payload, app.state.routes)
 
         return _render_route_response(
-            route,
+            parsed.route,
             request,
-            params,
-            fmt,
-            limit,
-            offset,
-            columns,
-            redacted_columns,
-            record_analytics=record_analytics,
+            parsed.params,
+            parsed.format,
+            parsed.limit,
+            parsed.offset,
+            parsed.columns,
+            parsed.redacted_columns,
+            record_analytics=parsed.record_analytics,
         )
 
     return app
+
+
+def _build_local_reference_request(
+    payload: Mapping[str, object], routes: Sequence[RouteDefinition]
+) -> LocalReferenceRequest:
+    reference = (
+        payload.get("reference")
+        or payload.get("ref")
+        or payload.get("target")
+        or payload.get("route")
+    )
+    if reference is None:
+        raise _http_error("missing_parameter", "reference is required")
+    if not isinstance(reference, str):
+        raise _http_error("invalid_parameter", "reference must be a string")
+
+    try:
+        (
+            route_id,
+            ref_params,
+            ref_columns,
+            ref_format,
+            ref_limit,
+            ref_offset,
+        ) = _parse_local_reference(reference)
+    except ValueError as exc:
+        raise _http_error("invalid_parameter", str(exc)) from exc
+
+    route = _get_route(routes, route_id)
+
+    raw_params: dict[str, object] = dict(ref_params)
+    if "params" in payload:
+        params_override = payload["params"]
+        if params_override is None:
+            params_override = {}
+        if not isinstance(params_override, Mapping):
+            raise _http_error("invalid_parameter", "params must be an object")
+        for key, value in params_override.items():
+            raw_params[str(key)] = value
+    try:
+        params = _prepare_share_params(route, raw_params)
+    except ValueError as exc:
+        message = str(exc).replace("for share", "for local reference")
+        raise _http_error("invalid_parameter", message) from exc
+
+    columns = list(ref_columns)
+    if "columns" in payload:
+        columns = _normalize_columns(payload["columns"])
+
+    limit = _parse_optional_int(ref_limit) if ref_limit is not None else None
+    offset = _parse_optional_int(ref_offset) if ref_offset is not None else None
+    if "limit" in payload:
+        limit = _coerce_int(payload["limit"], "limit")
+    if "offset" in payload:
+        offset = _coerce_int(payload["offset"], "offset")
+
+    fmt = ref_format or route.default_format or "json"
+    if "format" in payload:
+        fmt_value = payload["format"]
+        if fmt_value is None:
+            fmt = route.default_format or "json"
+        elif isinstance(fmt_value, str):
+            fmt = fmt_value
+        else:
+            raise _http_error("invalid_parameter", "format must be a string")
+
+    redacted_columns = None
+    if "redact_columns" in payload and payload["redact_columns"] is not None:
+        redacted_columns = _normalize_columns(payload["redact_columns"])
+
+    return LocalReferenceRequest(
+        route=route,
+        params=params,
+        columns=columns,
+        format=fmt,
+        limit=limit,
+        offset=offset,
+        redacted_columns=redacted_columns,
+        record_analytics=bool(payload.get("record_analytics", False)),
+    )
 
 
 def _make_endpoint(route: RouteDefinition):

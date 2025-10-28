@@ -514,7 +514,15 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
         share_token = share_payload["token"]
         shared_response = client.get(f"/shares/{share_token}")
 
-        local_resolve = client.post("/local/resolve", json={"reference": "local:hello?name=Goose"})
+        local_resolve = client.post(
+            "/local/resolve",
+            json={
+                "reference": "local:hello?column=greeting",
+                "params": {"name": "Goose"},
+                "columns": ["greeting"],
+                "format": "json",
+            },
+        )
 
         # Trigger incremental analytics by running route again with tracking
         request_with_tracking(client, "get", "/hello", params={"name": "Swan"})
@@ -1164,6 +1172,12 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
                 ).value,
                 TypeError,
             ),
+            s,
+        )),
+        (lambda s: s.startswith("- Internal tooling can reuse share-safe validation"), lambda s: _ensure(
+            ctx.local_resolve_payload.get("route_id") == "hello"
+            and ctx.local_resolve_payload.get("columns") == ["greeting"]
+            and ctx.local_resolve_payload.get("rows", [{}])[0].get("greeting", "").startswith("Hello"),
             s,
         )),
         (lambda s: s.startswith("- When `auth.mode=\"external\"`"), lambda s: _ensure(

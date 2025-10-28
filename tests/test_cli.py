@@ -311,6 +311,87 @@ def test_cmd_serve_auto_compile_and_watch(
     assert run_calls == {"app": app_obj, "host": "127.0.0.1", "port": 8000}
     err = capsys.readouterr().err
     assert "Auto-compile" not in err
+
+
+def test_cmd_serve_watch_interval_clamp(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    source_dir = tmp_path / "src"
+    source_dir.mkdir()
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+
+    server_config = types.SimpleNamespace(
+        build_dir=build_dir,
+        source_dir=source_dir,
+        auto_compile=False,
+        watch=True,
+        watch_interval=1.0,
+        host="127.0.0.1",
+        port=8000,
+    )
+    config_obj = types.SimpleNamespace(server=server_config)
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config_obj)
+    monkeypatch.setattr(cli, "compile_routes", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        "webbed_duck.core.routes.load_compiled_routes", lambda build: ["route"]
+    )
+
+    recorded: dict[str, object] = {}
+
+    class _Stop:
+        def __init__(self) -> None:
+            self.called = False
+
+        def set(self) -> None:
+            self.called = True
+
+    class _Thread:
+        def __init__(self) -> None:
+            self.join_timeout: float | None = None
+
+        def join(self, timeout: float | None = None) -> None:
+            self.join_timeout = timeout
+
+    def fake_start_watcher(app, source: Path, build: Path, interval: float):  # type: ignore[no-untyped-def]
+        recorded["interval"] = interval
+        stop = _Stop()
+        thread = _Thread()
+        recorded["stop"] = stop
+        recorded["thread"] = thread
+        return stop, thread
+
+    monkeypatch.setattr(cli, "_start_watcher", fake_start_watcher)
+
+    app_obj = types.SimpleNamespace()
+    monkeypatch.setattr("webbed_duck.server.app.create_app", lambda routes, config: app_obj)
+
+    class _FakeUvicorn:
+        @staticmethod
+        def run(app, host: str, port: int) -> None:  # type: ignore[no-untyped-def]
+            recorded["host"] = host
+            recorded["port"] = port
+
+    monkeypatch.setitem(sys.modules, "uvicorn", _FakeUvicorn)
+
+    args = types.SimpleNamespace(
+        build=None,
+        source=None,
+        config="config.toml",
+        host=None,
+        port=None,
+        no_auto_compile=False,
+        watch=False,
+        no_watch=False,
+        watch_interval=0.05,
+    )
+
+    code = cli._cmd_serve(args)
+    assert code == 0
+    assert recorded["interval"] == pytest.approx(cli.WATCH_INTERVAL_MIN)
+    assert recorded["stop"].called is True
+    assert recorded["thread"].join_timeout == 2
 def test_compile_and_reload_invokes_reload(tmp_path: Path) -> None:
     called: dict[str, object] = {}
 
