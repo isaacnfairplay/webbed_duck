@@ -417,3 +417,66 @@ def test_invariant_partial_cache_triggers_query(tmp_path: Path, monkeypatch: pyt
     )
     assert third.status_code == 200
     assert len(calls) == 3
+
+
+@pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
+def test_invariant_filters_apply_to_html_views(tmp_path: Path) -> None:
+    src = tmp_path / "src"
+    src.mkdir()
+    build = tmp_path / "build"
+    route_text = (
+        "+++\n"
+        "id = \"division_map\"\n"
+        "path = \"/division_map\"\n"
+        "title = \"Division map\"\n"
+        "description = \"Demonstrate invariant filters for HTML views\"\n"
+        "[params.division]\n"
+        "type = \"str\"\n"
+        "default = \"\"\n"
+        "required = false\n"
+        "ui_label = \"Division\"\n"
+        "ui_control = \"select\"\n"
+        "options = [\"\", \"Engineering\", \"Finance\", \"Manufacturing\"]\n"
+        "[cache]\n"
+        "rows_per_page = 50\n"
+        "order_by = [\"Division\", \"Department\", \"TeamCode\"]\n"
+        "invariant_filters = [ { param = \"division\", column = \"Division\" } ]\n"
+        "[html_t]\n"
+        "show_params = [\"division\"]\n"
+        "+++\n\n"
+        "```sql\n"
+        "SELECT * FROM (VALUES\n"
+        "    ('ENG1', 'Mechanical Design', 'Engineering', 101),\n"
+        "    ('ENG2', 'Electrical Systems', 'Engineering', 102),\n"
+        "    ('FIN1', 'Payroll', 'Finance', 201),\n"
+        "    ('MFG1', 'Assembly Line 1', 'Manufacturing', 301)\n"
+        ") AS t(Department, Team, Division, TeamCode)\n"
+        "ORDER BY Division, Department, TeamCode\n"
+        "```\n"
+    )
+    write_sidecar_route(src, "division_map", route_text)
+    compile_routes(src, build)
+    routes = load_compiled_routes(build)
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+    config.server.storage_root.mkdir()
+    app = create_app(routes, config)
+    client = TestClient(app)
+
+    json_response = client.get(
+        "/division_map",
+        params={"format": "json", "division": "Manufacturing"},
+    )
+    assert json_response.status_code == 200
+    json_payload = json_response.json()
+    assert [row["Division"] for row in json_payload["rows"]] == ["Manufacturing"]
+
+    html_response = client.get(
+        "/division_map",
+        params={"format": "html_t", "division": "Manufacturing"},
+    )
+    assert html_response.status_code == 200
+    html_text = html_response.text
+    assert "Manufacturing" in html_text
+    assert "<td>Engineering</td>" not in html_text
+    assert "<td>Finance</td>" not in html_text

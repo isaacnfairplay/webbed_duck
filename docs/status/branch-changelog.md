@@ -1,5 +1,15 @@
 # Branch-level Changelog
 
+## HTML invariant filter enforcement (work branch)
+
+- Fix cache metadata to record the actual invariant tokens present in cached pages
+  so post-cache filtering triggers whenever requests provide a subset of cached
+  values.
+- Re-read newly populated cache entries through the invariant-aware reader path
+  to serve filtered tables on the first request instead of only after warmup.
+- Add a FastAPI regression test covering HTML table rendering with invariant
+  filters and drop the temporary invariant filter bug report doc.
+
 ## Local reference parser consolidation (work branch)
 
 - Convert `_parse_local_reference` into a structured dataclass so `/local/resolve`
