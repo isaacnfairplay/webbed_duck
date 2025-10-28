@@ -1,5 +1,15 @@
 # Branch-level Changelog
 
+## Cache invariant casefold coverage (work branch)
+
+- Add a FastAPI regression test proving case-insensitive invariant filters reuse
+  cached pages and still return rows with their original casing.
+- Factor invariant filter case-folding into a shared helper so cache key
+  canonicalisation and runtime filtering rely on the same logic.
+- Documented the lowercase normalisation for `case_insensitive = true` in the
+  README alongside a reminder that DuckDB/FastAPI extras are required for the
+  cache-heavy pytest suite.
+
 ## DuckDB failure guardrails + canonical route layout (work branch)
 
 - Add a FastAPI regression test that forces a `duckdb.Error` during execution and

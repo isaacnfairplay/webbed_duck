@@ -205,6 +205,79 @@ def test_invariant_filter_uses_superset_cache(tmp_path: Path, monkeypatch: pytes
 
 
 @pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
+def test_invariant_filter_case_insensitive_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src = tmp_path / "src"
+    src.mkdir()
+    build = tmp_path / "build"
+    route_text = (
+        "+++\n"
+        "id = \"inventory\"\n"
+        "path = \"/inventory\"\n"
+        "title = \"Inventory\"\n"
+        "[params.product_code]\n"
+        "type = \"str\"\n"
+        "required = false\n"
+        "[cache]\n"
+        "rows_per_page = 5\n"
+        "order_by = [\"seq\"]\n"
+        "invariant_filters = [ { param = \"product_code\", column = \"product_code\", case_insensitive = true } ]\n"
+        "+++\n\n"
+        "```sql\n"
+        "SELECT product_code, quantity, seq\n"
+        "FROM (VALUES\n"
+        "    ('Widget', 4, 1),\n"
+        "    ('gadget', 2, 2),\n"
+        "    ('widget', 3, 3)\n"
+        ") AS inventory(product_code, quantity, seq)\n"
+        "WHERE product_code = COALESCE({{ product_code }}, product_code)\n"
+        "ORDER BY seq\n"
+        "```\n"
+    )
+    _write_route(src, "inventory", route_text)
+    compile_routes(src, build)
+    routes = load_compiled_routes(build)
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+    config.server.storage_root.mkdir()
+    app = create_app(routes, config)
+    client = TestClient(app)
+
+    real_connect = duckdb.connect
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def counting_connect(*args, **kwargs):
+        calls.append((args, kwargs))
+        return real_connect(*args, **kwargs)
+
+    monkeypatch.setattr(duckdb, "connect", counting_connect)
+
+    superset = client.get("/inventory", params={"format": "json"})
+    assert superset.status_code == 200
+    assert len(calls) == 1
+
+    mixed_case = client.get(
+        "/inventory",
+        params={"format": "json", "product_code": "WiDgEt"},
+    )
+    assert mixed_case.status_code == 200
+    assert len(calls) == 1
+    payload = mixed_case.json()
+    values = [row["product_code"] for row in payload["rows"]]
+    assert values == ["Widget", "widget"]
+
+    uppercase = client.get(
+        "/inventory",
+        params=[("format", "json"), ("product_code", "GADGET")],
+    )
+    assert uppercase.status_code == 200
+    assert len(calls) == 1
+    gadget_values = [row["product_code"] for row in uppercase.json()["rows"]]
+    assert gadget_values == ["gadget"]
+
+
+@pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
 def test_invariant_combines_filtered_caches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     src = tmp_path / "src"
     src.mkdir()
