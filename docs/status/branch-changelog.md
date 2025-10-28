@@ -1,5 +1,11 @@
 # Branch-level Changelog
 
+## Local reference coverage + CLI guardrails (work branch)
+
+- Factor `/local/resolve` payload parsing into a typed helper reused by the endpoint so validation and formatting stay aligned with share flows.
+- Add FastAPI tests that exercise happy-path, coercion, and error handling for local references, plus a CLI test proving the watch interval clamp stays at the documented 0.2s minimum.
+- Document the `/local/resolve` workflow for internal automation so developers avoid reimplementing share parameter coercion.
+
 ## Cache pagination and analytics guardrails (work branch)
 
 - Document the CLI watch interval floor and cache enforcement toggle so route authors understand when limits are honoured.
