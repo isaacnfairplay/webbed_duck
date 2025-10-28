@@ -17,6 +17,7 @@ from types import ModuleType
 import pytest
 import duckdb
 
+from tests.conftest import write_sidecar_route
 from webbed_duck import cli as cli_module
 from webbed_duck.config import Config, load_config
 from webbed_duck.core.compiler import compile_route_file, compile_routes
@@ -284,6 +285,7 @@ class ReadmeContext:
     charts_registry_size: int
     duckdb_connect_counts: list[int]
     source_pairs: dict[str, dict[str, bool]]
+    legacy_sidecars_present: bool
     route_cache_modes: dict[str, str]
     route_returns: dict[str, str]
     route_uses: dict[str, list]
@@ -352,12 +354,12 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
     storage_root = tmp_path / "storage"
     src_dir.mkdir()
 
-    (src_dir / "hello.sql.md").write_text(ROUTE_PRIMARY, encoding="utf-8")
-    (src_dir / "by_date.sql.md").write_text(ROUTE_INCREMENTAL, encoding="utf-8")
-    (src_dir / "cached_page.sql.md").write_text(ROUTE_PAGED, encoding="utf-8")
-    (src_dir / "cached_page_flex.sql.md").write_text(ROUTE_PAGED_FLEX, encoding="utf-8")
-    (src_dir / "cached_invariant.sql.md").write_text(ROUTE_INVARIANT_SUPERSET, encoding="utf-8")
-    (src_dir / "cached_invariant_shards.sql.md").write_text(ROUTE_INVARIANT_SHARDS, encoding="utf-8")
+    write_sidecar_route(src_dir, "hello", ROUTE_PRIMARY)
+    write_sidecar_route(src_dir, "by_date", ROUTE_INCREMENTAL)
+    write_sidecar_route(src_dir, "cached_page", ROUTE_PAGED)
+    write_sidecar_route(src_dir, "cached_page_flex", ROUTE_PAGED_FLEX)
+    write_sidecar_route(src_dir, "cached_invariant", ROUTE_INVARIANT_SUPERSET)
+    write_sidecar_route(src_dir, "cached_invariant_shards", ROUTE_INVARIANT_SHARDS)
 
     (src_dir / "readme_child.toml").write_text(ROUTE_DEP_CHILD_TOML + "\n", encoding="utf-8")
     (src_dir / "readme_child.sql").write_text(ROUTE_DEP_CHILD_SQL + "\n", encoding="utf-8")
@@ -369,6 +371,7 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
     compile_routes(src_dir, rebuild_dir)
 
     source_pairs: dict[str, dict[str, bool]] = {}
+    legacy_sidecars_present = False
     for toml_path in sorted(src_dir.rglob("*.toml")):
         data = tomllib.loads(toml_path.read_text(encoding="utf-8"))
         route_id = str(data.get("id", toml_path.stem))
@@ -376,8 +379,8 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
             "toml": toml_path.exists(),
             "sql": toml_path.with_suffix(".sql").exists(),
             "md": toml_path.with_suffix(".md").exists(),
-            "legacy_sql_md": toml_path.with_suffix(".sql.md").exists(),
         }
+        legacy_sidecars_present = legacy_sidecars_present or toml_path.with_suffix(".sql.md").exists()
 
     def _hash_dir(path: Path) -> dict[str, str]:
         hashes: dict[str, str] = {}
@@ -800,6 +803,7 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
         charts_registry_size=len(getattr(charts_plugins, "_RENDERERS", {})),
         duckdb_connect_counts=duckdb_connect_counts,
         source_pairs=source_pairs,
+        legacy_sidecars_present=legacy_sidecars_present,
         route_cache_modes=route_cache_modes,
         route_returns=route_returns,
         route_uses=route_uses,
@@ -828,8 +832,8 @@ def _frontmatter_warning_emitted() -> bool:
         "```sql\nSELECT 1;\n```\n"
     )
     with tempfile.TemporaryDirectory() as tmpdir:
-        route_path = Path(tmpdir) / "warn.sql.md"
-        route_path.write_text(route_body, encoding="utf-8")
+        write_sidecar_route(Path(tmpdir), "warn", route_body)
+        route_path = Path(tmpdir) / "warn.toml"
         buffer = io.StringIO()
         with contextlib.redirect_stderr(buffer):
             compile_route_file(route_path)
@@ -880,7 +884,7 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         (lambda s: bool(re.match(r"^\d+\. \[", s)), lambda s: None),
         (lambda s: s.startswith("- Each route lives in `routes_src/` as a `<stem>.toml`"), lambda s: _ensure(
             all(pair["toml"] and pair["sql"] for pair in ctx.source_pairs.values())
-            and any(pair["legacy_sql_md"] for pair in ctx.source_pairs.values()),
+            and not ctx.legacy_sidecars_present,
             s,
         )),
         (lambda s: s.startswith("- The compiler translates those sources"), lambda s: _ensure(
@@ -888,6 +892,10 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         )),
         (lambda s: s.startswith("- The runtime ships the results"), lambda s: _ensure(
             "content-type" in ctx.csv_headers and "content-type" in ctx.parquet_headers, s
+        )),
+        (lambda s: s.startswith("> **FastAPI runtime dependency:**"), lambda s: _ensure(
+            {"fastapi", "uvicorn"}.issubset(_dependency_names(ctx.dependencies)),
+            s,
         )),
         (lambda s: s.startswith("> **FastAPI extras required:**"), lambda s: _ensure(
             {"fastapi", "uvicorn"}.issubset(
@@ -1316,9 +1324,6 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         (lambda s: s.startswith("3. **`<stem>.md`"), lambda s: _ensure(
             any(pair["md"] for pair in ctx.source_pairs.values()), s
         )),
-        (lambda s: s.startswith("Legacy `<stem>.sql.md` files can still live"), lambda s: _ensure(
-            any(pair["legacy_sql_md"] for pair in ctx.source_pairs.values()), s
-        )),
         (lambda s: s.startswith("Common keys inside `<stem>.toml` include:"), lambda s: None),
         (lambda s: s.startswith("- `[params]`"), lambda s: _ensure(
             any(route.params for route in ctx.compiled_routes), s
@@ -1515,8 +1520,9 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         (lambda s: s.startswith("* **Email integration**"), lambda s: _ensure(
             len(ctx.email_records) == 1, s
         )),
-        (lambda s: s.startswith("A `.sql.md` file is the single source of truth"), lambda s: _ensure(
-            bool(ctx.compiled_routes), s
+        (lambda s: "The TOML + SQL sidecar pair is the single source of truth" in s, lambda s: _ensure(
+            bool(ctx.compiled_routes) and not ctx.legacy_sidecars_present,
+            s,
         )),
         (lambda s: s.startswith("1. **Frontmatter (`+++"), lambda s: None),
         (lambda s: s.startswith("2. **Markdown body:"), lambda s: None),

@@ -8,6 +8,7 @@ import pytest
 
 import duckdb
 
+from tests.conftest import write_sidecar_route
 from webbed_duck.config import Config, load_config
 from webbed_duck.core.compiler import compile_routes
 from webbed_duck.core.incremental import run_incremental
@@ -19,12 +20,6 @@ try:
     from fastapi.testclient import TestClient
 except ModuleNotFoundError:  # pragma: no cover - optional dependency
     TestClient = None  # type: ignore
-
-
-def _write_route(tmp_path: Path, content: str) -> Path:
-    path = tmp_path / "route.sql.md"
-    path.write_text(content, encoding="utf-8")
-    return path
 
 
 def _make_config(storage_root: Path) -> Config:
@@ -70,7 +65,7 @@ def test_overrides_and_append(tmp_path: Path) -> None:
     build_dir = tmp_path / "build"
     storage_root = tmp_path / "storage"
     src_dir.mkdir()
-    _write_route(src_dir, ROUTE_TEMPLATE)
+    write_sidecar_route(src_dir, "hello", ROUTE_TEMPLATE)
     compile_routes(src_dir, build_dir)
     routes = load_compiled_routes(build_dir)
     config = _make_config(storage_root)
@@ -104,7 +99,7 @@ def test_schema_endpoint(tmp_path: Path) -> None:
     src_dir = tmp_path / "src"
     build_dir = tmp_path / "build"
     src_dir.mkdir()
-    _write_route(src_dir, ROUTE_TEMPLATE)
+    write_sidecar_route(src_dir, "hello", ROUTE_TEMPLATE)
     compile_routes(src_dir, build_dir)
     routes = load_compiled_routes(build_dir)
     config = _make_config(tmp_path / "storage")
@@ -124,7 +119,7 @@ def test_routes_endpoint_reports_metrics(tmp_path: Path) -> None:
     src_dir = tmp_path / "src"
     build_dir = tmp_path / "build"
     src_dir.mkdir()
-    _write_route(src_dir, ROUTE_TEMPLATE)
+    write_sidecar_route(src_dir, "hello", ROUTE_TEMPLATE)
     compile_routes(src_dir, build_dir)
     routes = load_compiled_routes(build_dir)
     config = _make_config(tmp_path / "storage")
@@ -146,7 +141,7 @@ def test_local_resolve_endpoint(tmp_path: Path) -> None:
     src_dir = tmp_path / "src"
     build_dir = tmp_path / "build"
     src_dir.mkdir()
-    _write_route(src_dir, ROUTE_TEMPLATE)
+    write_sidecar_route(src_dir, "hello", ROUTE_TEMPLATE)
     compile_routes(src_dir, build_dir)
     routes = load_compiled_routes(build_dir)
     config = _make_config(tmp_path / "storage")
@@ -183,7 +178,7 @@ def test_run_route_local(tmp_path: Path) -> None:
     src_dir = tmp_path / "src"
     build_dir = tmp_path / "build"
     src_dir.mkdir()
-    _write_route(src_dir, ROUTE_TEMPLATE)
+    write_sidecar_route(src_dir, "hello", ROUTE_TEMPLATE)
     compile_routes(src_dir, build_dir)
 
     table = run_route("hello", params={"name": "Duck"}, build_dir=build_dir, config=_make_config(tmp_path / "storage"))
@@ -195,7 +190,7 @@ def test_run_route_records_format(tmp_path: Path) -> None:
     src_dir = tmp_path / "src"
     build_dir = tmp_path / "build"
     src_dir.mkdir()
-    _write_route(src_dir, ROUTE_TEMPLATE)
+    write_sidecar_route(src_dir, "hello", ROUTE_TEMPLATE)
     compile_routes(src_dir, build_dir)
 
     records = run_route(
@@ -215,7 +210,7 @@ def test_run_route_unknown_route(tmp_path: Path) -> None:
     src_dir = tmp_path / "src"
     build_dir = tmp_path / "build"
     src_dir.mkdir()
-    _write_route(src_dir, ROUTE_TEMPLATE)
+    write_sidecar_route(src_dir, "hello", ROUTE_TEMPLATE)
     compile_routes(src_dir, build_dir)
 
     with pytest.raises(RouteNotFoundError):
@@ -226,7 +221,7 @@ def test_run_route_rejects_unknown_format(tmp_path: Path) -> None:
     src_dir = tmp_path / "src"
     build_dir = tmp_path / "build"
     src_dir.mkdir()
-    _write_route(src_dir, ROUTE_TEMPLATE)
+    write_sidecar_route(src_dir, "hello", ROUTE_TEMPLATE)
     compile_routes(src_dir, build_dir)
 
     with pytest.raises(ValueError) as excinfo:
@@ -261,7 +256,7 @@ ORDER BY day_value;
     build_dir = tmp_path / "build"
     storage_root = tmp_path / "storage"
     src_dir.mkdir()
-    _write_route(src_dir, incremental_route)
+    write_sidecar_route(src_dir, "by_date", incremental_route)
     compile_routes(src_dir, build_dir)
 
     config = _make_config(storage_root)
@@ -324,9 +319,9 @@ def test_routes_endpoint_folder_aggregation(tmp_path: Path) -> None:
     src_dir = tmp_path / "src"
     build_dir = tmp_path / "build"
     src_dir.mkdir()
-    (src_dir / "index.sql.md").write_text(ROUTE_REPORTS_INDEX, encoding="utf-8")
-    (src_dir / "summary.sql.md").write_text(ROUTE_REPORTS_DAILY_SUMMARY, encoding="utf-8")
-    (src_dir / "detail.sql.md").write_text(ROUTE_REPORTS_DAILY_DETAIL, encoding="utf-8")
+    write_sidecar_route(src_dir, "reports_index", ROUTE_REPORTS_INDEX)
+    write_sidecar_route(src_dir, "reports_daily_summary", ROUTE_REPORTS_DAILY_SUMMARY)
+    write_sidecar_route(src_dir, "reports_daily_detail", ROUTE_REPORTS_DAILY_DETAIL)
     compile_routes(src_dir, build_dir)
     routes = load_compiled_routes(build_dir)
     config = _make_config(tmp_path / "storage")

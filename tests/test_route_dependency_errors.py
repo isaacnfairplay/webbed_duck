@@ -4,15 +4,12 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import write_sidecar_route
 from webbed_duck.config import load_config
 from webbed_duck.core.compiler import compile_routes
 from webbed_duck.core.routes import RouteDefinition, load_compiled_routes
 from webbed_duck.server.cache import CacheStore
 from webbed_duck.server.execution import RouteExecutionError, RouteExecutor
-
-
-def _write_route(base: Path, name: str, content: str) -> None:
-    (base / f"{name}.sql.md").write_text(content, encoding="utf-8")
 
 
 def _compile(base: Path) -> list[RouteDefinition]:
@@ -32,7 +29,7 @@ def _make_executor(routes: list[RouteDefinition], storage_root: Path) -> RouteEx
 def test_dependency_missing_route_raises(tmp_path: Path) -> None:
     src = tmp_path / "src"
     src.mkdir()
-    _write_route(
+    write_sidecar_route(
         src,
         "orphan",
         (
@@ -63,7 +60,7 @@ def test_dependency_missing_route_raises(tmp_path: Path) -> None:
 def test_dependency_unsupported_mode(tmp_path: Path) -> None:
     src = tmp_path / "src"
     src.mkdir()
-    _write_route(
+    write_sidecar_route(
         src,
         "child",
         (
@@ -75,7 +72,7 @@ def test_dependency_unsupported_mode(tmp_path: Path) -> None:
             "```sql\nSELECT 'alpha' AS label\n```\n"
         ),
     )
-    _write_route(
+    write_sidecar_route(
         src,
         "parent",
         (
@@ -107,7 +104,7 @@ def test_dependency_unsupported_mode(tmp_path: Path) -> None:
 def test_dependency_argument_forwarding(tmp_path: Path) -> None:
     src = tmp_path / "src"
     src.mkdir()
-    _write_route(
+    write_sidecar_route(
         src,
         "child",
         (
@@ -126,7 +123,7 @@ def test_dependency_argument_forwarding(tmp_path: Path) -> None:
             "```\n"
         ),
     )
-    _write_route(
+    write_sidecar_route(
         src,
         "parent",
         (

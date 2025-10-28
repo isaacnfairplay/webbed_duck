@@ -41,10 +41,10 @@ def test_build_source_fingerprint_custom_patterns(tmp_path: Path) -> None:
     (src / "include.md").write_text("docs", encoding="utf-8")
 
     default = cli.build_source_fingerprint(src)
-    assert "include.md" not in default.files
+    assert "include.md" in default.files
 
     custom = cli.build_source_fingerprint(src, patterns=("*.md",))
-    assert "include.md" in custom.files
+    assert set(custom.files) == {"include.md"}
 
 
 def test_parse_param_assignments_handles_invalid_pairs() -> None:

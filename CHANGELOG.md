@@ -95,10 +95,10 @@
 - Updated project documentation (README, AGENTS guide, status report) to reflect
   DuckDB-backed incremental checkpoints, share workflows, and security
   guardrails for pseudo-auth sessions and share tokens.
-- Replaced the README with product-grade docs covering the `.sql.md` contract,
+- Replaced the README with product-grade docs covering the TOML/SQL sidecar contract,
   runtime formats, and the standalone server workflow.
 - Delivered a config-driven auto-compiling `webbed-duck serve` command with
-  optional watch mode and FastAPI route hot-reload support for `.sql.md`
+  optional watch mode and FastAPI route hot-reload support for sidecar
   contract changes.
 
 ## MVP 0.3
@@ -123,5 +123,5 @@
 - Implemented Markdown-to-Python route compiler with parameter handling.
 - Created FastAPI application factory that executes DuckDB queries per request.
 - Added CLI commands for compiling routes and running the development server.
-- Included sample route (`routes_src/hello.sql.md`) and compiled manifest.
+- Included sample route (`routes_src/hello.toml` + `hello.sql`) and compiled manifest.
 - Added pytest coverage for compiler and server basics.

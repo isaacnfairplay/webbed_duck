@@ -4,6 +4,7 @@ from pathlib import Path
 import duckdb
 import pytest
 
+from tests.conftest import write_sidecar_route
 from webbed_duck.core.compiler import compile_routes
 from webbed_duck.core.incremental import IncrementalResult, run_incremental
 from webbed_duck.config import Config, load_config
@@ -31,7 +32,7 @@ def _write_route(tmp_path: Path) -> tuple[Path, Path]:
     src_dir = tmp_path / "src"
     build_dir = tmp_path / "build"
     src_dir.mkdir()
-    (src_dir / "route.sql.md").write_text(ROUTE_TEMPLATE, encoding="utf-8")
+    write_sidecar_route(src_dir, "route", ROUTE_TEMPLATE)
     compile_routes(src_dir, build_dir)
     return src_dir, build_dir
 

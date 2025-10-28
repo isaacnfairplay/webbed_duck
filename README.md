@@ -4,7 +4,7 @@
 
 `webbed_duck` is a self-contained data server that turns declarative TOML + SQL route definitions into live DuckDB-backed web endpoints.
 
-- Each route lives in `routes_src/` as a `<stem>.toml` metadata file paired with a `<stem>.sql` query (with optional `<stem>.md` documentation). Legacy `.sql.md` files can be imported once, but the TOML + SQL pair is the canonical representation.
+- Each route lives in `routes_src/` as a `<stem>.toml` metadata file paired with a `<stem>.sql` query (with optional `<stem>.md` documentation). The TOML + SQL sidecar pair is the single source of truth for a route.
 - The compiler translates those sources into executable Python modules and registers them as HTTP endpoints.
 - The runtime ships the results as styled HTML tables or cards, JSON payloads, CSV and Parquet downloads, or Arrow streams—no custom FastAPI or Flask code required.
 - Drop TOML/SQL pairs into a folder, run the bundled CLI, and immediately browse or export the data surfaces.
@@ -17,7 +17,9 @@
    pip install webbed-duck
    ```
 
-2. **Create your route source directory** (default is `routes_src/`) and add paired route files (see [Authoring a route](#authoring-a-route)). Each route needs `<stem>.toml` for metadata and `<stem>.sql` for the query. Add `<stem>.md` when you want extra documentation. If you still have legacy `.sql.md` files, the compiler will import them into the new layout on first run—after that conversion the TOML/SQL pair becomes the source of truth, so keep those files checked in and stop editing the old `.sql.md` artifact. The repository ships `routes_src/hello.toml` + `hello.sql` as a living example of the canonical layout so new contributors do not accidentally recreate `.sql.md` routes.
+2. **Create your route source directory** (default is `routes_src/`) and add paired route files (see [Authoring a route](#authoring-a-route)). Each route needs `<stem>.toml` for metadata and `<stem>.sql` for the query. Add `<stem>.md` when you want extra documentation. The repository ships `routes_src/hello.toml` + `hello.sql` as a living example of the canonical layout so new contributors have a starting point for the sidecar format.
+
+   > **Legacy importer:** `webbed-duck import` will split older `.sql.md` files into TOML/SQL once. After that run, edit only the TOML/SQL pair—the importer ignores the markdown stub on subsequent builds.
 
 3. **Compile the contracts into runnable manifests (optional when auto-compile is enabled).**
    ```bash
@@ -28,7 +30,7 @@
    ```bash
    webbed-duck serve --config config.toml --watch
    ```
-   - `--watch` keeps the compiler running and reloads routes in-place when `.toml`, `.sql`, or legacy `.sql.md` files change.
+   - `--watch` keeps the compiler running and reloads routes in-place when `.toml`, `.sql`, or `.md` files change.
    - Pass `--no-auto-compile` to serve pre-built `routes_build/` artifacts without touching the source tree.
 - Watching performs filesystem polls once per second by default; disable it (or raise `server.watch_interval`) if you run on slower hardware where constant polling is undesirable.
 - The watch interval is clamped to a minimum of 0.2 seconds at runtime so accidental `--watch-interval 0` or extremely small values do not spin a tight loop.
@@ -41,19 +43,42 @@
 
 5. **Browse the routes.** Open `http://127.0.0.1:8000/hello` (or your route path) in a browser, or request alternate formats with `?format=csv`, `?format=parquet`, etc.
 
+### Project structure
+
+```
+webbed_duck/
+  core/            # compiler, executor, cache (no web)
+  server/          # FastAPI & HTTP semantics
+  plugins/         # adapters (charts, email, assets, auth, storage)
+  routes_src/      # <stem>.toml + <stem>.sql (+ <stem>.md)
+  routes_build/    # compiled artifacts imported in prod
+  tests/           # unit, property, snapshot, integration
+  perf/            # micro-benchmarks
+```
+
+### Quality gates (what CI runs)
+
+- `ruff` — fast linting and import hygiene ([docs](https://docs.astral.sh/ruff/)).
+- `mypy --strict webbed_duck/core/**` — enforce types in core; gradually tighten elsewhere ([docs](https://mypy.readthedocs.io/en/stable/getting_started.html)).
+- `pytest` — unit/integration/snapshot/property suites (Hypothesis included).
+- `pytest-benchmark` — guardrails on cache hits and Parquet throughput ([docs](https://pytest-benchmark.readthedocs.io/)).
+- `vulture` — remove dead code before it rots ([repo](https://github.com/jendrikseipp/vulture)).
+- `radon` — monitor cyclomatic complexity budgets ([docs](https://radon.readthedocs.io/)).
+- `bandit` — static security checks across server/adapters ([docs](https://bandit.readthedocs.io/)).
+
 ## How it works today (v0.4)
 
 ### Runtime startup
 
 - `webbed-duck serve` loads configuration from `config.toml` (defaults to host `127.0.0.1`, port `8000`, storage under `./storage`) and resolves `server.source_dir` / `server.build_dir`.
-- With `server.auto_compile = true` (the default) the CLI compiles every `<stem>.toml` + `<stem>.sql` pair in the configured source directory before starting Uvicorn. Legacy `*.sql.md` files are converted into sibling TOML/SQL/MD files the first time they are encountered.
+- With `server.auto_compile = true` (the default) the CLI compiles every `<stem>.toml` + `<stem>.sql` pair in the configured source directory before starting Uvicorn.
 - Enabling watch mode (`server.watch = true` or the `--watch` flag) keeps a background poller running so route edits trigger re-compilation and live reloading without restarting the process.
 - Combine `server.watch = true` with a sensible `server.watch_interval` (defaults to `1.0` seconds) to balance responsiveness and CPU usage.
 - The server is a FastAPI application exposed via Uvicorn. No additional framework integration is necessary for development deployments.
 
 ### Route discovery and mapping
 
-- The compiler scans the source tree for `<stem>.toml` files and requires a sibling `<stem>.sql`. Optional `<stem>.md` prose is bundled alongside the SQL body. Legacy `*.sql.md` files are skipped once their TOML/SQL counterparts exist.
+- The compiler scans the source tree for `<stem>.toml` files and requires a sibling `<stem>.sql`. Optional `<stem>.md` prose is bundled alongside the SQL body.
 - Each TOML file carries the metadata that previously lived in frontmatter: route `id`, HTTP `path`, optional `version`, formats, `[params]`, `[cache]`, preprocessors, postprocessors, and display metadata. New fields such as `cache_mode`, `returns`, and declarative `[[uses]]` dependencies control execution and composition.
 - Compiled artifacts are written to the `--build` directory, mirroring the source folder structure but with `.py` files. These contain serialised `ROUTE` dictionaries consumed at runtime.
 - At boot—and after each live reload triggered by the watcher—the server imports every compiled module and registers the route path on the FastAPI app. The `id` doubles as the logical identifier for `/routes/{id}` helper endpoints.
@@ -125,6 +150,8 @@ All of the following formats work today, provided the route either allows them e
 
 Routes may set `default_format` in TOML to choose the response when `?format` is omitted.
 
+Arrow RPC endpoints mirror `x-total-rows`, `x-offset`, and `x-limit` headers, and every HTML view exposes a “Download this slice (Arrow)” link for parity.
+
 `?format=chart_js` renders every `[[charts]]` specification as a Chart.js canvas. The server vendors Chart.js into `storage_root/static/vendor/chartjs/` on first run and serves it from `/vendor/chart.umd.min.js?v=4.4.3`, falling back to the CDN source only if the vendored copy cannot be prepared. The Python package ships with Chart.js 4.4.3 under `webbed_duck/static/chartjs/chart.umd.min.js`, so projects with read-only storage can still serve the script directly from site-packages. Override the script URL (and layout details like `canvas_height`) via `[chart_js]` metadata or `@postprocess chart_js` overrides. Provide your own build by dropping a `chart.umd.min.js` into that directory (or set `WEBDUCK_SKIP_CHARTJS_DOWNLOAD=1` to skip the automatic fetch). Air-gapped environments **must** pre-populate that folder (or mount it read-only with the asset in place); otherwise the runtime will return a 404 for `/vendor/chart.umd.min.js` and continue referencing the CDN fallback.
 Append `?embed=1` to receive a snippet that can be dropped into another page without the surrounding `<html>` wrapper; the
 snippet still initialises the charts automatically.
@@ -159,6 +186,11 @@ snippet still initialises the charts automatically.
 ## How parameters work
 
 Route parameters affect both cache determinism and SQL safety. Follow these guardrails when writing `.toml` and `.sql` files:
+
+Remember:
+
+- Never build comma-joined lists—bind Python sequences as arrays so DuckDB handles quoting and caching.
+- Treat file paths and shard lists as `TEXT` / `TEXT[]` parameters and cast inside SQL instead of concatenating strings.
 
 ### Rule A — Use bound parameters for any runtime/user input
 
@@ -265,8 +297,6 @@ A route now spans up to three sibling files in `routes_src/`:
 1. **`<stem>.toml` (required):** Metadata, parameters, cache rules, preprocessors, postprocessors, and declarative dependencies.
 2. **`<stem>.sql` (required):** The DuckDB relation that consumes registered dependencies and bound parameters.
 3. **`<stem>.md` (optional):** Additional prose documentation shown in tooling or docs.
-
-Legacy `<stem>.sql.md` files can still live in the tree. The compiler will split them into the three canonical files on first encounter and ignore the Markdown version afterwards.
 
 ### TOML contract
 
@@ -444,7 +474,7 @@ Routes can further customise behaviour via presentation metadata—e.g., `[html_
 ### Highlights in 0.4
 
 - Auto-compiling `webbed-duck serve` command with config-driven `source_dir` / `build_dir` defaults and a `--no-auto-compile` escape hatch for frozen artifacts.
-- Built-in watch mode (`server.watch` / `--watch`) that recompiles `.toml` / `.sql` sources (and imports legacy `.sql.md` files) while hot-reloading FastAPI routes without restarting Uvicorn.
+- Built-in watch mode (`server.watch` / `--watch`) that recompiles `.toml` / `.sql` sources while hot-reloading FastAPI routes without restarting Uvicorn.
 - Dynamic route registry inside the FastAPI app so helpers such as `/routes/{id}` and sharing workflows immediately reflect newly compiled contracts.
 - CLI and docs tuned for a zero-config quick start: install, drop a contract in `routes_src/`, and run `webbed-duck serve --config config.toml --watch` to explore.
 

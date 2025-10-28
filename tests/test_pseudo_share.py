@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from tests.conftest import write_sidecar_route
 from webbed_duck.config import Config, load_config
 from webbed_duck.core.compiler import compile_routes
 from webbed_duck.core.routes import load_compiled_routes
@@ -49,7 +50,7 @@ def _prepare_app(
     build_dir = tmp_path / "build"
     storage_root = tmp_path / "storage"
     src_dir.mkdir()
-    (src_dir / "hello.sql.md").write_text(route_text, encoding="utf-8")
+    write_sidecar_route(src_dir, "hello", route_text)
     compile_routes(src_dir, build_dir)
     routes = load_compiled_routes(build_dir)
     config = load_config(None)

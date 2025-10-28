@@ -54,7 +54,7 @@
   asserts the server returns the documented 500 response payload.
 - Convert the bundled `hello` sample into a TOML/SQL/MD triplet and regenerate
   the compiled artifact so contributors see the canonical layout instead of the
-  deprecated `.sql.md` format.
+  deprecated combined Markdown format.
 - Call out the refreshed sample in the README quick start to steer route authors
   away from legacy Markdown frontmatter files.
 
@@ -129,7 +129,7 @@
 ## Route authoring guidance refresh (work branch)
 
 - Rewrite the README around the new TOML + SQL route layout, covering
-  dependency metadata, execution modes, and the compiler's legacy `.sql.md`
+  dependency metadata, execution modes, and the compiler's former combined-Markdown
   import path.
 - Add a detailed "How parameters work" section documenting safe named binding,
   multi-value filters, and cache-aware distinctions between persistent and
