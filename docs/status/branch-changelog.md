@@ -69,6 +69,15 @@
 - Refresh README guidance on canonical TOML/SQL route sources, filesystem watch
   caveats, and the deprecation status of HTML comment directives.
 
+## Local runner reuse helper (work branch)
+
+- Introduce `LocalRouteRunner` so repeated programmatic executions reuse cache
+  and overlay stores instead of reinitialising on every call.
+- Add unit coverage that exercises Arrow and records formats plus the legacy
+  `run_route` convenience wrapper.
+- Update README "Local execution" guidance to steer developers toward the new
+  helper when building batch jobs or CLI tools.
+
 ## Route authoring guidance refresh (work branch)
 
 - Rewrite the README around the new TOML + SQL route layout, covering
