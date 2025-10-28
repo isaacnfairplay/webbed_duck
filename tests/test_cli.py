@@ -392,6 +392,50 @@ def test_cmd_serve_watch_interval_clamp(
     assert recorded["interval"] == pytest.approx(cli.WATCH_INTERVAL_MIN)
     assert recorded["stop"].called is True
     assert recorded["thread"].join_timeout == 2
+
+
+def test_cmd_serve_auto_compile_failure_reports_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    source_dir = tmp_path / "src"
+    source_dir.mkdir()
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+
+    server_config = types.SimpleNamespace(
+        build_dir=build_dir,
+        source_dir=source_dir,
+        auto_compile=True,
+        watch=False,
+        watch_interval=1.0,
+        host="127.0.0.1",
+        port=8000,
+    )
+    config_obj = types.SimpleNamespace(server=server_config)
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config_obj)
+
+    def failing_compile(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(cli, "compile_routes", failing_compile)
+
+    args = types.SimpleNamespace(
+        build=None,
+        source=str(source_dir),
+        config="config.toml",
+        host=None,
+        port=None,
+        no_auto_compile=False,
+        watch=False,
+        no_watch=False,
+        watch_interval=None,
+    )
+
+    code = cli._cmd_serve(args)
+    assert code == 1
+    err = capsys.readouterr().err
+    assert "[webbed-duck] Auto-compile failed: boom" in err
 def test_compile_and_reload_invokes_reload(tmp_path: Path) -> None:
     called: dict[str, object] = {}
 

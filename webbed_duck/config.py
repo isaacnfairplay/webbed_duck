@@ -101,6 +101,14 @@ def _as_path(value: Any) -> Path:
     return Path(str(value))
 
 
+def _non_negative_int(value: Any) -> int:
+    return max(0, int(value))
+
+
+def _hours_to_seconds(value: Any) -> int:
+    return _non_negative_int(float(value) * 3600)
+
+
 def _load_toml(path: Path) -> Mapping[str, Any]:
     if not path.exists():
         return {}
@@ -254,14 +262,20 @@ def _parse_cache(data: Mapping[str, Any], base: CacheConfig) -> CacheConfig:
     overrides: MutableMapping[str, Any] = {}
     if "enabled" in data:
         overrides["enabled"] = bool(data["enabled"])
+    ttl_seconds: int | None = None
     if "ttl_seconds" in data:
-        overrides["ttl_seconds"] = max(0, int(data["ttl_seconds"]))
+        ttl_seconds = _non_negative_int(data["ttl_seconds"])
     if "ttl_hours" in data:
-        overrides["ttl_seconds"] = max(0, int(float(data["ttl_hours"]) * 3600))
+        ttl_seconds = _hours_to_seconds(data["ttl_hours"])
+    if ttl_seconds is not None:
+        overrides["ttl_seconds"] = ttl_seconds
+    page_rows: int | None = None
     if "page_rows" in data:
-        overrides["page_rows"] = max(0, int(data["page_rows"]))
+        page_rows = _non_negative_int(data["page_rows"])
     if "rows_per_page" in data:
-        overrides["page_rows"] = max(0, int(data["rows_per_page"]))
+        page_rows = _non_negative_int(data["rows_per_page"])
+    if page_rows is not None:
+        overrides["page_rows"] = page_rows
     if "enforce_global_page_size" in data:
         overrides["enforce_global_page_size"] = bool(data["enforce_global_page_size"])
     if not overrides:
