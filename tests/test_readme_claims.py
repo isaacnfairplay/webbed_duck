@@ -258,6 +258,7 @@ class ReadmeContext:
     csv_headers: dict[str, str]
     parquet_headers: dict[str, str]
     arrow_headers: dict[str, str]
+    arrow_rpc_headers: dict[str, str]
     analytics_payload: dict
     schema_payload: dict
     override_payload: dict
@@ -301,6 +302,7 @@ class ReadmeContext:
     duckdb_binding_checks: dict[str, bool]
     external_adapter_checks: dict[str, bool]
     share_config: object
+    quality_gate_tools: set[str]
 
 
 def _inject_file_list_preprocessor(params, *, context, files):
@@ -450,6 +452,10 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
         csv_response = client.get("/hello", params={"format": "csv"})
         parquet_response = client.get("/hello", params={"format": "parquet"})
         arrow_response = client.get("/hello", params={"format": "arrow", "limit": 1})
+        arrow_rpc_response = client.get(
+            "/hello",
+            params={"format": "arrow_rpc", "limit": 1},
+        )
         paged_response = client.get(
             "/cached_page",
             params={"format": "json", "limit": 1, "offset": 3},
@@ -728,6 +734,18 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
         "tests": (repo_root / "tests").is_dir(),
         "webbed_duck": (repo_root / "webbed_duck").is_dir(),
     }
+    agents_text = (repo_root / "AGENTS.md").read_text(encoding="utf-8")
+    quality_gate_tokens = [
+        "ruff",
+        "mypy --strict webbed_duck/core/**",
+        "pytest-benchmark",
+        "vulture",
+        "radon",
+        "bandit",
+    ]
+    quality_gate_tools = {token for token in quality_gate_tokens if token in agents_text}
+    if repo_structure["tests"]:
+        quality_gate_tools.add("pytest")
 
     pyproject = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
     project_data = pyproject.get("project", {})
@@ -776,6 +794,7 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
         csv_headers=dict(csv_response.headers),
         parquet_headers=dict(parquet_response.headers),
         arrow_headers=dict(arrow_response.headers),
+        arrow_rpc_headers=dict(arrow_rpc_response.headers),
         analytics_payload=analytics_response.json(),
         schema_payload=schema_response.json(),
         override_payload=override_response.json()["override"],
@@ -819,6 +838,7 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
         invariant_shard_counts=invariant_shard_counts,
         duckdb_binding_checks=duckdb_binding_checks,
         external_adapter_checks=external_adapter_checks,
+        quality_gate_tools=quality_gate_tools,
     )
 
 
@@ -885,6 +905,10 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         (lambda s: s.startswith("- Each route lives in `routes_src/` as a `<stem>.toml`"), lambda s: _ensure(
             all(pair["toml"] and pair["sql"] for pair in ctx.source_pairs.values())
             and not ctx.legacy_sidecars_present,
+            s,
+        )),
+        (lambda s: s.startswith("> **Legacy `.sql.md` files:**"), lambda s: _ensure(
+            not ctx.legacy_sidecars_present,
             s,
         )),
         (lambda s: s.startswith("- The compiler translates those sources"), lambda s: _ensure(
@@ -973,6 +997,16 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
             "Download this slice" in ctx.html_text and "Download this slice" in ctx.cards_text,
             s,
         )),
+        (lambda s: s.startswith("Arrow RPC endpoints mirror"), lambda s: _ensure(
+            all(
+                ctx.arrow_rpc_headers.get(header) == ctx.html_headers.get(header)
+                for header in ("x-total-rows", "x-offset", "x-limit")
+            )
+            and ctx.arrow_rpc_headers.get("content-type", "").startswith(
+                "application/vnd.apache.arrow.stream"
+            ),
+            s,
+        )),
         (lambda s: s.startswith("- Drop TOML/SQL pairs into a folder"), lambda s: _ensure(
             ctx.repo_structure["routes_src"] and ctx.repo_structure["routes_build"], s
         )),
@@ -1016,6 +1050,27 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
             )),
         (lambda s: s.startswith("For an exhaustive"), lambda s: _ensure(
             (ctx.repo_root / "AGENTS.md").is_file(), s
+        )),
+        (lambda s: s.startswith("- `ruff`"), lambda s: _ensure(
+            "ruff" in ctx.quality_gate_tools, s
+        )),
+        (lambda s: s.startswith("- `mypy --strict webbed_duck/core/**`"), lambda s: _ensure(
+            "mypy --strict webbed_duck/core/**" in ctx.quality_gate_tools, s
+        )),
+        (lambda s: s.startswith("- `pytest`"), lambda s: _ensure(
+            "pytest" in ctx.quality_gate_tools, s
+        )),
+        (lambda s: s.startswith("- `pytest-benchmark`"), lambda s: _ensure(
+            "pytest-benchmark" in ctx.quality_gate_tools, s
+        )),
+        (lambda s: s.startswith("- `vulture`"), lambda s: _ensure(
+            "vulture" in ctx.quality_gate_tools, s
+        )),
+        (lambda s: s.startswith("- `radon`"), lambda s: _ensure(
+            "radon" in ctx.quality_gate_tools, s
+        )),
+        (lambda s: s.startswith("- `bandit`"), lambda s: _ensure(
+            "bandit" in ctx.quality_gate_tools, s
         )),
         (lambda s: s.startswith("- `webbed-duck serve` loads configuration"), lambda s: _ensure(
             ctx.repo_structure["config.toml"], s
@@ -1257,6 +1312,16 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         )),
         (lambda s: s.startswith("Route parameters affect both cache determinism"), lambda s: _ensure(
             any(route.params for route in ctx.compiled_routes), s
+        )),
+        (lambda s: s == "Remember:", lambda s: None),
+        (lambda s: s.startswith("- Never build comma-joined lists"), lambda s: _ensure(
+            ctx.duckdb_binding_checks.get("multi", False)
+            and ctx.duckdb_binding_checks.get("preprocessed_multi", False),
+            s,
+        )),
+        (lambda s: s.startswith("- Treat file paths and shard lists"), lambda s: _ensure(
+            ctx.duckdb_binding_checks.get("single", False),
+            s,
         )),
         (lambda s: s.startswith("- Bind everything that comes from the request context"), lambda s: _ensure(
             "?" in ctx.compiled_routes[0].prepared_sql, s

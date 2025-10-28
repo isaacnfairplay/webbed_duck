@@ -19,7 +19,7 @@
 
 2. **Create your route source directory** (default is `routes_src/`) and add paired route files (see [Authoring a route](#authoring-a-route)). Each route needs `<stem>.toml` for metadata and `<stem>.sql` for the query. Add `<stem>.md` when you want extra documentation. The repository ships `routes_src/hello.toml` + `hello.sql` as a living example of the canonical layout so new contributors have a starting point for the sidecar format.
 
-   > **Legacy importer:** `webbed-duck import` will split older `.sql.md` files into TOML/SQL once. After that run, edit only the TOML/SQL pair—the importer ignores the markdown stub on subsequent builds.
+   > **Legacy `.sql.md` files:** Convert each legacy file into a TOML/SQL pair once (for example, copy the metadata into `<stem>.toml` and the query body into `<stem>.sql`). After that conversion, edit only the TOML/SQL pair—the old markdown stub can be deleted or ignored.
 
 3. **Compile the contracts into runnable manifests (optional when auto-compile is enabled).**
    ```bash
