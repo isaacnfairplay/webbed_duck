@@ -6,7 +6,13 @@ import pytest
 
 from webbed_duck.config import load_config
 from webbed_duck.core.compiler import compile_routes
-from webbed_duck.core.routes import load_compiled_routes
+from webbed_duck.core.routes import (
+    ParameterSpec,
+    ParameterType,
+    RouteDefinition,
+    load_compiled_routes,
+)
+from webbed_duck.server import app as server_app
 from webbed_duck.server.app import create_app
 
 try:
@@ -114,3 +120,39 @@ def test_local_resolve_validates_reference_numbers(tmp_path: Path) -> None:
     detail = response.json()["detail"]
     assert detail["code"] == "invalid_parameter"
     assert "integer" in detail["message"]
+
+
+def _sample_route() -> RouteDefinition:
+    return RouteDefinition(
+        id="hello",
+        path="/hello",
+        methods=("GET",),
+        raw_sql="SELECT 1",
+        prepared_sql="SELECT 1",
+        param_order=("name",),
+        params=(
+            ParameterSpec(name="name", type=ParameterType.STRING, required=False, default="World"),
+        ),
+        default_format="json",
+    )
+
+
+def test_resolve_reference_alias_supports_target_key() -> None:
+    route = _sample_route()
+    payload = {"target": " local:hello   "}
+
+    request = server_app._build_local_reference_request(payload, [route])
+
+    assert request.route is route
+    assert request.format == "json"
+
+
+def test_resolve_reference_alias_rejects_blank_string() -> None:
+    route = _sample_route()
+
+    with pytest.raises(server_app.HTTPException) as excinfo:
+        server_app._build_local_reference_request({"reference": "   "}, [route])
+
+    detail = excinfo.value.detail
+    assert detail["code"] == "invalid_parameter"
+    assert "non-empty" in detail["message"]
