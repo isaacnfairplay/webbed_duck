@@ -545,12 +545,6 @@ def _unique_invariant_options(
     if allowed_pages is not None and len(allowed_pages) == 0:
         return [("", "")]
 
-    table_values: set[str] | None = None
-    if filters_applied and current_table is not None:
-        table_values = _table_unique_values(current_table, setting.column)
-        if table_values is not None and not table_values:
-            table_values = None
-
     options: list[tuple[str, str]] = []
     seen: set[str] = set()
     for token, entry in param_index.items():
@@ -561,8 +555,6 @@ def _unique_invariant_options(
             if not entry_pages & allowed_pages:
                 continue
         value = _token_to_option_value(token, entry)
-        if table_values is not None and value not in table_values:
-            continue
         if value in seen:
             continue
         label = _token_to_option_label(token, entry)
@@ -589,21 +581,6 @@ def _coerce_invariant_index(
     if isinstance(index, Mapping):
         return index  # type: ignore[return-value]
     return None
-
-
-def _table_unique_values(table: pa.Table | None, column: str) -> set[str] | None:
-    if table is None or column not in table.column_names:
-        return None
-    try:
-        unique = pc.unique(table.column(column))
-    except Exception:  # pragma: no cover - defensive fallback
-        return None
-    values: set[str] = set()
-    for item in unique.to_pylist():
-        values.add(_stringify_param_value(item))
-    return values
-
-
 def _pages_for_other_invariants(
     target_param: str,
     invariant_settings: Mapping[str, InvariantFilterSetting],
