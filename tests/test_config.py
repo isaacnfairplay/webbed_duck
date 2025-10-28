@@ -101,3 +101,23 @@ watermark = false
     assert config.share.zip_passphrase_required is True
     assert config.share.watermark is False
 
+
+def test_load_config_cache_aliases_prefer_latest(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path,
+        """
+[cache]
+ttl_seconds = 90
+ttl_hours = 0.5
+page_rows = 250
+rows_per_page = 150
+enforce_global_page_size = true
+""".strip(),
+    )
+
+    config = load_config(path)
+
+    assert config.cache.ttl_seconds == 1800
+    assert config.cache.page_rows == 150
+    assert config.cache.enforce_global_page_size is True
+

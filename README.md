@@ -137,7 +137,7 @@ Routes may set `default_format` in TOML to choose the response when `?format` is
 - After loading the cached (or freshly queried) page, server-side overlays (cell-level overrides) and append metadata apply automatically when configured in the contract.
 - When a route defines `cache.rows_per_page`, the backend overrides ad-hoc `limit`/`offset` requests so every consumer sees cache-aligned slices—helpful for HTML pagination and CLI batch jobs alike.
 - Set `[cache].enforce_page_size = false` in TOML when you need to honour caller-supplied `limit` values even though `rows_per_page` is configured; the executor keeps materialising pages of that size but skips the clamp when responding.
-- The global `[cache]` configuration exposes `page_rows` and `enforce_global_page_size` to establish a default page length when route metadata omits `rows_per_page`, keeping CLI runs and HTTP defaults aligned without editing every contract.
+- The global `[cache]` configuration exposes `page_rows` and `enforce_global_page_size` to establish a default page length when route metadata omits `rows_per_page`, keeping CLI runs and HTTP defaults aligned without editing every contract. Use `enforce_global_page_size` to set the repo-wide default, then override individual routes with `[cache].enforce_page_size` when a specific contract needs to relax or tighten the clamp.
 - When invariant filters are configured, cached pages include value indexes so follow-up requests with the same `rows_per_page`
   setting can be resolved without re-querying DuckDB even if the client adds or removes filter values. The backend merges
   superset and shard caches, reorders the combined rows by `cache.order_by`, and then applies the requested offset/limit so HTML
