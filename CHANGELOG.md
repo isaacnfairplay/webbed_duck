@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added a `chart_js` response format that converts route `[[charts]]` metadata into
+  Chart.js canvases, including an embeddable `?embed=1` snippet, vendored
+  runtime assets served from `/vendor/chart.umd.min.js`, and configurable
+  script overrides via `[chart_js]` metadata or postprocess settings.
 - Simplified the `/routes` index by extracting folder aggregation into a helper,
   paving the way for reuse in analytics surfaces and clarifying how metrics roll
   up across nested folders.
