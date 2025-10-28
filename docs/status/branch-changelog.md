@@ -1,5 +1,15 @@
 # Branch-level Changelog
 
+## Local reference parser consolidation (work branch)
+
+- Convert `_parse_local_reference` into a structured dataclass so `/local/resolve`
+  shares explicit parsing semantics with helper callers instead of unpacking a
+  positional tuple.
+- Add unit tests that exercise multi-source column selection, prefix validation,
+  and limit/offset propagation for local references.
+- Extend the README section on `local:` references to document supported query
+  parameters and integer coercion expectations.
+
 ## Chart.js vendor hardening (work branch)
 
 - Add deterministic unit coverage for `ensure_chartjs_vendor` (existing asset reuse,

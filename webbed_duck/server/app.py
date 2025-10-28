@@ -57,6 +57,18 @@ class RouteExecutionResult:
     limit: int | None
 
 
+@dataclass(slots=True, frozen=True)
+class ParsedLocalReference:
+    """Structured result returned by :func:`_parse_local_reference`."""
+
+    route_id: str
+    params: Mapping[str, str]
+    columns: tuple[str, ...]
+    format: str | None
+    limit: str | None
+    offset: str | None
+
+
 @dataclass(slots=True)
 class LocalReferenceRequest:
     """Parsed payload for ``/local/resolve`` requests."""
@@ -500,20 +512,13 @@ def _build_local_reference_request(
         raise _http_error("invalid_parameter", str(exc)) from exc
 
     try:
-        (
-            route_id,
-            ref_params,
-            ref_columns,
-            ref_format,
-            ref_limit,
-            ref_offset,
-        ) = _parse_local_reference(reference)
+        parsed = _parse_local_reference(reference)
     except ValueError as exc:
         raise _http_error("invalid_parameter", str(exc)) from exc
 
-    route = _get_route(routes, route_id)
+    route = _get_route(routes, parsed.route_id)
 
-    raw_params: dict[str, object] = dict(ref_params)
+    raw_params: dict[str, object] = dict(parsed.params)
     if "params" in payload:
         params_override = payload["params"]
         if params_override is None:
@@ -528,18 +533,18 @@ def _build_local_reference_request(
         message = str(exc).replace("for share", "for local reference")
         raise _http_error("invalid_parameter", message) from exc
 
-    columns = list(ref_columns)
+    columns = list(parsed.columns)
     if "columns" in payload:
         columns = _normalize_columns(payload["columns"])
 
-    limit = _parse_optional_int(ref_limit) if ref_limit is not None else None
-    offset = _parse_optional_int(ref_offset) if ref_offset is not None else None
+    limit = _parse_optional_int(parsed.limit) if parsed.limit is not None else None
+    offset = _parse_optional_int(parsed.offset) if parsed.offset is not None else None
     if "limit" in payload:
         limit = _coerce_int(payload["limit"], "limit")
     if "offset" in payload:
         offset = _coerce_int(payload["offset"], "offset")
 
-    fmt = ref_format or route.default_format or "json"
+    fmt = parsed.format or route.default_format or "json"
     if "format" in payload:
         fmt_value = payload["format"]
         if fmt_value is None:
@@ -1227,7 +1232,7 @@ def _value_for_name(values: Mapping[str, object], name: str, route: RouteDefinit
     return values[name]
 
 
-def _parse_local_reference(reference: str) -> tuple[str, Mapping[str, str], list[str], str | None, str | None, str | None]:
+def _parse_local_reference(reference: str) -> ParsedLocalReference:
     prefix = "local:"
     if not reference.startswith(prefix):
         raise ValueError("reference must start with 'local:'")
@@ -1258,7 +1263,14 @@ def _parse_local_reference(reference: str) -> tuple[str, Mapping[str, str], list
             offset = value
         else:
             params[key] = value
-    return route_id, params, columns, fmt, limit, offset
+    return ParsedLocalReference(
+        route_id=route_id,
+        params=params,
+        columns=tuple(columns),
+        format=fmt,
+        limit=limit,
+        offset=offset,
+    )
 
 
 def _normalize_columns(value: object) -> list[str]:
