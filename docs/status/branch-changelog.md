@@ -1,5 +1,17 @@
 # Branch-level Changelog
 
+## Pseudo auth HTTP coverage (work branch)
+
+- Add FastAPI regression tests that exercise the `/auth/pseudo/session` lifecycle,
+  ensuring cookies, payload validation, and delete flows match the documented
+  behaviour.
+- Introduce a shared JSON payload helper in the server app so pseudo auth,
+  overrides, append, and share endpoints surface consistent error messages.
+- Extend the Chart.js vendor route coverage to assert the vendored asset serves a
+  200 response and returns a 404 when the script is missing.
+- Document that pseudo auth and share flows require FastAPI/Uvicorn and remind
+  teams to compile routes before running the `perf` harness.
+
 ## Multi-select dropdown refinement (work branch)
 
 - Replace the basic `<select multiple>` widgets with a compact dropdown shell

@@ -37,7 +37,7 @@
    - File watching relies on timestamp and size fingerprints of matching route files, so ensure your editor writes changes to disk (saving partial files can trigger reload attempts). Network or synced file systems that coalesce timestamp updates may require a longer `watch_interval`.
    - The `webbed-duck perf` helper expects compiled routes in the build directory, uses PyArrow tables to compute latency statistics, and accepts repeated `--param name=value` overrides for the target route.
 
-> **FastAPI runtime dependency:** The published wheel already includes `fastapi` and `uvicorn`. Treat them as core requirements for both development and production—removing them is only safe if you intentionally vendor `webbed_duck` inside another ASGI host and accept skipped HTTP coverage during tests.
+> **FastAPI runtime dependency:** The published wheel already includes `fastapi` and `uvicorn`. Treat them as core requirements for both development and production—removing them is only safe if you intentionally vendor `webbed_duck` inside another ASGI host and accept skipped HTTP coverage during tests. The pseudo-auth login endpoints and share workflows depend on FastAPI's request parsing, so uninstalling the web stack disables those flows entirely.
 
 > **Testing note:** The integration tests exercise the FastAPI stack via `fastapi.testclient`. When you purposefully uninstall the server stack (for example, in a trimmed-down tooling image) those tests will skip and coverage drops for auth, overlays, and caching flows. Reinstall `fastapi` and `uvicorn` whenever you need full confidence in HTTP behaviour.
 
