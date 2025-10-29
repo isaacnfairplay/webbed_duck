@@ -1298,8 +1298,24 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
             hasattr(ui_layout_module, "resolve_assets"),
             s,
         )),
-        (lambda s: s.startswith("`render_layout` de-duplicates requests"), lambda s: _ensure(
-            hasattr(ui_layout_module, "render_layout"),
+        (lambda s: s.startswith("`resolve_assets` keeps the canonical ordering"), lambda s: _ensure(
+            ui_layout_module.resolve_assets(
+                {"ui": {"styles": ["layout", "custom", "cards"], "scripts": ["custom_a", "header", "custom_b"]}},
+                default_styles=["layout"],
+                default_scripts=["header"],
+                extra_styles=["charts"],
+                extra_scripts=["chart_boot"],
+            ).styles
+            == ("layout", "custom", "cards", "charts")
+            and ui_layout_module.resolve_assets(
+                {"ui": {"styles": ["layout", "custom", "cards"], "scripts": ["custom_a", "header", "custom_b"]}},
+                default_styles=["layout"],
+                default_scripts=["header"],
+                extra_styles=["charts"],
+                extra_scripts=["chart_boot"],
+            ).scripts
+            == ("custom_a", "header", "custom_b", "chart_boot")
+            and hasattr(ui_layout_module, "render_layout"),
             s,
         )),
         (lambda s: s.startswith("Progressive enhancement remains optional"), lambda s: None),

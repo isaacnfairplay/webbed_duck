@@ -20,6 +20,7 @@ This guide maps the legacy HTML helpers to the refactored layered rendering syst
 Compiled routes can request widgets, styles, and scripts through the new `[ui]` table in their metadata. The post-processors merge those declarations with renderer defaults and feed them to `layout.resolve_assets`, which:
 
 - deduplicates entries,
+- keeps built-in assets in a canonical order (layout before table/cards, header before multi-select/chart boot) while preserving the relative position of custom names so downstream themes can slot in bespoke files,
 - appends `?v={package_version}` cache-busting query parameters,
 - emits `<link rel="stylesheet">` and `<script type="module">` tags only once per page.
 

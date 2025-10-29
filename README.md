@@ -39,7 +39,7 @@
 
 > **FastAPI runtime dependency:** The published wheel already includes `fastapi` and `uvicorn`. Treat them as core requirements for both development and production—removing them is only safe if you intentionally vendor `webbed_duck` inside another ASGI host and accept skipped HTTP coverage during tests. The pseudo-auth login endpoints and share workflows depend on FastAPI's request parsing, so uninstalling the web stack disables those flows entirely.
 
-> **Testing note:** The integration tests exercise the FastAPI stack via `fastapi.testclient`. When you purposefully uninstall the server stack (for example, in a trimmed-down tooling image) those tests will skip and coverage drops for auth, overlays, and caching flows. Reinstall `fastapi` and `uvicorn` whenever you need full confidence in HTTP behaviour.
+> **Testing note:** The integration tests exercise the FastAPI stack via `fastapi.testclient`. When you purposefully uninstall the server stack (for example, in a trimmed-down tooling image) those tests will skip and coverage drops for auth, overlays, and caching flows. Reinstall `fastapi` and `uvicorn` whenever you need full confidence in HTTP behaviour, especially before tagging a release.
 
 5. **Browse the routes.** Open `http://127.0.0.1:8000/hello` (or your route path) in a browser, or request alternate formats with `?format=csv`, `?format=parquet`, etc.
 
@@ -179,7 +179,7 @@ styles  = ["layout", "params", "table"]
 scripts = ["header", "multi_select", "chart_boot"]
 ```
 
-`render_layout` de-duplicates requests, appends `?v={package_version}` query parameters for cache busting, and only emits the `<link>` and `<script type="module">` tags needed for the current page. Static URLs are stable, so front-end plugins can be cached aggressively.
+`resolve_assets` keeps the canonical ordering for built-in CSS and JavaScript so layout scaffolding loads before table/card overrides, while preserving the relative position of custom asset names. List a bespoke stylesheet ahead of `cards` (for example) to have it load before the built-in cards styles, and rely on renderer-supplied `extra_scripts`/`extra_styles` to append required modules without duplicating metadata in every route. `render_layout` de-duplicates requests, appends `?v={package_version}` query parameters for cache busting, and only emits the `<link>` and `<script type="module">` tags needed for the current page. Static URLs are stable, so front-end plugins can be cached aggressively.
 
 Progressive enhancement remains optional: all pages function when JavaScript is disabled. The params form still posts via GET, the multi-select widget submits real `<select multiple>` values, tables/feeds/cards remain fully server-rendered, and Arrow download links behave like normal anchors. JavaScript enhances the experience when available but never replaces the server-side SSR flow.
 
