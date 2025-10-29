@@ -274,12 +274,6 @@ con.sql(
 
 - Pagination, sorting, and debug toggles do not influence the cached dataset. Apply them after the core relation is resolved and continue to bind values where possible (for example `?limit=` is still bound when the executor applies it).
 
-### Invariant parameters and HTML select options
-
-- Parameters registered under `[cache.invariant_filters]` automatically receive dynamic `<select>` options in the HTML views when no explicit `options` list is present. The runtime treats `"...unique_values..."` as a sentinel that expands to the unique invariant values visible to the current request, combining cached metadata with the live filtered table when other invariants are active.
-- Mix the sentinel with static choices to append fallback rows such as an "Other" bucket: `options = ["...unique_values...", { value = "Other", label = "Custom value" }]`. Duplicate values collapse during rendering so the merged list stays tidy.
-- When a caller supplies a value that is not part of the cached index (for example a brand-new invariant token), the current value is still injected into the select so the form reflects the request faithfully.
-
 ### Summary table
 
 | Type                     | Example                       | Cache impact | Binding style       |
@@ -451,9 +445,9 @@ Routes can further customise behaviour via presentation metadata—e.g., `[html_
   show_params = ["name"]
   ```
 
-  The same `show_params` list works for `[html_c]` card views. Only parameters
-  listed there render controls; the rest are preserved as hidden inputs so
-  filter submissions keep pagination or additional query values intact.
+  The same `show_params` list works for `[html_c]` card views, and parameters registered under `[cache.invariant_filters]` automatically receive dynamic `<select>` options when no explicit `options` list is present (the runtime treats `"...unique_values..."` as a sentinel that expands to the current invariant scope).
+  listed there render controls; the rest are preserved as hidden inputs so operators can mix the sentinel with static choices such as `{ value = "Other", label = "Custom value" }` without duplicating entries—the merged list stays tidy even as cached metadata combines with filtered table values.
+  filter submissions keep pagination or additional query values intact, and any caller-supplied value outside the cached index is still injected into the select so the rendered form reflects the request faithfully.
 
   HTML table and card responses also surface the development HTTP banner when
   `ui.show_http_warning` is enabled and reuse the error taxonomy banner toggle

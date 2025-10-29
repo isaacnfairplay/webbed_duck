@@ -30,6 +30,64 @@ def table_to_records(table: pa.Table) -> list[dict[str, object]]:
     return records
 
 
+_BASE_LAYOUT_STYLES = (
+    ":root{color-scheme:light dark;--wd-top-offset:0px;}"
+    ":root[data-has-top='true']{--wd-top-offset:4.5rem;}"
+    "body{font-family:system-ui,sans-serif;margin:0;background:#f8fafc;color:#0f172a;}"
+    ".wd-shell{min-height:100vh;background:inherit;}"
+    ".wd-top{position:sticky;top:0;z-index:90;background:rgba(255,255,255,0.96);backdrop-filter:blur(8px);box-shadow:0 1px 0 rgba(15,23,42,0.08);transition:transform 0.2s ease;}"
+    ".wd-top[data-hidden='true']{transform:translateY(-100%);}"
+    ".wd-top-inner{padding:0.75rem 1.5rem;display:flex;flex-direction:column;gap:0.75rem;}"
+    ".wd-top-actions{display:flex;align-items:center;justify-content:flex-end;gap:0.5rem;flex-wrap:wrap;}"
+    ".wd-top-button{appearance:none;border:1px solid #c7d2fe;background:#e0e7ff;color:#1e3a8a;border-radius:9999px;padding:0.4rem 0.95rem;font-size:0.85rem;font-weight:600;cursor:pointer;transition:background 0.2s ease,border-color 0.2s ease;}"
+    ".wd-top-button:hover{background:#c7d2fe;border-color:#a5b4fc;}"
+    ".wd-top[data-collapsed='true'] .wd-top-sections{display:none;}"
+    ".wd-top[data-collapsed='true'] .wd-top-actions{justify-content:space-between;}"
+    ".wd-top-sections{display:flex;flex-direction:column;gap:0.75rem;}"
+    ".wd-banners{display:flex;flex-direction:column;gap:0.35rem;}"
+    ".wd-banners .banner{margin:0;}"
+    ".wd-summary{display:flex;flex-direction:column;gap:0.5rem;font-size:0.95rem;color:#1f2937;}"
+    ".wd-filters .params-bar{margin:0;}"
+    ".wd-filters[hidden]{display:none!important;}"
+    ".wd-main{padding:calc(var(--wd-top-offset,0px) + 1.5rem) 1.5rem 2rem;transition:padding-top 0.2s ease;}"
+    ".wd-main-inner{display:flex;flex-direction:column;gap:1.5rem;}"
+    ".wd-chart-block{background:#fff;border-radius:0.75rem;box-shadow:0 1px 2px rgba(15,23,42,0.08);padding:1.25rem;}"
+    ".wd-chart-block:empty{display:none;}"
+    ".wd-surface{background:#fff;border-radius:0.75rem;box-shadow:0 1px 2px rgba(15,23,42,0.08);padding:1.25rem;}"
+    ".wd-surface--flush{padding:0;overflow:hidden;}"
+    ".wd-main-inner > *:empty{display:none;}"
+    ".banner.warning{color:#b91c1c;}"
+    ".banner.info{color:#2563eb;}"
+    ".watermark{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-24deg);font-size:3.5rem;color:rgba(37,99,235,0.12);letter-spacing:0.2rem;pointer-events:none;user-select:none;}"
+    "@media(max-width:720px){.wd-top-inner{padding:0.65rem 1rem;}.wd-main{padding:calc(var(--wd-top-offset,0px) + 1rem) 1rem 1.5rem;}}"
+)
+
+
+_TOP_BAR_SCRIPT = (
+    "<script>(function(){"
+    "var top=document.querySelector('[data-wd-top]');"
+    "if(!top){return;}"
+    "var root=document.documentElement;"
+    "var filters=top.querySelector('[data-wd-filters]');"
+    "var toggleTop=top.querySelector('[data-wd-top-toggle]');"
+    "var toggleFilters=top.querySelector('[data-wd-filters-toggle]');"
+    "var lastY=window.scrollY||0;"
+    "function setOffset(){var hidden=top.getAttribute('data-hidden')==='true';var offset=hidden?0:top.getBoundingClientRect().height;root.style.setProperty('--wd-top-offset',offset+'px');}"
+    "function ensureVisible(){top.setAttribute('data-hidden','false');setOffset();}"
+    "setOffset();"
+    "if(toggleFilters){if(!filters){toggleFilters.style.display='none';}else{var hideLabel=toggleFilters.dataset.hideLabel||'Hide filters';var showLabel=toggleFilters.dataset.showLabel||'Show filters';function updateFilters(){var hidden=filters.hasAttribute('hidden');toggleFilters.textContent=hidden?showLabel:hideLabel;toggleFilters.setAttribute('aria-expanded',hidden?'false':'true');}updateFilters();toggleFilters.addEventListener('click',function(){if(filters.hasAttribute('hidden')){filters.removeAttribute('hidden');}else{filters.setAttribute('hidden','');}updateFilters();setOffset();});}}"
+    "if(toggleTop){var hideHead=toggleTop.dataset.hideLabel||'Hide header';var showHead=toggleTop.dataset.showLabel||'Show header';function updateTopButton(){var collapsed=top.getAttribute('data-collapsed')==='true';toggleTop.textContent=collapsed?showHead:hideHead;toggleTop.setAttribute('aria-expanded',collapsed?'false':'true');}updateTopButton();toggleTop.addEventListener('click',function(){var collapsed=top.getAttribute('data-collapsed')==='true';if(collapsed){top.setAttribute('data-collapsed','false');}else{top.setAttribute('data-collapsed','true');}top.setAttribute('data-hidden','false');updateTopButton();setOffset();});}"
+    "var ticking=false;"
+    "function handleScroll(){var current=window.scrollY||0;var delta=current-lastY;lastY=current;var collapsed=top.getAttribute('data-collapsed')==='true';if(collapsed){top.setAttribute('data-hidden','false');setOffset();return;}if(delta>12&&current>24){top.setAttribute('data-hidden','true');}else if(delta<-12){top.setAttribute('data-hidden','false');}setOffset();}"
+    "window.addEventListener('scroll',function(){if(!ticking){window.requestAnimationFrame(function(){handleScroll();ticking=false;});ticking=true;}});"
+    "window.addEventListener('resize',function(){window.requestAnimationFrame(setOffset);});"
+    "top.addEventListener('mouseenter',ensureVisible);"
+    "top.addEventListener('focusin',ensureVisible);"
+    "document.addEventListener('keydown',function(ev){if(ev.key==='Home'){ensureVisible();}});"
+    "})();</script>"
+)
+
+
 def render_table_html(
     table: pa.Table,
     route_metadata: Mapping[str, object] | None,
@@ -79,15 +137,16 @@ def render_table_html(
     chart_html = "".join(item["html"] for item in charts or [])
     watermark_html = _render_watermark_html(watermark)
     styles = (
-        "body{font-family:system-ui,sans-serif;margin:1.5rem;}"
-        "table{border-collapse:collapse;width:100%;}"
-        "th,td{border:1px solid #e5e7eb;padding:0.5rem;text-align:left;}"
-        "tr:nth-child(even){background:#f9fafb;}"
+        ".wd-table{overflow:hidden;}"
+        ".wd-table-scroller{overflow:auto;max-width:100%;background:#fff;}"
+        ".wd-table-scroller table{border-collapse:collapse;width:100%;min-width:100%;background:#fff;}"
+        ".wd-table-scroller th,.wd-table-scroller td{border-bottom:1px solid #e2e8f0;padding:0.75rem 1rem;text-align:left;font-size:0.95rem;color:#1f2937;}"
+        ".wd-table-scroller tbody tr:nth-child(even){background:#f8fafc;}"
+        ".wd-table-scroller tbody tr:hover{background:#eef2ff;}"
+        ".wd-table-scroller tbody tr:last-child td{border-bottom:none;}"
+        ".wd-table-scroller thead th{position:sticky;top:calc(var(--wd-top-offset,0px));background:#e2e8f0;color:#0f172a;font-weight:600;z-index:3;}"
+        ".wd-table-scroller thead th::after{content:'';position:absolute;left:0;bottom:0;width:100%;height:1px;background:#cbd5f5;}"
         f"{_PARAMS_STYLES}"
-        ".banner.warning{color:#b91c1c;}"
-        ".banner.info{color:#2563eb;}"
-        ".watermark{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-24deg);"
-        "font-size:3.5rem;color:rgba(37,99,235,0.12);letter-spacing:0.2rem;pointer-events:none;user-select:none;}"
     )
     return _render_html_document(
         styles=styles,
@@ -96,7 +155,13 @@ def render_table_html(
         chart_html=chart_html,
         params_html=params_html,
         summary_html=summary_html,
-        content_html=f"<table><thead><tr>{header_html}</tr></thead><tbody>{rows_html}</tbody></table>",
+        content_html=(
+            "<div class='wd-surface wd-surface--flush wd-table'><div class='wd-table-scroller'><table><thead><tr>"
+            + header_html
+            + "</tr></thead><tbody>"
+            + rows_html
+            + "</tbody></table></div></div>"
+        ),
         rpc_html=rpc_html,
     )
 
@@ -179,16 +244,14 @@ def render_cards_html_with_assets(
     chart_html = "".join(item["html"] for item in charts or [])
     watermark_html = _render_watermark_html(watermark)
     styles = (
-        "body{font-family:system-ui,sans-serif;margin:1.5rem;}"
         ".cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1.25rem;}"
-        ".card{border:1px solid #e5e7eb;border-radius:0.5rem;padding:1rem;background:#fff;box-shadow:0 1px 2px rgba(15,23,42,.08);}"
+        ".card{border:1px solid #e5e7eb;border-radius:0.75rem;padding:1rem;background:#fff;box-shadow:0 1px 2px rgba(15,23,42,0.08);display:flex;flex-direction:column;gap:0.75rem;}"
         ".card img{width:100%;height:160px;object-fit:cover;border-radius:0.5rem;}"
-        ".card h3{margin:0.5rem 0;font-size:1.1rem;}"
-        ".card ul{margin:0;padding-left:1rem;}"
+        ".card h3{margin:0;font-size:1.1rem;color:#111827;}"
+        ".card ul{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:0.35rem;color:#374151;font-size:0.9rem;}"
+        ".card li{display:flex;gap:0.35rem;align-items:flex-start;}"
+        ".card li span{font-weight:600;color:#1f2937;}"
         f"{_PARAMS_STYLES}"
-        ".banner.info{color:#2563eb;}"
-        ".watermark{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%) rotate(-24deg);"
-        "font-size:3.5rem;color:rgba(37,99,235,0.12);letter-spacing:0.2rem;pointer-events:none;user-select:none;}"
     )
     return _render_html_document(
         styles=styles,
@@ -197,7 +260,7 @@ def render_cards_html_with_assets(
         chart_html=chart_html,
         params_html=params_html,
         summary_html=summary_html,
-        content_html=f"<section class='cards'>{''.join(cards)}</section>",
+        content_html=f"<div class='wd-surface'><section class='cards'>{''.join(cards)}</section></div>",
         rpc_html=rpc_html,
     )
 
@@ -258,7 +321,7 @@ def _render_watermark_html(watermark: str | None) -> str:
 
 def _render_html_document(
     *,
-    styles: str,
+    styles: Sequence[str] | str,
     watermark_html: str,
     banners_html: str,
     chart_html: str,
@@ -267,19 +330,67 @@ def _render_html_document(
     content_html: str,
     rpc_html: str,
 ) -> str:
-    return (
-        "<html><head><style>"
-        + styles
+    style_parts: list[str] = list(_BASE_LAYOUT_STYLES)
+    if styles:
+        if isinstance(styles, str):
+            style_parts.append(styles)
+        else:
+            style_parts.extend(styles)
+    style_text = "".join(style_parts)
+
+    top_sections: list[str] = []
+    if banners_html:
+        top_sections.append(f"<div class='wd-banners'>{banners_html}</div>")
+    if summary_html:
+        top_sections.append(f"<div class='wd-summary'>{summary_html}</div>")
+
+    filters_button = ""
+    if params_html:
+        filters_id = "wd-filters-area"
+        filters_block = (
+            f"<div class='wd-filters' data-wd-filters id='{filters_id}'>"
+            + params_html
+            + "</div>"
+        )
+        top_sections.append(filters_block)
+        filters_button = (
+            "<button type='button' class='wd-top-button' data-wd-filters-toggle "
+            f"data-hide-label='Hide filters' data-show-label='Show filters' aria-controls='{filters_id}' aria-expanded='true'>Hide filters</button>"
+        )
+
+    top_html = ""
+    if top_sections:
+        top_html = (
+            "<header class='wd-top' data-wd-top data-hidden='false' data-collapsed='false'>"
+            "<div class='wd-top-inner'>"
+            "<div class='wd-top-actions'>"
+            "<button type='button' class='wd-top-button' data-wd-top-toggle data-hide-label='Hide header' data-show-label='Show header' aria-expanded='true'>Hide header</button>"
+            + filters_button
+            + "</div><div class='wd-top-sections'>"
+            + "".join(top_sections)
+            + "</div></div></header>"
+        )
+
+    chart_section = f"<div class='wd-chart-block'>{chart_html}</div>" if chart_html else ""
+    html_attrs = " data-has-top='true'" if top_html else ""
+    body = (
+        "<html"
+        + html_attrs
+        + "><head><style>"
+        + style_text
         + "</style></head><body>"
         + watermark_html
-        + banners_html
-        + chart_html
-        + params_html
-        + summary_html
+        + "<div class='wd-shell'>"
+        + top_html
+        + "<main class='wd-main'><div class='wd-main-inner'>"
+        + chart_section
         + content_html
         + rpc_html
+        + "</div></main></div>"
+        + _TOP_BAR_SCRIPT
         + "</body></html>"
     )
+    return body
 
 
 def _merge_view_metadata(
@@ -1382,18 +1493,26 @@ def render_feed_html(
     taxonomy = ""
     if config.ui.error_taxonomy_banner:
         taxonomy = "<aside class='banner info'>Feeds suppress sensitive system errors.</aside>"
-    return (
-        "<html><head><style>"
-        "body{font-family:system-ui,sans-serif;margin:1.5rem;}"
-        "section{margin-bottom:1.5rem;}"
-        "h3{color:#111827;}"
-        "article{padding:0.75rem 0;border-bottom:1px solid #e5e7eb;}"
-        "time{display:block;color:#6b7280;font-size:0.875rem;}"
-        ".banner.info{color:#2563eb;}"
-        "</style></head><body>"
-        + taxonomy
-        + "".join(sections)
-        + "</body></html>"
+    styles = (
+        ".wd-feed{display:flex;flex-direction:column;gap:1.5rem;}"
+        ".wd-feed section{margin:0;display:flex;flex-direction:column;gap:0.75rem;}"
+        ".wd-feed h3{margin:0;font-size:1.05rem;color:#111827;}"
+        ".wd-feed article{padding:0.75rem 0;border-bottom:1px solid #e5e7eb;display:flex;flex-direction:column;gap:0.35rem;}"
+        ".wd-feed article:last-child{border-bottom:none;}"
+        ".wd-feed h4{margin:0;font-size:1rem;color:#111827;}"
+        ".wd-feed p{margin:0;color:#374151;font-size:0.9rem;}"
+        ".wd-feed time{color:#6b7280;font-size:0.8rem;}"
+    )
+    content_html = f"<div class='wd-surface wd-feed'>{''.join(sections)}</div>"
+    return _render_html_document(
+        styles=styles,
+        watermark_html="",
+        banners_html=taxonomy,
+        chart_html="",
+        params_html="",
+        summary_html="",
+        content_html=content_html,
+        rpc_html="",
     )
 
 
