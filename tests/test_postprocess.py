@@ -10,6 +10,9 @@ from webbed_duck.server.postprocess import (
     render_chartjs_html,
     render_table_html,
 )
+from webbed_duck.server.ui.layout import render_layout, resolve_assets
+from webbed_duck.server.ui.views.table import render_table
+from webbed_duck.server.ui.widgets.params import render_params_form
 from webbed_duck.static.chartjs import CHARTJS_FILENAME, CHARTJS_VERSION
 
 
@@ -52,6 +55,11 @@ def test_render_table_html_renders_controls_and_rpc() -> None:
 
     assert "Development mode – HTTP only" in html
     assert "Errors follow the webbed_duck taxonomy" in html
+    assert "/assets/wd/layout.css" in html
+    assert "/assets/wd/table.css" in html
+    assert "/assets/wd/header.js" in html
+    assert "/assets/wd/multi_select.js" in html
+    assert "data-wd-widget='params'" in html
     assert "<label for='param-name'>Name</label>" in html
     assert "placeholder='Friend'" in html
     assert "Enter a name and press Apply" in html
@@ -96,7 +104,7 @@ def test_render_table_html_uses_invariant_unique_values() -> None:
         cache_meta=cache_meta,
     )
 
-    assert "<div class='wd-multi-select' data-wd-multi>" in html
+    assert "<div class='wd-multi-select' data-wd-widget='multi'>" in html
     assert "<select id='param-division' name='division' class='wd-multi-select-input' multiple" in html
     assert "data-search='engineering engineering'" in html
     assert "data-search='finance finance'" in html
@@ -136,7 +144,7 @@ def test_render_table_html_select_without_options_uses_invariant_index() -> None
         cache_meta=cache_meta,
     )
 
-    assert "<div class='wd-multi-select' data-wd-multi>" in html
+    assert "<div class='wd-multi-select' data-wd-widget='multi'>" in html
     assert "<select id='param-division' name='division' class='wd-multi-select-input' multiple" in html
     assert "<option value=''" in html
     assert "data-search='engineering engineering'" in html
@@ -178,7 +186,7 @@ def test_render_table_html_invariant_options_follow_filtered_rows() -> None:
         cache_meta=cache_meta,
     )
 
-    assert "<div class='wd-multi-select' data-wd-multi>" in html
+    assert "<div class='wd-multi-select' data-wd-widget='multi'>" in html
     assert "<select id='param-division' name='division' class='wd-multi-select-input' multiple" in html
     assert "data-search='finance finance'" in html
     assert "<option value='Engineering'" not in html
@@ -350,7 +358,6 @@ def test_render_table_html_invariant_options_keep_multiple_selected_values() -> 
     assert "<select id='param-division' name='division' class='wd-multi-select-input' multiple" in html
     assert "<option value='Finance' selected>Finance</option>" in html
     assert "<option value='Engineering' selected>Engineering</option>" in html
-    assert "container.dataset.wdMultiInit" in html
 
 
 def test_render_cards_html_includes_assets_and_select_options() -> None:
@@ -391,8 +398,10 @@ def test_render_cards_html_includes_assets_and_select_options() -> None:
     assert "<select id='param-status' name='status' class='wd-multi-select-input' multiple" in html
     assert "wd-multi-select-clear'>Clear</button>" in html
     assert "<option value='OK' selected>On Track</option>" in html
+    assert "/assets/wd/cards.css" in html
+    assert "/assets/wd/multi_select.js" in html
     assert "Development mode – HTTP only" in html
-    assert "Error taxonomy: user, data, system." in html
+    assert "Errors follow the webbed_duck taxonomy" in html
     assert "<div>chart</div>" in html
 
 
@@ -427,9 +436,11 @@ def test_chartjs_build_and_render_embed_modes() -> None:
     )
     assert "<!doctype html>" in full_html
     assert f"/vendor/{CHARTJS_FILENAME}?v={CHARTJS_VERSION}" in full_html
+    assert "/assets/wd/charts.css" in full_html
+    assert "/assets/wd/chart_boot.js" in full_html
     assert "data-wd-chart='trend-config'" in full_html
     assert "Development mode – HTTP only" in full_html
-    assert "Charts suppress internal error details." in full_html
+    assert "Errors follow the webbed_duck taxonomy" in full_html
 
     embed_html = render_chartjs_html(
         charts,
@@ -442,4 +453,66 @@ def test_chartjs_build_and_render_embed_modes() -> None:
     )
     assert "<!doctype html>" not in embed_html
     assert embed_html.count("<canvas") == 1
-    assert "Charts suppress internal error details" not in embed_html
+    assert "/assets/wd/chart_boot.js" in embed_html
+
+def test_params_form_renders_hidden_inputs_and_multi_select() -> None:
+    table = pa.table({"region": ["EMEA", "APAC"]})
+    params = [
+        ParameterSpec(
+            name="search",
+            type=ParameterType.STRING,
+            extra={"ui_control": "input", "ui_label": "Search"},
+        ),
+        ParameterSpec(
+            name="region",
+            type=ParameterType.STRING,
+            extra={"ui_control": "select"},
+        ),
+    ]
+
+    html = render_params_form(
+        {"show_params": ["search", "region"]},
+        params,
+        {"search": "engine", "format": "html_t"},
+        format_hint="html_t",
+        pagination={"limit": 25},
+        current_table=table,
+    )
+
+    assert "class='params-form'" in html
+    assert "name='format' value='html_t'" in html
+    assert "name='limit' value='25'" in html
+    assert "<div class='wd-multi-select' data-wd-widget='multi'>" in html
+    assert "<option value='EMEA'>EMEA</option>" in html
+    assert "<option value='APAC'>APAC</option>" in html
+
+
+def test_table_view_renders_header_and_rows() -> None:
+    html = render_table(["col_a", "col_b"], [{"col_a": "x", "col_b": "y"}])
+    assert "<th>col_a</th>" in html
+    assert "<td>x</td>" in html
+    assert "<td>y</td>" in html
+
+
+def test_layout_emits_requested_assets_once() -> None:
+    assets = resolve_assets(
+        {"ui": {"styles": ["table"], "scripts": ["header"]}},
+        default_styles=["layout", "table"],
+        default_scripts=["header"],
+        extra_scripts=["chart_boot"],
+    )
+
+    html = render_layout(
+        page_title="Demo",
+        banners_html="",
+        summary_html="",
+        filters_html="",
+        main_blocks_html=["<p>Body</p>"],
+        watermark_html="",
+        assets=assets,
+    )
+
+    assert html.count("/assets/wd/layout.css") == 1
+    assert html.count("/assets/wd/table.css") == 1
+    assert html.count("src='/assets/wd/header.js") == 1
+    assert html.count("src='/assets/wd/chart_boot.js") == 1

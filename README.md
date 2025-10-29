@@ -153,8 +153,41 @@ Routes may set `default_format` in TOML to choose the response when `?format` is
 Arrow RPC endpoints mirror `x-total-rows`, `x-offset`, and `x-limit` headers, and every HTML view exposes a “Download this slice (Arrow)” link for parity.
 
 `?format=chart_js` renders every `[[charts]]` specification as a Chart.js canvas. The server vendors Chart.js into `storage_root/static/vendor/chartjs/` on first run and serves it from `/vendor/chart.umd.min.js?v=4.4.3`, falling back to the CDN source only if the vendored copy cannot be prepared. The Python package ships with Chart.js 4.4.3 under `webbed_duck/static/chartjs/chart.umd.min.js`, so projects with read-only storage can still serve the script directly from site-packages. Override the script URL (and layout details like `canvas_height`) via `[chart_js]` metadata or `@postprocess chart_js` overrides. Provide your own build by dropping a `chart.umd.min.js` into that directory (or set `WEBDUCK_SKIP_CHARTJS_DOWNLOAD=1` to skip the automatic fetch). Air-gapped environments **must** pre-populate that folder (or mount it read-only with the asset in place); otherwise the runtime will return a 404 for `/vendor/chart.umd.min.js` and continue referencing the CDN fallback.
-Append `?embed=1` to receive a snippet that can be dropped into another page without the surrounding `<html>` wrapper; the
-snippet still initialises the charts automatically.
+Append `?embed=1` to receive a snippet that includes the vendor `<script src="…chart.umd.min.js">`, the rendered `<div class='wd-chart-grid'>…</div>` markup, and a `<script type="module" src="/assets/wd/chart_boot.js?v=VERSION">` loader without the surrounding `<html>` wrapper.
+The snippet ships the vendor Chart.js tag and the `/assets/wd/chart_boot.js` module so dropping it into another page still boots every `<canvas data-wd-chart>` element once Chart.js is ready.
+
+### UI rendering architecture and progressive enhancement
+
+The HTML layer now follows a strict separation between server-rendered structure, declarative metadata, and progressive enhancement:
+
+- `webbed_duck/server/ui/layout.py` assembles the outer `<html>` shell and is the only module that emits `<link rel="stylesheet">` or `<script src="…">` tags. It accepts pre-rendered fragments for the top banners, summary text, filters, and the main content blocks.
+- View modules under `webbed_duck/server/ui/views/` (`table.py`, `cards.py`, `feed.py`, `charts.py`) produce scrollable tables, card grids, feeds, and chart canvases without inline JavaScript.
+- Widget modules under `webbed_duck/server/ui/widgets/` (`params.py`, `multi_select.py`) render the filter form, the hidden pagination inputs, and the accessible multi-select control that syncs with submitted query parameters.
+- Support modules under `webbed_duck/server/ui/` handle shared logic (`invariants.py`, `pagination.py`, `rpc.py`, and `charts.py` for Chart.js configuration validation) so renderers stay thin and testable.
+
+Static assets live in `webbed_duck/static/assets/wd/` and mirror those widgets:
+
+- `layout.css`, `params.css`, `multi_select.css`, `table.css`, `cards.css`, `feed.css`, and `charts.css` style the layout, filters, and data surfaces.
+- `header.js`, `params_form.js`, `multi_select.js`, and `chart_boot.js` attach behavior to `[data-wd-*]` attributes without altering the server-rendered markup. For example, `header.js` manages sticky-header offsets, `multi_select.js` enhances `<select multiple>` controls, and `chart_boot.js` reads `<canvas data-wd-chart>` elements and their JSON config blocks.
+
+Compiled routes declare the assets they require via a `[ui]` section. The metadata supports `widgets`, `styles`, and `scripts` arrays, which the server merges with renderer defaults and resolves through `resolve_assets`:
+
+```toml
+[ui]
+widgets = ["header", "params", "multi_select"]
+styles  = ["layout", "params", "table"]
+scripts = ["header", "multi_select", "chart_boot"]
+```
+
+`render_layout` de-duplicates requests, appends `?v={package_version}` query parameters for cache busting, and only emits the `<link>` and `<script type="module">` tags needed for the current page. Static URLs are stable, so front-end plugins can be cached aggressively.
+
+Progressive enhancement remains optional: all pages function when JavaScript is disabled. The params form still posts via GET, the multi-select widget submits real `<select multiple>` values, tables/feeds/cards remain fully server-rendered, and Arrow download links behave like normal anchors. JavaScript enhances the experience when available but never replaces the server-side SSR flow.
+
+### UI testing strategy
+
+- Python unit tests exercise the renderers directly (see `tests/test_postprocess.py`), asserting structure such as sticky table headers, hidden pagination inputs, `<script type="application/json">` chart configs, and asset resolution.
+- Front-end plugins are written as modules that expose small `init*` helpers so they can be tested with DOM stubs. Keep those unit tests close to the asset sources to guard regressions in multi-select syncing, sticky-header offsets, and chart bootstrapping.
+- End-to-end and visual verification should be automated with a browser automation framework such as [Playwright](https://playwright.dev/?utm_source=chatgpt.com) or [Cypress](https://testsigma.com/tools/open-source-testing-tools/?utm_source=chatgpt.com). Include scenarios for sticky header behavior on scroll, multi-select open/close/filter flows, card grid responsiveness, and chart canvas bootstrapping. Pair those runs with a visual regression tool like [Galen Framework](https://en.wikipedia.org/wiki/Galen_Framework?utm_source=chatgpt.com) to catch layout drift across browsers and screen sizes.
 
 ### Data sources and execution model
 

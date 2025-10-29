@@ -1,0 +1,127 @@
+.params-bar {
+  margin-bottom: 1.25rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 0.75rem;
+  background: #f9fafb;
+}
+
+.params-form {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  align-items: flex-end;
+}
+
+.param-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  min-width: 12rem;
+  position: relative;
+}
+
+.param-field label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #374151;
+}
+
+.param-field input,
+.param-field select {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #d1d5db;
+  border-radius: 0.375rem;
+  font: inherit;
+  background: #fff;
+  min-height: 2.25rem;
+}
+
+.param-field select {
+  min-width: 10rem;
+}
+
+.param-help {
+  font-size: 0.75rem;
+  color: #6b7280;
+  margin: 0;
+}
+
+.param-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.param-actions button {
+  padding: 0.45rem 0.95rem;
+  border-radius: 0.375rem;
+  border: 1px solid #2563eb;
+  background: #2563eb;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.param-actions button:hover {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+}
+
+.param-actions .reset-link {
+  color: #2563eb;
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+
+.param-actions .reset-link:hover {
+  text-decoration: underline;
+}
+
+.result-summary {
+  margin: 0.5rem 0 1rem;
+  color: #374151;
+  font-size: 0.9rem;
+}
+
+.rpc-actions {
+  margin-top: 1rem;
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+}
+
+.rpc-actions a {
+  color: #2563eb;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.rpc-actions a:hover {
+  text-decoration: underline;
+}
+
+.pagination {
+  margin-top: 1rem;
+}
+
+.pagination a {
+  color: #2563eb;
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.pagination a:hover {
+  text-decoration: underline;
+}
+
+@media (max-width: 720px) {
+  .params-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .param-field {
+    width: 100%;
+  }
+}

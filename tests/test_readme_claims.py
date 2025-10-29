@@ -29,6 +29,7 @@ from webbed_duck.server.app import create_app
 from webbed_duck.server.auth import resolve_auth_adapter
 from webbed_duck.server.email import load_email_sender
 from webbed_duck.server.execution import RouteExecutor
+from webbed_duck.server.ui import layout as ui_layout_module
 from webbed_duck.static.chartjs import CHARTJS_FILENAME, CHARTJS_VERSION
 
 try:
@@ -956,7 +957,7 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         (lambda s: s.startswith("`ui.show_http_warning` is enabled and reuse the error taxonomy banner toggle"), lambda s: None),
         (lambda s: s.startswith("so operators see consistent guidance. Every response embeds a"), lambda s: _ensure(
             "Errors follow the webbed_duck taxonomy" in ctx.html_text
-            and "Error taxonomy" in ctx.cards_text,
+            and "Errors follow the webbed_duck taxonomy" in ctx.cards_text,
             s,
         )),
         (lambda s: s.startswith("`<script id=\"wd-rpc-config\">` payload alongside a"), lambda s: _ensure(
@@ -1237,13 +1238,80 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         (lambda s: s.startswith("|"), lambda s: None),
         (lambda s: s.startswith("Append `?embed=1`"), lambda s: _ensure(
             "<!doctype html>" not in ctx.chart_js_embed_text
-            and "data-wd-chart" in ctx.chart_js_embed_text,
+            and "wd-chart-grid" in ctx.chart_js_embed_text
+            and "chart.umd.min.js" in ctx.chart_js_embed_text,
             s,
         )),
-        (lambda s: s.startswith("snippet still initialises the charts automatically."), lambda s: _ensure(
-            "new Chart" in ctx.chart_js_text,
+        (lambda s: s.startswith("The snippet ships the vendor Chart.js tag"), lambda s: _ensure(
+            "/assets/wd/chart_boot.js" in ctx.chart_js_embed_text,
             s,
         )),
+        (lambda s: s.startswith("The HTML layer now follows a strict separation"), lambda s: _ensure(
+            (ctx.repo_root / "webbed_duck/server/ui/layout.py").is_file()
+            and (ctx.repo_root / "webbed_duck/server/ui/views/table.py").is_file(),
+            s,
+        )),
+        (lambda s: s.startswith("- `webbed_duck/server/ui/layout.py` assembles"), lambda s: _ensure(
+            hasattr(ui_layout_module, "render_layout"),
+            s,
+        )),
+        (lambda s: s.startswith("- View modules under `webbed_duck/server/ui/views/`"), lambda s: _ensure(
+            all(
+                (ctx.repo_root / f"webbed_duck/server/ui/views/{name}.py").is_file()
+                for name in ("table", "cards", "feed", "charts")
+            ),
+            s,
+        )),
+        (lambda s: s.startswith("- Widget modules under `webbed_duck/server/ui/widgets/`"), lambda s: _ensure(
+            all(
+                (ctx.repo_root / f"webbed_duck/server/ui/widgets/{name}.py").is_file()
+                for name in ("params", "multi_select")
+            ),
+            s,
+        )),
+        (lambda s: s.startswith("- Support modules under `webbed_duck/server/ui/`"), lambda s: _ensure(
+            all(
+                (ctx.repo_root / f"webbed_duck/server/ui/{name}.py").is_file()
+                for name in ("invariants", "pagination", "rpc", "charts")
+            ),
+            s,
+        )),
+        (lambda s: s.startswith("Static assets live in `webbed_duck/static/assets/wd/`"), lambda s: _ensure(
+            (ctx.repo_root / "webbed_duck/static/assets/wd").is_dir(),
+            s,
+        )),
+        (lambda s: s.startswith("- `layout.css`, `params.css`"), lambda s: _ensure(
+            all(
+                (ctx.repo_root / f"webbed_duck/static/assets/wd/{name}.css").is_file()
+                for name in ("layout", "params", "multi_select", "table", "cards", "feed", "charts")
+            ),
+            s,
+        )),
+        (lambda s: s.startswith("- `header.js`, `params_form.js`"), lambda s: _ensure(
+            all(
+                (ctx.repo_root / f"webbed_duck/static/assets/wd/{name}.js").is_file()
+                for name in ("header", "params_form", "multi_select", "chart_boot")
+            ),
+            s,
+        )),
+        (lambda s: s.startswith("Compiled routes declare the assets they require via a `[ui]` section"), lambda s: _ensure(
+            hasattr(ui_layout_module, "resolve_assets"),
+            s,
+        )),
+        (lambda s: s.startswith("`render_layout` de-duplicates requests"), lambda s: _ensure(
+            hasattr(ui_layout_module, "render_layout"),
+            s,
+        )),
+        (lambda s: s.startswith("Progressive enhancement remains optional"), lambda s: None),
+        (lambda s: s.startswith("- Python unit tests exercise the renderers directly"), lambda s: _ensure(
+            (ctx.repo_root / "tests/test_postprocess.py").is_file(),
+            s,
+        )),
+        (lambda s: s.startswith("- Front-end plugins are written as modules"), lambda s: _ensure(
+            (ctx.repo_root / "webbed_duck/static/assets/wd/header.js").is_file(),
+            s,
+        )),
+        (lambda s: s.startswith("- End-to-end and visual verification should be automated"), lambda s: None),
         (lambda s: s.startswith("Routes may set `default_format`"), lambda s: None),
         (lambda s: s.startswith("- You can query DuckDB-native sources"), lambda s: None),
         (lambda s: s.startswith("- For derived inputs"), lambda s: None),
