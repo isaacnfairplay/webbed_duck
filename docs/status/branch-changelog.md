@@ -1,5 +1,13 @@
 # Branch-level Changelog
 
+## Version bump workflow YAML fix (work branch)
+
+- Indented the inline Python scripts inside `.github/workflows/version-bump.yml`
+  so GitHub Actions parses the job correctly and runs the merge-time version
+  bump instead of failing before any steps execute.
+- Documented the workflow repair in `CHANGELOG.md` to highlight why the release
+  automation resumed working after the merge that introduced the job.
+
 ## Watch iteration helper and feature flag parsing (work branch)
 
 - Extracted a reusable `_watch_iteration` helper for the CLI file watcher and

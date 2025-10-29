@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fixed the automated version bump workflow by indenting the embedded Python
+  scripts so GitHub Actions can parse the YAML and execute the job that tags
+  releases after merges.
 - Refactored the CLI watcher into a single-iteration helper with dedicated
   tests and taught `load_config` to parse `[feature_flags]` so configuration
   docs and runtime behaviour stay aligned.
