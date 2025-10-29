@@ -1,5 +1,14 @@
 # Branch-level Changelog
 
+## Plugin registry hygiene (work branch)
+
+- Tighten `webbed_duck.plugins.assets.get_image_getter` so registry lookups raise
+  when both the requested getter and the `static_fallback` entry are missing.
+- Extend `tests/test_plugins.py` to cover empty registries and the new
+  `LookupError` signalling.
+- Document the requirement to re-register a fallback getter in
+  `docs/demos/plugin_registry.md`, keeping downstream plugin tests aligned.
+
 ## Pseudo auth HTTP coverage (work branch)
 
 - Add FastAPI regression tests that exercise the `/auth/pseudo/session` lifecycle,

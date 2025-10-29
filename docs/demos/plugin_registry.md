@@ -33,7 +33,7 @@ The plugin registries are covered by `tests/test_plugins.py`, which now includes
 checks for:
 
 - Custom CDN image getters.
-- Fallback resolution to the static asset getter.
+- Fallback resolution to the static asset getter when it remains registered.
 - Custom chart renderers and renderer skipping for unknown types.
 - Error propagation when renderers raise exceptions.
 - Validation paths for the built-in line chart renderer (missing columns and
@@ -41,3 +41,10 @@ checks for:
 
 These tests and the accompanying demo provide a bench of executable references
 outside the main package source so teams can iterate on plugins confidently.
+
+When test helpers call `reset_image_getters(include_defaults=False)` the
+registry is intentionally left empty.  Subsequent lookups raise a
+`LookupError`, making missing fallbacks obvious instead of silently
+reinstalling the default `static_fallback` getter.  Downstream projects should
+re-register their preferred default getter (or the built-in fallback) before
+resolving images.

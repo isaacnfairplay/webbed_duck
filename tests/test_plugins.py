@@ -65,6 +65,20 @@ def test_resolve_image_falls_back_to_static(asset_registry):
     assert resolve_image("hero.jpg", "routes/about", "unknown") == "/static/hero.jpg"
 
 
+def test_get_image_getter_requires_fallback(asset_registry):
+    reset_image_getters(include_defaults=False)
+
+    with pytest.raises(LookupError):
+        assets.get_image_getter("missing")
+
+
+def test_resolve_image_raises_when_fallback_missing(asset_registry):
+    reset_image_getters(include_defaults=False)
+
+    with pytest.raises(LookupError):
+        resolve_image("logo.png", "routes/home")
+
+
 def test_render_route_charts_custom_renderer(chart_registry):
     @register_chart_renderer("custom")
     def _custom_renderer(table: pa.Table, spec):

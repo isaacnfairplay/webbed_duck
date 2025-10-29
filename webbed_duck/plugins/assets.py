@@ -18,7 +18,24 @@ def register_image_getter(name: str) -> Callable[[ImageGetter], ImageGetter]:
 
 
 def get_image_getter(name: str) -> ImageGetter:
-    return _REGISTRY.get(name, _REGISTRY.setdefault("static_fallback", static_fallback))
+    """Return the registered getter for ``name``.
+
+    When the requested getter is not installed we fall back to the
+    ``static_fallback`` registration if it exists.  If neither the requested
+    getter nor the fallback are present a :class:`LookupError` is raised so
+    callers notice the misconfiguration instead of silently re-installing the
+    default implementation.
+    """
+
+    if name in _REGISTRY:
+        return _REGISTRY[name]
+
+    fallback = _REGISTRY.get("static_fallback")
+    if fallback is None:
+        raise LookupError(
+            f"Image getter '{name}' is not registered and no 'static_fallback' getter is available"
+        )
+    return fallback
 
 
 def resolve_image(name: str, route_id: str, getter_name: str | None = None) -> str:
