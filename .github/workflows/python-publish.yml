@@ -29,7 +29,15 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || github.ref }}
+          repository: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.repository.full_name || github.repository }}
+
+      - name: Sync branch tip for workflow_run events
+        if: github.event_name == 'workflow_run'
+        run: |
+          git fetch origin "${{ github.event.workflow_run.head_branch }}" --tags
+          git checkout "${{ github.event.workflow_run.head_branch }}"
+          git reset --hard "origin/${{ github.event.workflow_run.head_branch }}"
 
       - name: Determine release tag on HEAD
         id: release_tag
