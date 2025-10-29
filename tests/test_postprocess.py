@@ -63,6 +63,296 @@ def test_render_table_html_renders_controls_and_rpc() -> None:
     assert "Mallard" in html
 
 
+def test_render_table_html_uses_invariant_unique_values() -> None:
+    config = load_config(None)
+    table = pa.table({"Division": ["Engineering", "Finance", "Manufacturing"]})
+    params = [
+        ParameterSpec(
+            name="division",
+            type=ParameterType.STRING,
+            extra={
+                "ui_control": "select",
+                "options": "...unique_values...",
+            },
+        )
+    ]
+    cache_meta = {
+        "invariant_index": {
+            "division": {
+                "str:Engineering": {"pages": [0], "rows": 1, "sample": "Engineering"},
+                "str:Finance": {"pages": [0], "rows": 1, "sample": "Finance"},
+            }
+        }
+    }
+
+    html = render_table_html(
+        table,
+        {"html_t": {"show_params": ["division"]}},
+        config,
+        charts=[],
+        params=params,
+        param_values={"division": ""},
+        format_hint="html_t",
+        cache_meta=cache_meta,
+    )
+
+    assert "<div class='wd-multi-select' data-wd-multi>" in html
+    assert "<select id='param-division' name='division' class='wd-multi-select-input' multiple" in html
+    assert "data-search='engineering engineering'" in html
+    assert "data-search='finance finance'" in html
+    assert "wd-multi-select-clear'>Clear</button>" in html
+    assert "<option value='Manufacturing'" not in html
+
+
+def test_render_table_html_select_without_options_uses_invariant_index() -> None:
+    config = load_config(None)
+    table = pa.table({"division": ["Engineering", "Finance", "Manufacturing"]})
+    params = [
+        ParameterSpec(
+            name="division",
+            type=ParameterType.STRING,
+            extra={
+                "ui_control": "select",
+            },
+        )
+    ]
+    cache_meta = {
+        "invariant_index": {
+            "division": {
+                "str:Engineering": {"pages": [0], "rows": 1, "sample": "Engineering"},
+                "str:Finance": {"pages": [0], "rows": 1, "sample": "Finance"},
+            }
+        }
+    }
+
+    html = render_table_html(
+        table,
+        {"html_t": {"show_params": ["division"]}},
+        config,
+        charts=[],
+        params=params,
+        param_values={"division": ""},
+        format_hint="html_t",
+        cache_meta=cache_meta,
+    )
+
+    assert "<div class='wd-multi-select' data-wd-multi>" in html
+    assert "<select id='param-division' name='division' class='wd-multi-select-input' multiple" in html
+    assert "<option value=''" in html
+    assert "data-search='engineering engineering'" in html
+    assert "data-search='finance finance'" in html
+    assert "Selections stay checked as you filter." in html
+    assert "<option value='Manufacturing'" not in html
+
+
+def test_render_table_html_invariant_options_follow_filtered_rows() -> None:
+    config = load_config(None)
+    table = pa.table({"division": ["Finance"], "region": ["EMEA"]})
+    params = [
+        ParameterSpec(
+            name="division",
+            type=ParameterType.STRING,
+            extra={
+                "ui_control": "select",
+                "options": "...unique_values...",
+            },
+        )
+    ]
+    cache_meta = {
+        "invariant_index": {
+            "division": {
+                "str:Engineering": {"pages": [0], "rows": 10, "sample": "Engineering"},
+                "str:Finance": {"pages": [0], "rows": 5, "sample": "Finance"},
+            }
+        }
+    }
+
+    html = render_table_html(
+        table,
+        {"html_t": {"show_params": ["division"]}},
+        config,
+        charts=[],
+        params=params,
+        param_values={"division": "", "region": "EMEA"},
+        format_hint="html_t",
+        cache_meta=cache_meta,
+    )
+
+    assert "<div class='wd-multi-select' data-wd-multi>" in html
+    assert "<select id='param-division' name='division' class='wd-multi-select-input' multiple" in html
+    assert "data-search='finance finance'" in html
+    assert "<option value='Engineering'" not in html
+
+
+def test_render_table_html_invariant_options_keep_selected_value() -> None:
+    config = load_config(None)
+    table = pa.table({"division": ["Finance"]})
+    params = [
+        ParameterSpec(
+            name="division",
+            type=ParameterType.STRING,
+            extra={
+                "ui_control": "select",
+                "options": "...unique_values...",
+            },
+        )
+    ]
+    cache_meta = {
+        "invariant_index": {
+            "division": {
+                "str:Engineering": {"pages": [0], "rows": 10, "sample": "Engineering"},
+                "str:Finance": {"pages": [0], "rows": 5, "sample": "Finance"},
+            }
+        }
+    }
+
+    html = render_table_html(
+        table,
+        {"html_t": {"show_params": ["division"]}},
+        config,
+        charts=[],
+        params=params,
+        param_values={"division": "Engineering"},
+        format_hint="html_t",
+        cache_meta=cache_meta,
+    )
+
+    assert "<select id='param-division' name='division' class='wd-multi-select-input' multiple" in html
+    assert "<option value='Engineering' selected>Engineering</option>" in html
+    assert "<option value='Finance'>Finance</option>" in html
+
+
+def test_render_table_html_select_without_options_defaults_to_table_unique_values() -> None:
+    config = load_config(None)
+    table = pa.table({"division": ["Engineering", "Finance", "Engineering"]})
+    params = [
+        ParameterSpec(
+            name="division",
+            type=ParameterType.STRING,
+            extra={
+                "ui_control": "select",
+            },
+        )
+    ]
+
+    html = render_table_html(
+        table,
+        {"html_t": {"show_params": ["division"]}},
+        config,
+        charts=[],
+        params=params,
+        param_values={"division": ""},
+        format_hint="html_t",
+        cache_meta=None,
+    )
+
+    assert "<select id='param-division' name='division' class='wd-multi-select-input' multiple" in html
+    assert "<option value='' selected>" in html
+    assert "<option value='Engineering'>Engineering</option>" in html
+    assert "<option value='Finance'>Finance</option>" in html
+
+
+def test_render_table_html_select_marks_multiple_selected_values() -> None:
+    config = load_config(None)
+    table = pa.table({"division": ["Engineering", "Finance", "Manufacturing"]})
+    params = [
+        ParameterSpec(
+            name="division",
+            type=ParameterType.STRING,
+            extra={
+                "ui_control": "select",
+            },
+        )
+    ]
+
+    html = render_table_html(
+        table,
+        {"html_t": {"show_params": ["division"]}},
+        config,
+        charts=[],
+        params=params,
+        param_values={"division": ["Engineering", "Finance"]},
+        format_hint="html_t",
+        cache_meta=None,
+    )
+
+    assert "<select id='param-division' name='division' class='wd-multi-select-input' multiple" in html
+    assert "<option value='Engineering' selected>Engineering</option>" in html
+    assert "<option value='Finance' selected>Finance</option>" in html
+    assert "<option value='Manufacturing'" in html
+
+
+def test_render_table_html_falls_back_to_table_unique_values() -> None:
+    config = load_config(None)
+    table = pa.table({"division": ["Engineering", "Finance", "Engineering"]})
+    params = [
+        ParameterSpec(
+            name="division",
+            type=ParameterType.STRING,
+            extra={
+                "ui_control": "select",
+                "options": ["...unique_values...", {"value": "Other", "label": "Other"}],
+            },
+        )
+    ]
+
+    html = render_table_html(
+        table,
+        {"html_t": {"show_params": ["division"]}},
+        config,
+        charts=[],
+        params=params,
+        param_values={"division": ""},
+        format_hint="html_t",
+        cache_meta=None,
+    )
+
+    assert "<select id='param-division' name='division' class='wd-multi-select-input' multiple" in html
+    assert "<option value='' selected>" in html
+    assert "<option value='Engineering'>Engineering</option>" in html
+    assert "<option value='Finance'>Finance</option>" in html
+    assert "<option value='Other'>Other</option>" in html
+
+
+def test_render_table_html_invariant_options_keep_multiple_selected_values() -> None:
+    config = load_config(None)
+    table = pa.table({"division": ["Finance"]})
+    params = [
+        ParameterSpec(
+            name="division",
+            type=ParameterType.STRING,
+            extra={
+                "ui_control": "select",
+                "options": "...unique_values...",
+            },
+        )
+    ]
+    cache_meta = {
+        "invariant_index": {
+            "division": {
+                "str:Engineering": {"pages": [0], "rows": 10, "sample": "Engineering"},
+                "str:Finance": {"pages": [0], "rows": 5, "sample": "Finance"},
+            }
+        }
+    }
+
+    html = render_table_html(
+        table,
+        {"html_t": {"show_params": ["division"]}},
+        config,
+        charts=[],
+        params=params,
+        param_values={"division": ["Engineering", "Finance"]},
+        format_hint="html_t",
+        cache_meta=cache_meta,
+    )
+
+    assert "<select id='param-division' name='division' class='wd-multi-select-input' multiple" in html
+    assert "<option value='Finance' selected>Finance</option>" in html
+    assert "<option value='Engineering' selected>Engineering</option>" in html
+    assert "container.dataset.wdMultiInit" in html
+
+
 def test_render_cards_html_includes_assets_and_select_options() -> None:
     config = load_config(None)
     config.ui.show_http_warning = True
@@ -98,7 +388,8 @@ def test_render_cards_html_includes_assets_and_select_options() -> None:
 
     assert "<section class='cards'>" in html
     assert "<img src='/static/media/card.png'" in html
-    assert "<select id='param-status'" in html
+    assert "<select id='param-status' name='status' class='wd-multi-select-input' multiple" in html
+    assert "wd-multi-select-clear'>Clear</button>" in html
     assert "<option value='OK' selected>On Track</option>" in html
     assert "Development mode – HTTP only" in html
     assert "Error taxonomy: user, data, system." in html
