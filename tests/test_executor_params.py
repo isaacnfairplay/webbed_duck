@@ -160,6 +160,103 @@ WHERE ($enabled = enabled_again)
     assert data["text_again"] == ["Alpha"]
 
 
+def test_executor_converts_sequence_items_to_param_type(tmp_path: Path) -> None:
+    source = tmp_path / "src"
+    build = tmp_path / "build"
+    source.mkdir()
+
+    _write_pair(
+        source,
+        "multi_int_sequence",
+        """id = "multi_int_sequence"
+path = "/multi-int-sequence"
+cache_mode = "passthrough"
+
+[params.ids]
+type = "int"
+required = false
+""".strip(),
+        """WITH selected AS (
+    SELECT UNNEST($ids::INT[]) AS value
+)
+SELECT
+    SUM(value) AS total,
+    COUNT(*) AS count
+FROM selected;
+""".strip(),
+    )
+
+    compile_routes(source, build)
+    routes = load_compiled_routes(build)
+    route = next(item for item in routes if item.id == "multi_int_sequence")
+
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+
+    executor = RouteExecutor({item.id: item for item in routes}, cache_store=None, config=config)
+
+    raw_params = {"ids": ["1", "2", "3"]}
+    prepared = executor._prepare(route, raw_params, ordered=None, preprocessed=False)
+
+    assert prepared.params["ids"] == [1, 2, 3]
+    assert prepared.ordered == [[1, 2, 3]]
+
+    result = executor.execute_relation(route, raw_params, offset=0, limit=None)
+    table = result.table
+    assert table.num_rows == 1
+    data = table.to_pydict()
+    assert data["total"] == [6]
+    assert data["count"] == [3]
+
+
+def test_executor_drops_optional_sequence_filter_when_empty(tmp_path: Path) -> None:
+    source = tmp_path / "src"
+    build = tmp_path / "build"
+    source.mkdir()
+
+    _write_pair(
+        source,
+        "optional_multi_filter",
+        """id = "optional_multi_filter"
+path = "/optional-multi-filter"
+cache_mode = "passthrough"
+
+[params.ids]
+type = "int"
+required = false
+""".strip(),
+        """WITH base AS (
+    SELECT * FROM (VALUES (1), (2), (3)) AS t(id)
+)
+SELECT id
+FROM base
+WHERE ($ids IS NULL OR id = ANY($ids::INT[]))
+ORDER BY id;""".strip(),
+    )
+
+    compile_routes(source, build)
+    routes = load_compiled_routes(build)
+    route = next(item for item in routes if item.id == "optional_multi_filter")
+
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+
+    executor = RouteExecutor({item.id: item for item in routes}, cache_store=None, config=config)
+
+    empty_selection = {"ids": []}
+    prepared = executor._prepare(route, empty_selection, ordered=None, preprocessed=False)
+
+    assert prepared.params["ids"] is None
+
+    result = executor.execute_relation(route, empty_selection, offset=0, limit=None)
+    table = result.table
+    assert table.to_pydict()["id"] == [1, 2, 3]
+
+    filtered = executor.execute_relation(route, {"ids": ["2"]}, offset=0, limit=None)
+    filtered_ids = filtered.table.to_pydict()["id"]
+    assert filtered_ids == [2]
+
+
 def test_executor_reports_conversion_failure(tmp_path: Path) -> None:
     source = tmp_path / "src"
     build = tmp_path / "build"

@@ -34,6 +34,14 @@
 - Extend postprocess renderer regression coverage to exercise multi-select
   behaviour across invariant-driven, table-driven, and card layouts.
 
+## Optional multi-select filters (work branch)
+
+- Treat empty optional sequence parameters as `NULL` during execution so compiled
+  SQL drops the associated predicates instead of binding empty arrays that filter
+  out every row.
+- Add executor regression coverage that exercises an empty selection and ensures
+  non-empty choices still constrain the DuckDB query as expected.
+
 ## Invariant select filtering (work branch)
 
 - Filter invariant-backed select dropdowns against the currently rendered
@@ -158,6 +166,13 @@
   deprecated combined Markdown format.
 - Call out the refreshed sample in the README quick start to steer route authors
   away from legacy Markdown frontmatter files.
+
+## Multi-select invariant type coercion (work branch)
+
+- Coerce sequence parameter values using each spec's converter so multi-select
+  filters bind the correct DuckDB array types instead of raw strings.
+- Add an executor regression test that feeds integer values via a multi-select
+  style payload and asserts the bound query receives `INT[]` inputs.
 
 ## Local reference coverage + CLI guardrails (work branch)
 

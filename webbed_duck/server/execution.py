@@ -1,8 +1,9 @@
 """Utilities for executing compiled routes with dependency resolution."""
 from __future__ import annotations
 
+from collections.abc import Mapping, MutableMapping, Sequence
 from dataclasses import dataclass
-from typing import Callable, Mapping, MutableMapping, Sequence
+from typing import Callable
 
 try:  # pragma: no cover - optional dependency for type checking
     from fastapi import Request
@@ -150,6 +151,23 @@ class RouteExecutor:
                 raise RouteExecutionError(
                     f"Unable to convert value for parameter '{spec.name}'"
                 ) from exc
+        if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes, bytearray)):
+            converted: list[object | None] = []
+            changed = False
+            for item in raw:
+                if isinstance(item, str):
+                    try:
+                        converted.append(spec.convert(item))
+                    except Exception as exc:  # pragma: no cover - defensive conversion guard
+                        raise RouteExecutionError(
+                            f"Unable to convert value for parameter '{spec.name}'"
+                        ) from exc
+                    changed = True
+                else:
+                    converted.append(item)
+            if not converted and not spec.required:
+                return None
+            return converted if changed else list(converted)
         return raw
 
     def _ordered_from_processed(
