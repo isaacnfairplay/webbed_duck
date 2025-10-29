@@ -17,11 +17,11 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 
 from ..config import Config
 from ..static.chartjs import CHARTJS_VERSION
-from ..core.routes import RouteDefinition
+from ..core.routes import ParameterSpec, ParameterType, RouteDefinition
 from ..plugins.charts import render_route_charts
 from .analytics import AnalyticsStore, ExecutionMetrics
 from .auth import resolve_auth_adapter
-from .cache import CacheStore
+from .cache import CacheStore, parse_invariant_filters
 from .csv import append_record
 from .email import load_email_sender
 from .execution import RouteExecutionError, RouteExecutor
@@ -1235,6 +1235,50 @@ def _collect_params(route: RouteDefinition, request: Request) -> Mapping[str, ob
         except ValueError as exc:
             raise _http_error("invalid_parameter", str(exc)) from exc
         values[spec.name] = converted_values
+
+    metadata = route.metadata if isinstance(route.metadata, Mapping) else {}
+    cache_block_raw = metadata.get("cache") if metadata else None
+    cache_block = cache_block_raw if isinstance(cache_block_raw, Mapping) else None
+    raw_invariants = cache_block.get("invariant_filters") if cache_block else None
+    invariant_specs = parse_invariant_filters(raw_invariants)
+    for setting in invariant_specs:
+        if setting.param in values:
+            continue
+        raw_values = query_params.getlist(setting.param)
+        extra = setting.extra if isinstance(setting.extra, Mapping) else {}
+        default_value = extra.get("default")
+        raw_type = extra.get("type")
+        param_type: ParameterType | None = None
+        if isinstance(raw_type, str):
+            try:
+                param_type = ParameterType.from_string(raw_type)
+            except ValueError:
+                param_type = None
+        converter_spec: ParameterSpec | None = None
+        if param_type is not None:
+            converter_spec = ParameterSpec(name=setting.param, type=param_type)
+
+        def convert_invariant(raw_value: str) -> object:
+            if converter_spec is None:
+                return raw_value
+            return converter_spec.convert(raw_value)
+
+        if not raw_values:
+            if default_value is not None:
+                values[setting.param] = default_value
+            else:
+                values[setting.param] = None
+            continue
+        if len(raw_values) == 1:
+            try:
+                values[setting.param] = convert_invariant(raw_values[0])
+            except ValueError as exc:
+                raise _http_error("invalid_parameter", str(exc)) from exc
+            continue
+        try:
+            values[setting.param] = [convert_invariant(item) for item in raw_values]
+        except ValueError as exc:
+            raise _http_error("invalid_parameter", str(exc)) from exc
     return values
 
 
