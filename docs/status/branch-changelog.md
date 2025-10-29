@@ -1,5 +1,59 @@
 # Branch-level Changelog
 
+## Multi-select dropdown refinement (work branch)
+
+- Replace the basic `<select multiple>` widgets with a compact dropdown shell
+  that keeps the filter controls feeling like standard comboboxes instead of
+  sprawling checkbox walls.
+- Layer in a case-insensitive search box, persistent "add to selection" hint,
+  and a clear button so analysts can quickly drill into long value lists and
+  reset a column without navigating away.
+- Ship responsive styles plus lightweight bootstrap JavaScript that syncs the
+  visible checkboxes with the hidden form control, enabling smooth desktop and
+  mobile filtering without regressing the server-rendered forms.
+
+## Multi-select UI defaults (work branch)
+
+- Default every select control to allow multi-value submissions while keeping
+  dynamic option lists compatible with invariant cache metadata and live table
+  fallbacks.
+- Normalize current parameter values so multiple selections remain selected and
+  stay visible even when filtered out of the rendered table.
+- Extend postprocess renderer regression coverage to exercise multi-select
+  behaviour across invariant-driven, table-driven, and card layouts.
+
+## Invariant select filtering (work branch)
+
+- Filter invariant-backed select dropdowns against the currently rendered
+  result table so downstream filters only offer values that remain valid after
+  other controls are applied.
+- Preserve a user's existing selection even when it no longer appears in the
+  filtered table, preventing the UI from unexpectedly clearing chosen values.
+- Extend the postprocess renderer coverage to lock in the filtered invariant
+  behaviour alongside the existing table fallback scenarios.
+
+## Default dynamic select options (work branch)
+
+- Make HTML select controls default to dynamically generated unique values when a
+  parameter declares `ui_control = "select"` without an explicit `options`
+  list, so authors get filter-aware dropdowns by default.
+- Reuse cached invariant metadata when present and fall back to the current
+  result table when caches are cold, ensuring the option list keeps pace with
+  the active filters.
+- Extend the postprocess renderer tests to cover the new default behaviour and
+  the cache-backed path so both HTML tables and cards stay covered by
+  regression tests.
+
+## Unique select fallback (work branch)
+
+- Teach the HTML parameter renderer to fall back to the current result table
+  when `options = "...unique_values..."` is requested but cache metadata lacks
+  an invariant index, so dropdowns still populate during first-run or
+  passthrough executions.
+- Add renderer-level regression tests that cover both invariant-index driven
+  options and the new table fallback, ensuring static choices continue to merge
+  cleanly with dynamic entries.
+
 ## HTML invariant filter enforcement (work branch)
 
 - Fix cache metadata to record the actual invariant tokens present in cached pages

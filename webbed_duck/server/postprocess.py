@@ -206,11 +206,31 @@ _PARAMS_STYLES = (
     ".params-bar{margin-bottom:1.25rem;padding:0.85rem 1rem;border:1px solid #e5e7eb;"
     "border-radius:0.75rem;background:#f9fafb;}"
     ".params-form{display:flex;flex-wrap:wrap;gap:0.75rem;align-items:flex-end;}"
-    ".param-field{display:flex;flex-direction:column;gap:0.35rem;min-width:12rem;}"
+    ".param-field{display:flex;flex-direction:column;gap:0.35rem;min-width:12rem;position:relative;}"
     ".param-field label{font-size:0.85rem;font-weight:600;color:#374151;}"
-    ".param-field input,.param-field select{padding:0.45rem 0.6rem;border:1px solid #d1d5db;"
+    ".param-field input,.param-field select,.wd-multi-select-toggle{padding:0.45rem 0.6rem;border:1px solid #d1d5db;"
     "border-radius:0.375rem;font:inherit;background:#fff;min-height:2.25rem;}"
     ".param-field select{min-width:10rem;}"
+    ".wd-multi-select{position:relative;width:100%;}"
+    ".wd-multi-select-toggle{width:100%;display:flex;align-items:center;justify-content:space-between;cursor:pointer;"
+    "color:#111827;gap:0.5rem;text-align:left;}"
+    ".wd-multi-select-toggle:hover{border-color:#9ca3af;}"
+    ".wd-multi-select-summary{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}"
+    ".wd-multi-select-caret{font-size:0.75rem;color:#6b7280;}"
+    ".wd-multi-select-panel{position:absolute;z-index:20;top:calc(100% + 0.35rem);left:0;width:100%;min-width:12rem;max-height:16rem;"
+    "display:flex;flex-direction:column;border:1px solid #d1d5db;border-radius:0.5rem;background:#fff;box-shadow:0 10px 25px rgba(15,23,42,0.1);}"
+    ".wd-multi-select-panel[hidden]{display:none;}"
+    ".wd-multi-select-search{padding:0.5rem;border-bottom:1px solid #e5e7eb;}"
+    ".wd-multi-select-search input{width:100%;padding:0.4rem 0.55rem;border:1px solid #d1d5db;border-radius:0.375rem;font:inherit;}"
+    ".wd-multi-select-hint{margin:0;padding:0.35rem 0.65rem 0;color:#6b7280;font-size:0.75rem;}"
+    ".wd-multi-select-options{margin:0;padding:0.25rem 0.5rem 0.5rem;list-style:none;overflow:auto;flex:1;}"
+    ".wd-multi-select-option label{display:flex;align-items:center;gap:0.5rem;padding:0.35rem 0.25rem;border-radius:0.35rem;cursor:pointer;}"
+    ".wd-multi-select-option label:hover{background:#f3f4f6;}"
+    ".wd-multi-select-option input{accent-color:#2563eb;}"
+    ".wd-multi-select-actions{padding:0.45rem 0.65rem;border-top:1px solid #e5e7eb;display:flex;justify-content:flex-end;}"
+    ".wd-multi-select-clear{border:none;background:none;color:#2563eb;font:inherit;cursor:pointer;padding:0.25rem 0.5rem;border-radius:0.35rem;}"
+    ".wd-multi-select-clear:hover{background:rgba(37,99,235,0.08);}"
+    ".wd-multi-select-input{display:none;}"
     ".param-help{font-size:0.75rem;color:#6b7280;margin:0;}"
     ".param-actions{display:flex;align-items:center;gap:0.75rem;}"
     ".param-actions button{padding:0.45rem 0.95rem;border-radius:0.375rem;border:1px solid #2563eb;"
@@ -225,6 +245,8 @@ _PARAMS_STYLES = (
     ".pagination{margin-top:1rem;}"
     ".pagination a{color:#2563eb;text-decoration:none;font-weight:600;}"
     ".pagination a:hover{text-decoration:underline;}"
+    "@media(max-width:720px){.params-form{flex-direction:column;align-items:stretch;}.param-field{width:100%;}"
+    ".wd-multi-select-panel{position:fixed;left:1rem;right:1rem;top:auto;bottom:1.5rem;max-height:60vh;}.wd-multi-select{width:100%;}}"
 )
 
 
@@ -337,17 +359,22 @@ def _render_params_ui(
             )
 
     fields: list[str] = []
+    multi_script_needed = False
     for spec in selected_specs:
         control = str(spec.extra.get("ui_control", "")).lower()
         if control not in {"input", "select"}:
             continue
         label = str(spec.extra.get("ui_label") or spec.name.replace("_", " ").title())
         value = values.get(spec.name, spec.default)
+        selected_values = _normalize_selected_values(value)
         value_str = _stringify_param_value(value)
         field_html = ["<div class='param-field'>"]
+        label_target = f"param-{spec.name}"
+        if control == "select":
+            label_target += "-toggle"
         field_html.append(
-            "<label for='param-"
-            + html.escape(spec.name)
+            "<label for='"
+            + html.escape(label_target)
             + "'>"
             + html.escape(label)
             + "</label>"
@@ -361,8 +388,8 @@ def _render_params_ui(
             field_html.append(
                 "<input type='"
                 + input_type
-                + "' id='param-"
-                + html.escape(spec.name)
+                + "' id='"
+                + html.escape(f"param-{spec.name}")
                 + "' name='"
                 + html.escape(spec.name)
                 + "' value='"
@@ -382,27 +409,16 @@ def _render_params_ui(
                 cache_meta,
                 current_table,
             )
+            placeholder_text = str(spec.extra.get("ui_placeholder") or "All values")
             field_html.append(
-                "<select id='param-"
-                + html.escape(spec.name)
-                + "' name='"
-                + html.escape(spec.name)
-                + "'>"
-            )
-            if not options:
-                options = [("", "")]
-            for opt_value, opt_label in options:
-                selected = " selected" if opt_value == value_str else ""
-                field_html.append(
-                    "<option value='"
-                    + html.escape(opt_value)
-                    + "'"
-                    + selected
-                    + ">"
-                    + html.escape(opt_label)
-                    + "</option>"
+                _render_multi_select_control(
+                    spec.name,
+                    options,
+                    selected_values,
+                    placeholder_text,
                 )
-            field_html.append("</select>")
+            )
+            multi_script_needed = True
         help_text = (
             spec.extra.get("ui_help")
             or spec.extra.get("ui_hint")
@@ -425,6 +441,8 @@ def _render_params_ui(
         "<div class='param-actions'><button type='submit'>Apply</button><a class='reset-link' href='?'>Reset</a></div>"
     )
     form_html.append("</form></div>")
+    if multi_script_needed:
+        form_html.append(_MULTI_SELECT_SCRIPT)
     return "".join(form_html)
 
 
@@ -436,6 +454,121 @@ def _input_attrs_for_spec(spec: ParameterSpec) -> tuple[str, str]:
     if spec.type is ParameterType.BOOLEAN:
         return "text", ""
     return "text", ""
+
+
+def _render_multi_select_control(
+    name: str,
+    options: Sequence[tuple[str, str]],
+    selected_values: Sequence[str],
+    placeholder: str,
+) -> str:
+    select_id = f"param-{name}"
+    toggle_id = f"{select_id}-toggle"
+    panel_id = f"{select_id}-panel"
+    selected_set = {value for value in selected_values}
+    rendered_options = list(options) if options else [("", "")]
+    summary_labels = [
+        label for value, label in rendered_options if value in selected_set and label
+    ]
+    summary_text = ", ".join(summary_labels) if summary_labels else placeholder
+    parts: list[str] = []
+    parts.append("<div class='wd-multi-select' data-wd-multi>")
+    parts.append(
+        "<button type='button' id='"
+        + html.escape(toggle_id)
+        + "' class='wd-multi-select-toggle' aria-haspopup='listbox' aria-expanded='false' aria-controls='"
+        + html.escape(panel_id)
+        + "'>"
+        + "<span class='wd-multi-select-summary'>"
+        + html.escape(summary_text or placeholder)
+        + "</span><span class='wd-multi-select-caret' aria-hidden='true'>▾</span></button>"
+    )
+    parts.append(
+        "<div class='wd-multi-select-panel' id='"
+        + html.escape(panel_id)
+        + "' role='listbox' aria-multiselectable='true' hidden>"
+    )
+    parts.append(
+        "<div class='wd-multi-select-search'><input type='search' placeholder='Filter options' aria-label='Filter options' autocomplete='off'/></div>"
+    )
+    parts.append(
+        "<p class='wd-multi-select-hint'>Selections stay checked as you filter.</p>"
+    )
+    parts.append("<ul class='wd-multi-select-options'>")
+    for opt_value, opt_label in rendered_options:
+        safe_value = html.escape(opt_value)
+        safe_label = html.escape(opt_label)
+        search_key = html.escape(f"{opt_label} {opt_value}".lower())
+        checked_attr = " checked" if opt_value in selected_set else ""
+        parts.append(
+            "<li class='wd-multi-select-option' data-search='"
+            + search_key
+            + "'><label><input type='checkbox' value='"
+            + safe_value
+            + "'"
+            + checked_attr
+            + "/><span>"
+            + safe_label
+            + "</span></label></li>"
+        )
+    parts.append("</ul>")
+    parts.append(
+        "<div class='wd-multi-select-actions'><button type='button' class='wd-multi-select-clear'>Clear</button></div>"
+    )
+    parts.append("</div>")
+    parts.append(
+        "<select id='"
+        + html.escape(select_id)
+        + "' name='"
+        + html.escape(name)
+        + "' class='wd-multi-select-input' multiple data-placeholder='"
+        + html.escape(placeholder)
+        + "'>"
+    )
+    for opt_value, opt_label in rendered_options:
+        selected_attr = " selected" if opt_value in selected_set else ""
+        parts.append(
+            "<option value='"
+            + html.escape(opt_value)
+            + "'"
+            + selected_attr
+            + ">"
+            + html.escape(opt_label)
+            + "</option>"
+        )
+    parts.append("</select>")
+    parts.append("</div>")
+    return "".join(parts)
+
+
+_MULTI_SELECT_SCRIPT = (
+    "<script>(function(){"
+    "function init(container){"
+    "if(container.dataset.wdMultiInit){return;}"
+    "container.dataset.wdMultiInit='1';"
+    "var select=container.querySelector('select.wd-multi-select-input');"
+    "if(!select){return;}"
+    "var toggle=container.querySelector('.wd-multi-select-toggle');"
+    "var panel=container.querySelector('.wd-multi-select-panel');"
+    "var search=container.querySelector('.wd-multi-select-search input');"
+    "var summary=container.querySelector('.wd-multi-select-summary');"
+    "var clear=container.querySelector('.wd-multi-select-clear');"
+    "var options=Array.from(container.querySelectorAll('.wd-multi-select-option'));"
+    "function updateFlags(){options.forEach(function(li){var cb=li.querySelector('input');li.dataset.selected=cb&&cb.checked?'1':'';});}"
+    "function updateSummary(){var labels=Array.from(select.selectedOptions).map(function(o){return (o.textContent||'').trim();}).filter(Boolean);var text=labels.length?labels.join(', '):(select.dataset.placeholder||'All values');summary.textContent=text;}"
+    "options.forEach(function(li){var cb=li.querySelector('input');if(!cb){return;}cb.addEventListener('change',function(){Array.from(select.options).forEach(function(opt){if(opt.value===cb.value){opt.selected=cb.checked;}});updateFlags();updateSummary();});});"
+    "if(clear){clear.addEventListener('click',function(){Array.from(select.options).forEach(function(opt){opt.selected=false;});options.forEach(function(li){var cb=li.querySelector('input');if(cb){cb.checked=false;}});updateFlags();updateSummary();});}"
+    "function closePanel(){if(panel){panel.hidden=true;}if(toggle){toggle.setAttribute('aria-expanded','false');}}"
+    "if(toggle){toggle.addEventListener('click',function(ev){ev.preventDefault();var expanded=toggle.getAttribute('aria-expanded')==='true';if(expanded){closePanel();}else{toggle.setAttribute('aria-expanded','true');if(panel){panel.hidden=false;}if(search){setTimeout(function(){try{search.focus({preventScroll:true});}catch(_){search.focus();}},10);}}});}"
+    "document.addEventListener('click',function(ev){if(!container.contains(ev.target)){closePanel();}});"
+    "if(panel){panel.addEventListener('keydown',function(ev){if(ev.key==='Escape'){closePanel();if(toggle){toggle.focus();}}});}"
+    "if(search){search.addEventListener('input',function(){var term=search.value.toLowerCase();options.forEach(function(li){var hay=(li.getAttribute('data-search')||'');if(!term){li.style.display='';return;}if(li.dataset.selected==='1'){li.style.display='';return;}li.style.display=hay.indexOf(term)===-1?'none':'';});});}"
+    "updateFlags();updateSummary();"
+    "}"
+    "function boot(){document.querySelectorAll('[data-wd-multi]').forEach(init);}" 
+    "if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',boot);}else{boot();}" 
+    "})();</script>"
+)
 
 
 def _normalize_options(options: object) -> list[tuple[str, str]]:
@@ -488,17 +621,23 @@ def _resolve_select_options(
     elif isinstance(raw_options, str):
         if raw_options.strip().lower() == _UNIQUE_VALUES_SENTINEL:
             wants_dynamic = True
-    elif raw_options is None and spec.name in invariant_settings:
+    elif raw_options is None:
         wants_dynamic = True
 
     if wants_dynamic:
         dynamic = _unique_invariant_options(
-            spec.name,
+            spec,
             invariant_settings,
             cache_meta,
             current_values,
             current_table,
         )
+        if not dynamic:
+            dynamic = _unique_options_from_table(
+                spec,
+                current_table,
+                current_values,
+            )
         combined = _merge_option_lists(dynamic or [("", "")], static_prefill)
         return combined or [("", "")]
 
@@ -519,13 +658,80 @@ def _merge_option_lists(
     return merged
 
 
+def _unique_options_from_table(
+    spec: ParameterSpec,
+    table: pa.Table | None,
+    current_values: Mapping[str, object],
+) -> list[tuple[str, str]]:
+    if table is None:
+        return []
+    column_name = _resolve_option_column_name(spec, table)
+    if column_name is None:
+        return []
+    column = table.column(column_name)
+    seen: set[str] = set()
+    options: list[tuple[str, str]] = []
+    for value in column.to_pylist():
+        option_value = _stringify_param_value(value)
+        if option_value in seen:
+            continue
+        label = "" if option_value == "" else str(value)
+        options.append((option_value, label))
+        seen.add(option_value)
+    options.sort(key=lambda item: item[1].lower())
+    if "" not in seen:
+        options.insert(0, ("", ""))
+        seen.add("")
+    for current_value in _normalize_selected_values(current_values.get(spec.name)):
+        if current_value and current_value not in seen:
+            options.append((current_value, current_value))
+            seen.add(current_value)
+    return options
+
+
+def _filter_options_by_table_values(
+    spec: ParameterSpec,
+    options: list[tuple[str, str]],
+    table: pa.Table | None,
+) -> list[tuple[str, str]]:
+    if table is None:
+        return options
+    column_name = _resolve_option_column_name(spec, table)
+    if column_name is None:
+        return options
+    column = table.column(column_name)
+    table_values = {
+        _stringify_param_value(value)
+        for value in column.to_pylist()
+    }
+    if not table_values:
+        return [item for item in options if item[0] == ""]
+    return [item for item in options if item[0] in table_values or item[0] == ""]
+
+
+def _resolve_option_column_name(
+    spec: ParameterSpec,
+    table: pa.Table,
+) -> str | None:
+    extra = spec.extra if isinstance(spec.extra, Mapping) else {}
+    candidates: list[str] = []
+    for key in ("options_column", "column", "value_column"):
+        raw = extra.get(key)
+        if isinstance(raw, str) and raw:
+            candidates.append(raw)
+    if spec.name not in candidates:
+        candidates.append(spec.name)
+    return next((name for name in candidates if name in table.column_names), None)
+
+
 def _unique_invariant_options(
-    param_name: str,
+    spec: ParameterSpec,
     invariant_settings: Mapping[str, InvariantFilterSetting],
     cache_meta: Mapping[str, object] | None,
     current_values: Mapping[str, object],
     current_table: pa.Table | None,
 ) -> list[tuple[str, str]]:
+    param_name = spec.name
     setting = invariant_settings.get(param_name)
     if setting is None:
         return []
@@ -560,16 +766,35 @@ def _unique_invariant_options(
         label = _token_to_option_label(token, entry)
         options.append((value, label))
         seen.add(value)
-
+    options = _filter_options_by_table_values(spec, options, current_table)
     options.sort(key=lambda item: item[1].lower())
     if not any(value == "" for value, _ in options):
         options.insert(0, ("", ""))
 
-    current_value = _stringify_param_value(current_values.get(param_name))
-    if current_value and current_value not in {value for value, _ in options}:
-        options.append((current_value, current_value))
+    existing_values = {value for value, _ in options}
+    for current_value in _normalize_selected_values(current_values.get(param_name)):
+        if current_value and current_value not in existing_values:
+            options.append((current_value, current_value))
+            existing_values.add(current_value)
 
     return options
+
+
+def _normalize_selected_values(raw: object) -> list[str]:
+    if raw is None:
+        return []
+    if isinstance(raw, Mapping):
+        return []
+    if isinstance(raw, (str, bytes, bytearray)):
+        return [_stringify_param_value(raw)]
+    if isinstance(raw, Iterable):
+        values: list[str] = []
+        for item in raw:
+            value = _stringify_param_value(item)
+            if value not in values:
+                values.append(value)
+        return values
+    return [_stringify_param_value(raw)]
 
 
 def _coerce_invariant_index(
