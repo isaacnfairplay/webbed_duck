@@ -53,7 +53,7 @@ jobs:
 
           bump_minor = files_changed > max_files or lines_changed > max_lines
           pyproject = pathlib.Path('pyproject.toml')
-          text = pyproject.read_text()
+          text = pyproject.read_text(encoding='utf-8')
           match = re.search(r'^version\s*=\s*"(\d+)\.(\d+)\.(\d+)"', text, re.MULTILINE)
           if not match:
               raise SystemExit('Version line not found in pyproject.toml')
@@ -68,7 +68,20 @@ jobs:
           new_version = f'{major}.{minor}.{patch}'
           new_line = f'version = "{new_version}"'
           text = re.sub(r'^version\s*=\s*"\d+\.\d+\.\d+"', new_line, text, flags=re.MULTILINE)
-          pyproject.write_text(text)
+          pyproject.write_text(text, encoding='utf-8')
+
+          package_init = pathlib.Path('webbed_duck/__init__.py')
+          init_text = package_init.read_text(encoding='utf-8')
+          init_replacement = re.sub(
+              r'(__version__\s*=\s*")([^"\n]+)(")',
+              lambda match: f"{match.group(1)}{new_version}{match.group(3)}",
+              init_text,
+              count=1,
+          )
+          if init_text == init_replacement:
+              raise SystemExit('Unable to locate __version__ assignment in webbed_duck/__init__.py')
+          package_init.write_text(init_replacement, encoding='utf-8')
+          print('Updated webbed_duck/__init__.py __version__ assignment')
           print(f'Version bumped to {new_version} ({level})')
           print(f'files_changed={files_changed}')
           print(f'lines_changed={lines_changed}')
@@ -86,7 +99,7 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml
+          git add pyproject.toml webbed_duck/__init__.py
           git commit -m "chore: bump version after merge"
           echo "changed=true" >> "$GITHUB_OUTPUT"
 

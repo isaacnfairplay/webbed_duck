@@ -5,6 +5,10 @@
 - Fixed the automated version bump workflow by indenting the embedded Python
   scripts so GitHub Actions can parse the YAML and execute the job that tags
   releases after merges.
+- Restored the package-level `__version__` constant and updated the automated
+  version bump workflow to keep `webbed_duck/__init__.py` and `pyproject.toml`
+  in sync, preventing drift between the runtime version and the published
+  metadata.
 - Refactored the CLI watcher into a single-iteration helper with dedicated
   tests and taught `load_config` to parse `[feature_flags]` so configuration
   docs and runtime behaviour stay aligned.

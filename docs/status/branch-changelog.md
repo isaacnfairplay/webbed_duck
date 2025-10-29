@@ -1,5 +1,15 @@
 # Branch-level Changelog
 
+## Version metadata alignment (work branch)
+
+- Restore the static `webbed_duck.__version__` constant and ensure it reflects
+  the current release number.
+- Update the version bump workflow to rewrite both `pyproject.toml` and
+  `webbed_duck/__init__.py` so automated releases keep the runtime version in
+  lockstep with packaging metadata.
+- Keep the regression test that parses `pyproject.toml` to guard the sync in the
+  future.
+
 ## Version bump workflow YAML fix (work branch)
 
 - Indented the inline Python scripts inside `.github/workflows/version-bump.yml`
