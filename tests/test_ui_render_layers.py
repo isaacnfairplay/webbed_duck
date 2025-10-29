@@ -260,6 +260,36 @@ def test_render_chart_grid_outputs_canvas_and_config(sample_table: pa.Table) -> 
     assert "Nothing to show" in empty_html
 
 
+def test_build_chart_configs_convert_temporal_and_boolean_series() -> None:
+    table = pa.table(
+        {
+            "recorded_at": [
+                dt.datetime(2024, 4, 1, 8, 30, tzinfo=dt.timezone.utc),
+                dt.datetime(2024, 4, 2, 9, 0, tzinfo=dt.timezone.utc),
+            ],
+            "active": [True, False],
+        }
+    )
+
+    configs = build_chartjs_configs(
+        table,
+        [
+            {
+                "id": "status",
+                "type": "line",
+                "x": "recorded_at",
+                "y": ["active", "recorded_at"],
+            }
+        ],
+    )
+
+    assert len(configs) == 1
+    datasets = configs[0]["config"]["data"]["datasets"]
+    assert datasets[0]["data"] == [1.0, 0.0]
+    expected_ts = [value.timestamp() for value in table.column("recorded_at").to_pylist()]
+    assert datasets[1]["data"] == pytest.approx(expected_ts)
+
+
 def test_chart_config_json_escapes_closing_tags() -> None:
     payload = {"data": "</script>"}
     encoded = chart_config_json(payload)
