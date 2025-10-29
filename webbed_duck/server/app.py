@@ -15,6 +15,7 @@ import pyarrow.parquet as pq
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 
+from .. import __version__ as PACKAGE_VERSION
 from ..config import Config
 from ..static.chartjs import CHARTJS_VERSION
 from ..core.routes import ParameterSpec, ParameterType, RouteDefinition
@@ -123,7 +124,7 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
     if not routes:
         raise ValueError("At least one route must be provided to create the application")
 
-    app = FastAPI(title="webbed_duck", version="0.4.6")
+    app = FastAPI(title="webbed_duck", version=PACKAGE_VERSION)
     app.state.config = config
     app.state.analytics = AnalyticsStore(
         weight=config.analytics.weight_interactions,

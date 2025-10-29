@@ -1,5 +1,15 @@
 # Branch-level Changelog
 
+## Chart dataset temporal coverage (work branch)
+
+- Add regression coverage that feeds datetime and boolean series through
+  `build_chartjs_configs`, ensuring conversions emit Unix timestamps and numeric
+  flags so any missing imports or coercion bugs surface immediately.
+- Align the FastAPI app version with the package `__version__` (now `0.4.7`) so
+  diagnostics and UI asset cache-busting share the same semantic version.
+- Clarify the UI migration guide to note the layered renderer shipped during the
+  0.4.7 cycle on the path to 0.5 instead of implying it is future-only.
+
 ## Plugin registry hygiene (work branch)
 
 - Tighten `webbed_duck.plugins.assets.get_image_getter` so registry lookups raise

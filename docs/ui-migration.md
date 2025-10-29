@@ -1,6 +1,6 @@
 # UI migration guide
 
-This guide maps the legacy HTML helpers to the refactored layered rendering system introduced in 0.5. The refactor keeps the server-side rendering model intact while moving UI behavior into dedicated modules and static assets.
+This guide maps the legacy HTML helpers to the refactored layered rendering system that landed during the 0.4.7 cycle while paving the way for 0.5. The refactor keeps the server-side rendering model intact while moving UI behavior into dedicated modules and static assets.
 
 ## Renderer mapping
 
