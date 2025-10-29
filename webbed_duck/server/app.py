@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable, Mapping, MutableMapping, Sequence
+from typing import Any, Iterable, Mapping, MutableMapping, Sequence, cast
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import duckdb
@@ -168,9 +168,9 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
     if config.auth.mode == "pseudo":
         @app.post("/auth/pseudo/session")
         async def create_pseudo_session(request: Request) -> Mapping[str, object]:
-            payload = await request.json()
-            if not isinstance(payload, Mapping):
-                raise _http_error("invalid_parameter", "Session payload must be an object")
+            payload = _require_json_mapping(
+                await request.json(), message="Session payload must be an object"
+            )
             email_raw = payload.get("email")
             remember = bool(payload.get("remember_me", False))
             try:
@@ -276,9 +276,9 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
         override_meta = metadata.get("overrides", {}) if isinstance(metadata, Mapping) else {}
         allowed = set(_coerce_sequence(override_meta.get("allowed")))
         key_columns = _coerce_sequence(override_meta.get("key_columns"))
-        payload = await request.json()
-        if not isinstance(payload, Mapping):
-            raise _http_error("invalid_parameter", "Override payload must be an object")
+        payload = _require_json_mapping(
+            await request.json(), message="Override payload must be an object"
+        )
         column = str(payload.get("column", "")).strip()
         if not column:
             raise _http_error("invalid_parameter", "Override column is required")
@@ -319,9 +319,9 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
         if not columns:
             raise HTTPException(status_code=500, detail={"code": "append_misconfigured", "message": "Append metadata must declare columns"})
         destination = str(append_meta.get("destination") or f"{route.id}.csv")
-        payload = await request.json()
-        if not isinstance(payload, Mapping):
-            raise _http_error("invalid_parameter", "Append payload must be an object")
+        payload = _require_json_mapping(
+            await request.json(), message="Append payload must be an object"
+        )
         record = {column: payload.get(column) for column in columns}
         try:
             path = append_record(
@@ -343,9 +343,9 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
         user = await app.state.auth_adapter.authenticate(request)
         if not user:
             raise HTTPException(status_code=401, detail={"code": "not_authenticated", "message": "Login required to create shares"})
-        payload = await request.json()
-        if not isinstance(payload, Mapping):
-            raise _http_error("invalid_parameter", "Share payload must be an object")
+        payload = _require_json_mapping(
+            await request.json(), message="Share payload must be an object"
+        )
         default_fmt = route.default_format or "html_t"
         fmt_raw = payload.get("format")
         fmt = fmt_raw.lower() if isinstance(fmt_raw, str) else default_fmt.lower()
@@ -1447,6 +1447,12 @@ def _get_route(routes: Sequence[RouteDefinition], route_id: str) -> RouteDefinit
         if route.id == route_id:
             return route
     raise HTTPException(status_code=404, detail={"code": "not_found", "message": f"Route '{route_id}' not found"})
+
+
+def _require_json_mapping(payload: object, *, message: str) -> Mapping[str, object]:
+    if not isinstance(payload, Mapping):
+        raise _http_error("invalid_parameter", message)
+    return cast(Mapping[str, object], payload)
 
 
 def _http_error(code: str, message: str) -> HTTPException:

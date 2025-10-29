@@ -17,3 +17,7 @@ Average latency: 3.412 ms
 Parameters can be supplied multiple times via `--param`. The harness executes
 routes in-process using the same DuckDB execution path as the HTTP server while
 respecting overrides stored in `storage_root/runtime`.
+
+> The harness expects compiled artifacts under `--build`. Run `webbed-duck compile`
+> (or rely on `serve --auto-compile`) before invoking `perf` so the manifest is
+> available.
