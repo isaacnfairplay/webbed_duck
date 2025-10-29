@@ -1209,9 +1209,10 @@ def _render_share_email(
 
 def _collect_params(route: RouteDefinition, request: Request) -> Mapping[str, object]:
     values: dict[str, object] = {}
+    query_params = request.query_params
     for spec in route.params:
-        raw_value = request.query_params.get(spec.name)
-        if raw_value is None:
+        raw_values = query_params.getlist(spec.name)
+        if not raw_values:
             if spec.default is not None:
                 values[spec.name] = spec.default
             elif spec.required:
@@ -1219,10 +1220,21 @@ def _collect_params(route: RouteDefinition, request: Request) -> Mapping[str, ob
             else:
                 values[spec.name] = None
             continue
+        if len(raw_values) == 1:
+            raw_value = raw_values[0]
+            try:
+                values[spec.name] = spec.convert(raw_value)
+            except ValueError as exc:
+                raise _http_error("invalid_parameter", str(exc)) from exc
+            continue
+
+        converted_values: list[object] = []
         try:
-            values[spec.name] = spec.convert(raw_value)
+            for raw_value in raw_values:
+                converted_values.append(spec.convert(raw_value))
         except ValueError as exc:
             raise _http_error("invalid_parameter", str(exc)) from exc
+        values[spec.name] = converted_values
     return values
 
 
