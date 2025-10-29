@@ -88,6 +88,9 @@ _TOP_BAR_SCRIPT = (
 )
 
 
+_UNIQUE_VALUES_SENTINEL = "...unique_values..."
+
+
 def render_table_html(
     table: pa.Table,
     route_metadata: Mapping[str, object] | None,
@@ -406,6 +409,38 @@ def _merge_view_metadata(
     return merged
 
 
+def _parameter_from_invariant(setting: InvariantFilterSetting) -> ParameterSpec:
+    extra_mapping = setting.extra if isinstance(setting.extra, Mapping) else {}
+    extra: dict[str, object] = dict(extra_mapping)
+    raw_type = extra.pop("type", None)
+    param_type = ParameterType.STRING
+    if isinstance(raw_type, str):
+        try:
+            param_type = ParameterType.from_string(raw_type)
+        except ValueError:
+            param_type = ParameterType.STRING
+    required = bool(extra.pop("required", False))
+    default = extra.pop("default", None)
+    description_raw = extra.pop("description", None)
+    if "ui_control" not in extra:
+        extra["ui_control"] = "select"
+    if "options" not in extra:
+        extra["options"] = _UNIQUE_VALUES_SENTINEL
+    if "ui_label" not in extra:
+        extra["ui_label"] = setting.param.replace("_", " ").title()
+    if "ui_allow_blank" not in extra:
+        extra["ui_allow_blank"] = True
+    description = str(description_raw) if description_raw is not None else None
+    return ParameterSpec(
+        name=setting.param,
+        type=param_type,
+        required=required,
+        default=default,
+        description=description,
+        extra=extra,
+    )
+
+
 def _render_params_ui(
     view_meta: Mapping[str, object] | None,
     params: Sequence[ParameterSpec] | None,
@@ -417,7 +452,16 @@ def _render_params_ui(
     cache_meta: Mapping[str, object] | None = None,
     current_table: pa.Table | None = None,
 ) -> str:
-    if not params:
+    params_list = list(params or [])
+    invariant_settings = _extract_invariant_settings(route_metadata, cache_meta)
+    if invariant_settings:
+        existing = {spec.name for spec in params_list}
+        for setting in invariant_settings.values():
+            if setting.param in existing:
+                continue
+            params_list.append(_parameter_from_invariant(setting))
+            existing.add(setting.param)
+    if not params_list:
         return ""
     show: list[str] = []
     if view_meta:
@@ -428,12 +472,11 @@ def _render_params_ui(
             show = [str(name) for name in raw]
     if not show:
         return ""
-    param_map = {spec.name: spec for spec in params}
+    param_map = {spec.name: spec for spec in params_list}
     selected_specs = [param_map[name] for name in show if name in param_map]
     if not selected_specs:
         return ""
     values = dict(param_values or {})
-    invariant_settings = _extract_invariant_settings(route_metadata, cache_meta)
     show_set = {spec.name for spec in selected_specs}
     hidden_inputs = []
     format_value = values.get("format") or format_hint
@@ -705,9 +748,6 @@ def _normalize_options(options: object) -> list[tuple[str, str]]:
                     _stringify_param_value(item),
                 ))
     return normalized
-
-
-_UNIQUE_VALUES_SENTINEL = "...unique_values..."
 
 
 def _resolve_select_options(

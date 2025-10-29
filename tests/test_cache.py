@@ -533,6 +533,61 @@ def test_invariant_select_defaults_to_unique_values(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
+def test_html_filters_render_for_invariants_without_params(tmp_path: Path) -> None:
+    src = tmp_path / "src"
+    src.mkdir()
+    build = tmp_path / "build"
+    route_text = (
+        "+++\n"
+        "id = \"auto_invariants\"\n"
+        "path = \"/auto_invariants\"\n"
+        "title = \"Auto invariants\"\n"
+        "[cache]\n"
+        "rows_per_page = 50\n"
+        "order_by = [\"Division\", \"Department\"]\n"
+        "invariant_filters = [ { param = \"division\", column = \"Division\", ui_label = \"Division\" } ]\n"
+        "[html_t]\n"
+        "show_params = [\"division\"]\n"
+        "+++\n\n"
+        "```sql\n"
+        "SELECT * FROM (VALUES\n"
+        "    ('Engineering', 'ENG'),\n"
+        "    ('Finance', 'FIN'),\n"
+        "    ('Manufacturing', 'MFG')\n"
+        ") AS t(Division, Department)\n"
+        "ORDER BY Division\n"
+        "```\n"
+    )
+    write_sidecar_route(src, "auto_invariants", route_text)
+    compile_routes(src, build)
+    routes = load_compiled_routes(build)
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+    config.server.storage_root.mkdir()
+    app = create_app(routes, config)
+    client = TestClient(app)
+
+    json_response = client.get(
+        "/auto_invariants",
+        params={"format": "json", "division": "Finance"},
+    )
+    assert json_response.status_code == 200
+    payload = json_response.json()
+    divisions = [row["Division"] for row in payload["rows"]]
+    assert divisions == ["Finance"]
+
+    html_response = client.get(
+        "/auto_invariants",
+        params={"format": "html_t", "division": "Finance"},
+    )
+    assert html_response.status_code == 200
+    html_text = html_response.text
+    assert "<td>Finance</td>" in html_text
+    assert "<td>Engineering</td>" not in html_text
+    assert ("name='division'" in html_text) or ("name=\"division\"" in html_text)
+
+
+@pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
 def test_invariant_unique_values_respect_filter_context(tmp_path: Path) -> None:
     src = tmp_path / "src"
     src.mkdir()

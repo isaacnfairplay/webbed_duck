@@ -5,7 +5,7 @@ import hashlib
 import json
 import shutil
 import time
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from itertools import product
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
@@ -43,6 +43,7 @@ class InvariantFilterSetting:
     column: str
     separator: str | None = None
     case_insensitive: bool = False
+    extra: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -550,21 +551,34 @@ def _parse_order_by(raw: object) -> list[str]:
 
 def parse_invariant_filters(raw: object) -> list[InvariantFilterSetting]:
     filters: list[InvariantFilterSetting] = []
+    known_keys = {"param", "name", "column", "field", "separator", "case_insensitive"}
+
+    def extra_from_mapping(data: Mapping[str, object]) -> dict[str, object]:
+        extras: dict[str, object] = {}
+        for key, value in data.items():
+            key_text = key if isinstance(key, str) else str(key)
+            if key_text in known_keys:
+                continue
+            extras[key_text] = value
+        return extras
+
     if isinstance(raw, Mapping):
         for key, value in raw.items():
             if isinstance(value, Mapping):
-                param = str(value.get("param", key))
-                column = str(value.get("column", param))
-                separator = (
-                    str(value.get("separator")) if value.get("separator") is not None else None
-                )
-                case_insensitive = bool(value.get("case_insensitive", False))
+                mapping = {key if isinstance(key, str) else str(key): val for key, val in value.items()}
+                param = str(mapping.get("param", key))
+                column = str(mapping.get("column", param))
+                separator_raw = mapping.get("separator")
+                separator = str(separator_raw) if separator_raw is not None else None
+                case_insensitive = bool(mapping.get("case_insensitive", False))
+                extra = extra_from_mapping(mapping)
                 filters.append(
                     InvariantFilterSetting(
                         param=param,
                         column=column,
                         separator=separator,
                         case_insensitive=case_insensitive,
+                        extra=extra,
                     )
                 )
             else:
@@ -575,23 +589,28 @@ def parse_invariant_filters(raw: object) -> list[InvariantFilterSetting]:
     if isinstance(raw, Sequence) and not isinstance(raw, (str, bytes, bytearray)):
         for item in raw:
             if isinstance(item, Mapping):
-                param = str(
-                    item.get("param")
-                    or item.get("name")
-                    or item.get("column")
-                    or item.get("field")
+                mapping = {key if isinstance(key, str) else str(key): val for key, val in item.items()}
+                raw_param = (
+                    mapping.get("param")
+                    or mapping.get("name")
+                    or mapping.get("column")
+                    or mapping.get("field")
                 )
-                column = str(item.get("column", param))
-                separator = (
-                    str(item.get("separator")) if item.get("separator") is not None else None
-                )
-                case_insensitive = bool(item.get("case_insensitive", False))
+                if raw_param is None:
+                    continue
+                param = str(raw_param)
+                column = str(mapping.get("column", param))
+                separator_raw = mapping.get("separator")
+                separator = str(separator_raw) if separator_raw is not None else None
+                case_insensitive = bool(mapping.get("case_insensitive", False))
+                extra = extra_from_mapping(mapping)
                 filters.append(
                     InvariantFilterSetting(
                         param=param,
                         column=column,
                         separator=separator,
                         case_insensitive=case_insensitive,
+                        extra=extra,
                     )
                 )
             elif item is not None:
