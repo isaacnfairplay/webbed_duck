@@ -248,16 +248,13 @@ def _start_watcher(app, source_dir: Path, build_dir: Path, interval: float) -> t
 def _watch_source(app, source_dir: Path, build_dir: Path, interval: float, stop_event: threading.Event) -> None:
     snapshot = build_source_fingerprint(source_dir)
     while not stop_event.wait(interval):
-        current = build_source_fingerprint(source_dir)
-        if not snapshot.has_changed(current):
-            continue
-        snapshot = current
         try:
-            count = _compile_and_reload(app, source_dir, build_dir)
+            snapshot, count = _watch_iteration(app, source_dir, build_dir, snapshot)
         except Exception as exc:  # pragma: no cover - runtime safeguard
             print(f"[webbed-duck] Watcher failed to compile routes: {exc}", file=sys.stderr)
             continue
-        print(f"[webbed-duck] Reloaded {count} route(s) from {source_dir}")
+        if count:
+            print(f"[webbed-duck] Reloaded {count} route(s) from {source_dir}")
 
 
 def _compile_and_reload(
@@ -278,6 +275,23 @@ def _compile_and_reload(
         raise RuntimeError("Application does not expose a reload_routes handler")
     reload_fn(routes)
     return len(routes)
+
+
+def _watch_iteration(
+    app,
+    source_dir: Path,
+    build_dir: Path,
+    snapshot: SourceFingerprint,
+    *,
+    compile_and_reload=_compile_and_reload,
+) -> tuple[SourceFingerprint, int]:
+    """Perform a single watch iteration and return the updated snapshot and reload count."""
+
+    current = build_source_fingerprint(source_dir)
+    if not snapshot.has_changed(current):
+        return snapshot, 0
+    count = compile_and_reload(app, source_dir, build_dir)
+    return current, count
 
 
 def build_source_fingerprint(
