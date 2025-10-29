@@ -92,6 +92,70 @@ def test_start_watcher_clamps_interval(monkeypatch: pytest.MonkeyPatch, tmp_path
     assert args[3] == pytest.approx(0.2)
 
 
+def test_watch_iteration_skips_when_fingerprint_unchanged(tmp_path: Path) -> None:
+    src = tmp_path / "src"
+    build = tmp_path / "build"
+    src.mkdir()
+    build.mkdir()
+    (src / "demo.toml").write_text("id='demo'\n", encoding="utf-8")
+    (src / "demo.sql").write_text("SELECT 1;\n", encoding="utf-8")
+
+    snapshot = cli.build_source_fingerprint(src)
+    app = object()
+    called: dict[str, object] = {}
+
+    def fake_reload(app_arg, source_dir, build_dir):  # type: ignore[no-untyped-def]
+        called["app"] = app_arg
+        return 5
+
+    updated, count = cli._watch_iteration(
+        app,
+        src,
+        build,
+        snapshot,
+        compile_and_reload=fake_reload,
+    )
+
+    assert count == 0
+    assert updated is snapshot
+    assert called == {}
+
+
+def test_watch_iteration_triggers_reload_on_change(tmp_path: Path) -> None:
+    src = tmp_path / "src"
+    build = tmp_path / "build"
+    src.mkdir()
+    build.mkdir()
+    toml_path = src / "demo.toml"
+    sql_path = src / "demo.sql"
+    toml_path.write_text("id='demo'\n", encoding="utf-8")
+    sql_path.write_text("SELECT 1;\n", encoding="utf-8")
+
+    snapshot = cli.build_source_fingerprint(src)
+    sql_path.write_text("SELECT 2; -- change\n", encoding="utf-8")
+
+    app = object()
+    calls: dict[str, object] = {}
+
+    def fake_reload(app_arg, source_dir, build_dir):  # type: ignore[no-untyped-def]
+        calls["app"] = app_arg
+        calls["source"] = source_dir
+        calls["build"] = build_dir
+        return 2
+
+    updated, count = cli._watch_iteration(
+        app,
+        src,
+        build,
+        snapshot,
+        compile_and_reload=fake_reload,
+    )
+
+    assert count == 2
+    assert updated.has_changed(snapshot)
+    assert calls == {"app": app, "source": src, "build": build}
+
+
 def test_perf_stats_from_timings() -> None:
     stats = cli.PerfStats.from_timings([3.0, 1.0, 2.0], rows_returned=5)
     assert stats.iterations == 3

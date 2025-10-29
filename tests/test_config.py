@@ -102,6 +102,24 @@ watermark = false
     assert config.share.watermark is False
 
 
+def test_load_config_parses_feature_flags(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path,
+        """
+[feature_flags]
+annotations_enabled = true
+comments_enabled = false
+""".strip(),
+    )
+
+    config = load_config(path)
+
+    assert config.feature_flags.annotations_enabled is True
+    assert config.feature_flags.comments_enabled is False
+    assert config.feature_flags.tasks_enabled is False
+    assert config.feature_flags.overrides_enabled is False
+
+
 def test_load_config_cache_aliases_prefer_latest(tmp_path: Path) -> None:
     path = _write_config(
         tmp_path,

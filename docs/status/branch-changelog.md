@@ -1,5 +1,15 @@
 # Branch-level Changelog
 
+## Watch iteration helper and feature flag parsing (work branch)
+
+- Extracted a reusable `_watch_iteration` helper for the CLI file watcher and
+  covered both change and no-change paths with unit tests so hot reload failures
+  surface immediately.
+- Added parsing for the documented `[feature_flags]` configuration table and a
+  regression test confirming the toggles flow into `Config.feature_flags`.
+- Documented the refactor in the project changelog so future contributors notice
+  the new helper when extending watch behaviour.
+
 ## Chart dataset temporal coverage (work branch)
 
 - Add regression coverage that feeds datetime and boolean series through

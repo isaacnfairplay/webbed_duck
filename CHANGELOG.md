@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Refactored the CLI watcher into a single-iteration helper with dedicated
+  tests and taught `load_config` to parse `[feature_flags]` so configuration
+  docs and runtime behaviour stay aligned.
 - Documented the layered UI architecture, route `[ui]` asset contract, and new progressive-enhancement plugins in the README, added a UI migration guide, and updated README coverage tests for the Chart.js embed snippet.
 - Added regression tests to cover string-based `[ui]` metadata and asset fallbacks to ensure layout rendering ignores unknown styles or scripts gracefully.
 
