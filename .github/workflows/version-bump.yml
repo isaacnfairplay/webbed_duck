@@ -1,0 +1,68 @@
+name: Auto bump version after merge
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  bump-version:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    env:
+      MAX_FILES_FOR_PATCH: "8"
+      MAX_LINES_FOR_PATCH: "200"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+
+      - name: Bump project version
+        id: bump
+        env:
+          GITHUB_BEFORE: ${{ github.event.before }}
+        run: python .github/scripts/bump_version.py
+
+      - name: Commit version bump
+        id: commit
+        run: |
+          if git diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pyproject.toml
+          git commit -m "chore: release ${{ steps.bump.outputs.version }}"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      - name: Create release tag
+        id: tag
+        if: steps.commit.outputs.changed == 'true'
+        run: |
+          TAG="v${{ steps.bump.outputs.version }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists, skipping creation"
+            echo "created=false" >> "$GITHUB_OUTPUT"
+          else
+            git tag -a "$TAG" -m "Release $TAG"
+            echo "created=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push changes
+        if: steps.commit.outputs.changed == 'true'
+        run: |
+          git push origin HEAD
+          if [ "${{ steps.tag.outputs.created }}" = 'true' ]; then
+            git push origin "v${{ steps.bump.outputs.version }}"
+          fi
