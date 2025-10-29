@@ -7,6 +7,7 @@
   docs and runtime behaviour stay aligned.
 - Documented the layered UI architecture, route `[ui]` asset contract, and new progressive-enhancement plugins in the README, added a UI migration guide, and updated README coverage tests for the Chart.js embed snippet.
 - Added regression tests to cover string-based `[ui]` metadata and asset fallbacks to ensure layout rendering ignores unknown styles or scripts gracefully.
+- Automated the merge-time release pipeline to capture changelog snippets in annotated tags, cascade PyPI publishing after the version bump workflow, and document the patch-versus-minor thresholds in AGENTS.md.
 
 ## 0.4.6 - 2025-03-10
 

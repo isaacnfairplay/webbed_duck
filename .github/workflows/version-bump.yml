@@ -90,6 +90,69 @@ PY
           git commit -m "chore: bump version after merge"
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
+      - name: Generate tag notes from changelog
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          python - <<'PY'
+import os
+import pathlib
+import subprocess
+
+version = os.environ["VERSION"]
+tag = f"v{version}"
+
+try:
+    previous_tag = subprocess.check_output(
+        ["git", "describe", "--tags", "--abbrev=0", "HEAD^"],
+        text=True,
+    ).strip()
+except subprocess.CalledProcessError:
+    previous_tag = ""
+
+notes = []
+
+if previous_tag:
+    diff_cmd = [
+        "git",
+        "diff",
+        "--unified=0",
+        previous_tag,
+        "HEAD",
+        "--",
+        "CHANGELOG.md",
+    ]
+    diff_output = subprocess.check_output(diff_cmd, text=True)
+    for line in diff_output.splitlines():
+        if line.startswith("+++") or line.startswith("---") or line.startswith("@@"):
+            continue
+        if line.startswith("+"):
+            notes.append(line[1:].rstrip())
+else:
+    changelog = subprocess.check_output(
+        ["git", "show", "HEAD:CHANGELOG.md"], text=True
+    )
+    notes = [line.rstrip() for line in changelog.splitlines()]
+
+header = [f"Release {tag}"]
+if previous_tag:
+    header.append("")
+    header.append(f"Changes since {previous_tag}:")
+else:
+    header.append("")
+    header.append("Initial tagged release for automated versioning.")
+
+if notes:
+    body = ["", *notes]
+else:
+    body = ["", "No CHANGELOG updates detected in this release."]
+
+message = "\n".join(header + body)
+pathlib.Path("tag_message.txt").write_text(f"{message}\n", encoding="utf-8")
+print("Generated tag_message.txt")
+PY
+
       - name: Create release tag
         id: tag
         if: steps.commit.outputs.changed == 'true'
@@ -99,7 +162,7 @@ PY
             echo "Tag $TAG already exists, skipping creation"
             echo "created=false" >> "$GITHUB_OUTPUT"
           else
-            git tag -a "$TAG" -m "Release $TAG"
+            git tag -a "$TAG" -F tag_message.txt
             echo "created=true" >> "$GITHUB_OUTPUT"
           fi
 

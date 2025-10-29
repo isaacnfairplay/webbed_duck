@@ -718,6 +718,9 @@ gantt
 * **Routes**: version in `@meta.version`. Prod may keep only latest (N) active with a sunset window for N-1.
 * **Migrations**: core never hardcodes storage DDL; adapters own their tables and migrations.
 * **CHANGELOG.md**: concise entries, human & agent friendly.
+* **Automation**: `Auto bump version after merge` bumps `pyproject.toml` on every merge (`MAX_FILES_FOR_PATCH=8`, `MAX_LINES_FOR_PATCH=200`). Stay within the patch budget where possible; exceeding either threshold automatically bumps the minor version and zeroes the patch.
+* **Release notes**: The workflow diffs `CHANGELOG.md` against the prior tag to seed annotated tag notes. Keep branch-level changelog entries crisp so tag messages mirror PR summaries.
+* **Publishing**: `Publish to PyPI (OIDC)` runs after the version bump workflow completes successfully. It only publishes when the merge commit is tagged (e.g., `v1.2.3`); ensure the release tag points at HEAD and `CHANGELOG.md` is updated before merging.
 
 ---
 
