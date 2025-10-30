@@ -87,6 +87,28 @@ def test_resolve_assets_accepts_csv_strings() -> None:
     assert assets.scripts == ("header", "multi_select", "chart_boot")
 
 
+def test_resolve_assets_defaults_precede_custom_when_unanchored() -> None:
+    metadata = {"ui": {"styles": ["theme"]}}
+
+    assets = resolve_assets(
+        metadata,
+        default_styles=["layout", "table"],
+    )
+
+    assert assets.styles == ("layout", "table", "theme")
+
+
+def test_resolve_assets_can_anchor_custom_before_default() -> None:
+    metadata = {"ui": {"styles": ["theme", "layout"]}}
+
+    assets = resolve_assets(
+        metadata,
+        default_styles=["layout", "table"],
+    )
+
+    assert assets.styles == ("theme", "layout", "table")
+
+
 def test_resolve_assets_preserves_custom_order() -> None:
     metadata = {
         "ui": {
