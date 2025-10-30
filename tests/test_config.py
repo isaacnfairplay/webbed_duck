@@ -139,3 +139,28 @@ enforce_global_page_size = true
     assert config.cache.page_rows == 150
     assert config.cache.enforce_global_page_size is True
 
+
+def test_load_config_expands_user_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    home = tmp_path / "home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    monkeypatch.setenv("USERPROFILE", str(home))
+
+    path = _write_config(
+        tmp_path,
+        """
+[server]
+storage_root = "~/duck_storage"
+source_dir = "~/routes"
+build_dir = "~/build"
+""".strip(),
+    )
+
+    config = load_config(path)
+
+    assert config.server.storage_root == home / "duck_storage"
+    assert config.server.source_dir == home / "routes"
+    assert config.server.build_dir == home / "build"
+

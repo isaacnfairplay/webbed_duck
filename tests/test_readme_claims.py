@@ -5,6 +5,7 @@ import contextlib
 import hashlib
 import io
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -343,6 +344,43 @@ def _extract_statements(readme: str) -> list[str]:
             continue
         statements.append(stripped)
     return statements
+
+
+def _config_paths_support_home() -> bool:
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp = Path(tmpdir)
+        home = tmp / "home"
+        home.mkdir()
+        config_path = tmp / "config.toml"
+        config_path.write_text(
+            """
+[server]
+storage_root = "~/duck_storage"
+source_dir = "~/routes"
+build_dir = "~/build"
+""".strip(),
+            encoding="utf-8",
+        )
+        env_home = os.environ.get("HOME")
+        env_userprofile = os.environ.get("USERPROFILE")
+        try:
+            os.environ["HOME"] = str(home)
+            os.environ["USERPROFILE"] = str(home)
+            config = load_config(config_path)
+        finally:
+            if env_home is None:
+                os.environ.pop("HOME", None)
+            else:
+                os.environ["HOME"] = env_home
+            if env_userprofile is None:
+                os.environ.pop("USERPROFILE", None)
+            else:
+                os.environ["USERPROFILE"] = env_userprofile
+        return (
+            config.server.storage_root == home / "duck_storage"
+            and config.server.source_dir == home / "routes"
+            and config.server.build_dir == home / "build"
+        )
 
 
 @pytest.fixture(scope="module")
@@ -1020,6 +1058,9 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
             ctx.reload_capable, s
         )),
         (lambda s: s.startswith("- Pass `--no-auto-compile`"), lambda s: None),
+        (lambda s: s.startswith("- Configuration paths accept relative, absolute, and home-relative"), lambda s: _ensure(
+            _config_paths_support_home(), s
+        )),
         (lambda s: s.startswith("- Watching performs filesystem polls once per second"), lambda s: _ensure(
             ctx.reload_capable and Config().server.watch_interval == pytest.approx(1.0), s
         )),

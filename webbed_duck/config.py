@@ -108,8 +108,8 @@ class Config:
 
 def _as_path(value: Any) -> Path:
     if isinstance(value, Path):
-        return value
-    return Path(str(value))
+        return value.expanduser()
+    return Path(str(value)).expanduser()
 
 
 def _non_negative_int(value: Any) -> int:

@@ -32,6 +32,7 @@
    ```
    - `--watch` keeps the compiler running and reloads routes in-place when `.toml`, `.sql`, or `.md` files change.
    - Pass `--no-auto-compile` to serve pre-built `routes_build/` artifacts without touching the source tree.
+- Configuration paths accept relative, absolute, and home-relative (`~/…`) entries; the loader expands `~` using the current environment so `server.storage_root = "~/duck_storage"` works as expected.
 - Watching performs filesystem polls once per second by default; disable it (or raise `server.watch_interval`) if you run on slower hardware where constant polling is undesirable.
 - The watch interval is clamped to a minimum of 0.2 seconds at runtime so accidental `--watch-interval 0` or extremely small values do not spin a tight loop.
    - File watching relies on timestamp and size fingerprints of matching route files, so ensure your editor writes changes to disk (saving partial files can trigger reload attempts). Network or synced file systems that coalesce timestamp updates may require a longer `watch_interval`.

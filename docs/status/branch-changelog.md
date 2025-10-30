@@ -1,5 +1,14 @@
 # Branch-level Changelog
 
+## Config path home expansion (work branch)
+
+- Expand `_as_path` so configuration entries like `"~/duck_storage"` resolve to
+  the active home directory, aligning runtime behaviour with user expectations.
+- Added `tests/test_config.py::test_load_config_expands_user_paths` to lock in
+  the new behaviour and catch regressions.
+- Documented the support for home-relative config paths in the README and
+  captured the change in the changelog for downstream consumers.
+
 ## Cache invariant large-string handling (work branch)
 
 - Guard case-insensitive invariant filters against Arrow `large_string` columns

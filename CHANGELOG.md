@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Expand configuration path handling so `load_config` resolves `~` home
+  references for `storage_root`, `source_dir`, and `build_dir`, matching
+  common config.toml conventions.
 - Ensure invariant cache filters treat Arrow `large_string` columns as eligible
   for case-insensitive matching and add unit coverage around the helper to catch
   future regressions.
