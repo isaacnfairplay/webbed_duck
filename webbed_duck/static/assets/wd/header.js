@@ -11,20 +11,22 @@ function initHeader(header) {
   let measuredHeight = header.getBoundingClientRect().height;
   let ticking = false;
 
-  function setOffset(forceMeasure = false) {
+  function setOffset(forceMeasure = false, override) {
     if (forceMeasure) {
       measuredHeight = header.getBoundingClientRect().height;
     }
-    root.style.setProperty('--wd-top-offset', `${measuredHeight}px`);
+    const value = override !== undefined ? override : measuredHeight;
+    root.style.setProperty('--wd-top-offset', `${value}px`);
   }
 
   function showHeader() {
     header.setAttribute('data-hidden', 'false');
-    setOffset();
+    setOffset(true);
   }
 
   function hideHeader() {
     header.setAttribute('data-hidden', 'true');
+    setOffset(false, 0);
   }
 
   function updateTopButton() {
