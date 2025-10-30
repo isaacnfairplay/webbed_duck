@@ -9,9 +9,15 @@ import pyarrow as pa
 from tests.conftest import write_sidecar_route
 from webbed_duck.config import load_config
 from webbed_duck.core.compiler import compile_routes
-from webbed_duck.core.routes import load_compiled_routes
+from webbed_duck.core.routes import (
+    ParameterSpec,
+    ParameterType,
+    RouteDefinition,
+    load_compiled_routes,
+)
 from webbed_duck.server.app import create_app
 from webbed_duck.server import cache as cache_mod
+from webbed_duck.server.cache import CacheSettings, InvariantFilterSetting
 
 try:
     from fastapi.testclient import TestClient
@@ -298,6 +304,52 @@ def test_invariant_filter_case_insensitive_handles_large_string() -> None:
     )
 
     assert filtered.column("product_code").to_pylist() == ["Widget", "widget"]
+
+
+def test_cache_key_normalises_invariant_value_order(tmp_path: Path) -> None:
+    route = RouteDefinition(
+        id="inventory",
+        path="/inventory",
+        methods=("GET",),
+        raw_sql="SELECT 1",
+        prepared_sql="SELECT 1",
+        param_order=("product_code",),
+        params=(
+            ParameterSpec(
+                name="product_code",
+                type=ParameterType.STRING,
+                required=False,
+                default=None,
+            ),
+        ),
+    )
+    settings = CacheSettings(
+        enabled=True,
+        ttl_seconds=60,
+        rows_per_page=10,
+        enforce_page_size=False,
+        invariant_filters=(
+            InvariantFilterSetting(param="product_code", column="product_code"),
+        ),
+        order_by=("product_code",),
+    )
+    store = cache_mod.CacheStore(tmp_path)
+
+    params_a = {"product_code": ["widget", "gadget"]}
+    params_b = {"product_code": ["gadget", "widget"]}
+
+    key_a = store.compute_key(
+        route,
+        cache_mod._prepare_cache_params(params_a, settings.invariant_filters),
+        settings,
+    )
+    key_b = store.compute_key(
+        route,
+        cache_mod._prepare_cache_params(params_b, settings.invariant_filters),
+        settings,
+    )
+
+    assert key_a.digest == key_b.digest
 
 
 @pytest.mark.skipif(TestClient is None, reason="fastapi is not available")

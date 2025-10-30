@@ -1226,6 +1226,16 @@ def _prepare_cache_params(
         value = canonical.get(setting.param)
         if value is None:
             canonical.pop(setting.param, None)
+            continue
+        normalized = normalize_invariant_value(value, setting)
+        if not normalized:
+            canonical.pop(setting.param, None)
+            continue
+        tokens = [
+            canonicalize_invariant_value(item, setting)
+            for item in normalized
+        ]
+        canonical[setting.param] = tuple(sorted(tokens))
     return canonical
 
 

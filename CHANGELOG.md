@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Canonicalised cache parameter hashing so multi-value invariant filters reuse
+  the same entry regardless of request ordering, preventing redundant
+  superset rebuilds.
 - Ensure invariant cache filters treat Arrow `large_string` columns as eligible
   for case-insensitive matching and add unit coverage around the helper to catch
   future regressions.
