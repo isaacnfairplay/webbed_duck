@@ -234,14 +234,17 @@ def _cmd_perf(args: argparse.Namespace) -> int:
 
 def _start_watcher(app, source_dir: Path, build_dir: Path, interval: float) -> tuple[threading.Event, threading.Thread]:
     stop_event = threading.Event()
+    effective_interval = max(WATCH_INTERVAL_MIN, float(interval))
     thread = threading.Thread(
         target=_watch_source,
-        args=(app, source_dir, build_dir, max(WATCH_INTERVAL_MIN, float(interval)), stop_event),
+        args=(app, source_dir, build_dir, effective_interval, stop_event),
         daemon=True,
         name="webbed-duck-watch",
     )
     thread.start()
-    print(f"[webbed-duck] Watching {source_dir} for changes (interval={interval:.2f}s)")
+    print(
+        f"[webbed-duck] Watching {source_dir} for changes (interval={effective_interval:.2f}s)"
+    )
     return stop_event, thread
 
 

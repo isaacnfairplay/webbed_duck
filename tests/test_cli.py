@@ -63,7 +63,9 @@ def test_parse_date_validation() -> None:
         cli._parse_date("not-a-date")
 
 
-def test_start_watcher_clamps_interval(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_start_watcher_clamps_interval(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
     captured: dict[str, object] = {}
 
     class _FakeThread:
@@ -90,6 +92,9 @@ def test_start_watcher_clamps_interval(monkeypatch: pytest.MonkeyPatch, tmp_path
     assert isinstance(args, tuple) and len(args) == 5
     assert args[1] == tmp_path and args[2] == tmp_path
     assert args[3] == pytest.approx(0.2)
+    out = capsys.readouterr().out
+    assert "[webbed-duck] Watching" in out
+    assert "interval=0.20s" in out
 
 
 def test_watch_iteration_skips_when_fingerprint_unchanged(tmp_path: Path) -> None:
