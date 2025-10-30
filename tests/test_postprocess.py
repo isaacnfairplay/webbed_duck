@@ -455,6 +455,36 @@ def test_chartjs_build_and_render_embed_modes() -> None:
     assert embed_html.count("<canvas") == 1
     assert "/assets/wd/chart_boot.js" in embed_html
 
+
+def test_chartjs_uses_ui_config_source() -> None:
+    config = load_config(None)
+    config.ui.chartjs_source = "https://cdn.example.com/chart.js"
+
+    table = pa.table({"day": ["Mon"], "value": [1]})
+    specs = [
+        {
+            "id": "trend",
+            "type": "bar",
+            "x": "day",
+            "y": "value",
+            "title": "Values",
+        }
+    ]
+
+    charts = build_chartjs_configs(table, specs)
+
+    html = render_chartjs_html(
+        charts,
+        config=config,
+        route_id="demo",
+        route_title="Demo",
+        route_metadata={},
+        default_script_url=None,
+        embed=False,
+    )
+
+    assert "data-wd-chart-src='https://cdn.example.com/chart.js'" in html
+
 def test_params_form_renders_hidden_inputs_and_multi_select() -> None:
     table = pa.table({"region": ["EMEA", "APAC"]})
     params = [

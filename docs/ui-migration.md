@@ -35,6 +35,8 @@ scripts = ["header", "multi_select", "chart_boot"]
 
 The JavaScript plugins (`header.js`, `multi_select.js`, `params_form.js`, `chart_boot.js`) attach behavior to server-rendered markup using `data-wd-*` attributes. CSS files live alongside them under `webbed_duck/static/assets/wd/`.
 
+Set a global Chart.js CDN (used when routes omit a `[chart_js]` override) by declaring `chartjs_source = "https://cdn.example.com/chart.umd.min.js"` under the top-level `[ui]` table in `config.toml`.
+
 ## Progressive enhancement
 
 The migration keeps the SSR-first contract:
