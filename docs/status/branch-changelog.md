@@ -1,5 +1,15 @@
 # Branch-level Changelog
 
+## Boolean parameter whitespace coercion (ci/assessment-coverage branch)
+
+- Trim boolean route parameters before coercion so incidental whitespace from
+  query strings or HTML forms no longer triggers conversion errors while other
+  primitive types remain tolerant.
+- Extend executor coverage with direct `ParameterSpec` assertions to lock in the
+  trimming behaviour and guard both truthy and falsey tokens.
+- Document the behaviour adjustment in the README and `CHANGELOG.md` to keep
+  operator guidance aligned with runtime expectations.
+
 ## Cache invariant large-string handling (work branch)
 
 - Guard case-insensitive invariant filters against Arrow `large_string` columns

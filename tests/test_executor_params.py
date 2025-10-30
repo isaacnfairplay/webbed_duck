@@ -9,6 +9,7 @@ from webbed_duck.config import load_config
 from webbed_duck.core.compiler import compile_routes
 from webbed_duck.core.routes import (
     ParameterSpec,
+    ParameterType,
     RouteDefinition,
     load_compiled_routes,
 )
@@ -100,7 +101,7 @@ WHERE ($enabled = enabled_again)
         "text": "Alpha",
         "count": "7",
         "ratio": "2.5",
-        "enabled": "TRUE",
+        "enabled": " TRUE ",
         "tags": ["Alpha", "Omega"],
     }
 
@@ -194,6 +195,12 @@ required = true
     message = str(excinfo.value)
     assert "value" in message
     assert "Unable to convert" in message
+
+
+def test_parameter_spec_boolean_trimmed() -> None:
+    spec = ParameterSpec(name="flag", type=ParameterType.BOOLEAN)
+    assert spec.convert(" yes ") is True
+    assert spec.convert(" No ") is False
 
 
 def test_prepare_skips_preprocessors_when_marked(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

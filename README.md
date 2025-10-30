@@ -87,7 +87,7 @@ webbed_duck/
 
 - Parameters are declared under `[params]` in the TOML file. Each entry can be a table (with `type`, `required`, `default`, `description`, and extra metadata) or a string shorthand when you only need to annotate the DuckDB type.
 - Within the SQL body, use `{{name}}` or `$name` placeholders. During compilation each placeholder becomes a bound parameter in the prepared statement, preserving type safety while keeping the SQL readable.
-- At request time the runtime reads query string values, validates types (including boolean coercion for `true`/`false`, `1`/`0`), applies defaults, and rejects missing required parameters. Ephemeral controls like pagination and sorting stay out of `[params]` and are applied after the core relation is resolved.
+- At request time the runtime reads query string values, validates types (including boolean coercion for `true`/`false`, `1`/`0`, and values padded with incidental whitespace), applies defaults, and rejects missing required parameters. Ephemeral controls like pagination and sorting stay out of `[params]` and are applied after the core relation is resolved.
 - Additional runtime controls:
   - `?limit=` and `?offset=` apply post-query pagination without changing the SQL.
   - `?column=` can be repeated to restrict returned columns.

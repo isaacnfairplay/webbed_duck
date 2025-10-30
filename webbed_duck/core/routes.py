@@ -40,7 +40,7 @@ class ParameterSpec:
         if self.type is ParameterType.FLOAT:
             return float(raw)
         if self.type is ParameterType.BOOLEAN:
-            lowered = raw.lower()
+            lowered = raw.strip().lower()
             if lowered in {"1", "true", "t", "yes", "y"}:
                 return True
             if lowered in {"0", "false", "f", "no", "n"}:

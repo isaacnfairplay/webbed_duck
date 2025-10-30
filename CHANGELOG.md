@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Trim incidental whitespace before coercing boolean parameters so runtime
+  behaviour matches integer/float conversion and avoids surprising
+  `RouteExecutionError` conversions for padded inputs.
 - Ensure invariant cache filters treat Arrow `large_string` columns as eligible
   for case-insensitive matching and add unit coverage around the helper to catch
   future regressions.
