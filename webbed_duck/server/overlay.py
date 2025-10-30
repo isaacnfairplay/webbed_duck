@@ -112,6 +112,12 @@ class OverlayStore:
                 self._save()
             return changed
 
+    def reload(self) -> None:
+        """Reload overlay data from disk, replacing the in-memory snapshot."""
+
+        with self._lock:
+            self._data = self._load()
+
     def _load(self) -> MutableMapping[str, list[dict[str, Any]]]:
         if not self._path.exists():
             return {}

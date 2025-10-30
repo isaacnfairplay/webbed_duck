@@ -9,8 +9,9 @@ from tests.conftest import write_sidecar_route
 from webbed_duck.config import load_config
 from webbed_duck.core.compiler import compile_routes
 from webbed_duck.core.local import LocalRouteRunner, RouteNotFoundError, run_route
-from webbed_duck.server.execution import RouteExecutionError
 from webbed_duck.core.routes import load_compiled_routes
+from webbed_duck.server.execution import RouteExecutionError
+from webbed_duck.server.overlay import OverlayStore, compute_row_key_from_values
 
 ROUTE_TEXT = """+++
 id = "hello"
@@ -29,13 +30,31 @@ SELECT 'Hello, ' || {{name}} || '!' AS greeting
 """
 
 
-def _build_runner(tmp_path: Path) -> LocalRouteRunner:
+ROUTE_WITH_OVERRIDES = """+++
+id = "overridable"
+path = "/overridable"
+
+[cache]
+order_by = ["id"]
+
+[overrides]
+key_columns = ["id"]
+allowed = ["note"]
++++
+
+```sql
+SELECT 1 AS id, 'baseline' AS note
+```
+"""
+
+
+def _build_runner(tmp_path: Path, *, route_text: str = ROUTE_TEXT, stem: str = "hello") -> LocalRouteRunner:
     src_dir = tmp_path / "src"
     build_dir = tmp_path / "build"
     storage_root = tmp_path / "storage"
     src_dir.mkdir()
     storage_root.mkdir()
-    write_sidecar_route(src_dir, "hello", ROUTE_TEXT)
+    write_sidecar_route(src_dir, stem, route_text)
     compile_routes(src_dir, build_dir)
     routes = load_compiled_routes(build_dir)
     config = load_config(None)
@@ -108,4 +127,24 @@ def test_local_route_runner_unknown_route(tmp_path: Path) -> None:
 
     with pytest.raises(RouteNotFoundError):
         runner.run("missing")
+
+
+def test_local_route_runner_refreshes_overrides(tmp_path: Path) -> None:
+    runner = _build_runner(tmp_path, route_text=ROUTE_WITH_OVERRIDES, stem="overridable")
+
+    initial = runner.run("overridable", format="records")
+    assert initial == [{"id": 1, "note": "baseline"}]
+
+    storage_root = tmp_path / "storage"
+    overlay_store = OverlayStore(storage_root)
+    row_key = compute_row_key_from_values({"id": 1}, ["id"])
+    overlay_store.upsert(
+        route_id="overridable",
+        row_key=row_key,
+        column="note",
+        value="patched",
+    )
+
+    refreshed = runner.run("overridable", format="records")
+    assert refreshed == [{"id": 1, "note": "patched"}]
 

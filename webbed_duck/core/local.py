@@ -63,6 +63,7 @@ class LocalRouteRunner:
         except RouteExecutionError as exc:
             raise ValueError(str(exc)) from exc
 
+        self._overlay_store.reload()
         table = apply_overrides(
             cache_result.table,
             route.metadata,

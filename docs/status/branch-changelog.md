@@ -1,5 +1,16 @@
 # Branch-level Changelog
 
+## Local runner overlay refresh (feature/local-runner-overrides)
+
+- Teach the `OverlayStore` to reload its JSON payload from disk and have
+  `LocalRouteRunner` refresh the snapshot before applying overrides so scripts
+  pick up edits written by other processes.
+- Extend `tests/test_local_runner.py` with a regression that patches an
+  override after the runner is constructed, ensuring the refreshed store feeds
+  the new value back on the next execution.
+- Note the behaviour in the README so the documented “cache and overlay reuse”
+  promise explicitly covers cross-process refreshes.
+
 ## Decimal JSON serialization (work branch)
 
 - Convert DuckDB `DECIMAL` values into JSON-safe strings inside
