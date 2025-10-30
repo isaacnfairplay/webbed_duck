@@ -1357,6 +1357,18 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
             s,
         )),
         (lambda s: s.startswith("- End-to-end and visual verification should be automated"), lambda s: None),
+        (
+            lambda s: s.startswith("- Front-end unit tests live in `frontend_tests/`"),
+            lambda s: _ensure(
+                (ctx.repo_root / "frontend_tests").is_dir()
+                and (ctx.repo_root / "docs" / "frontend_testing.md").is_file(),
+                s,
+            ),
+        ),
+        (
+            lambda s: s.startswith("- Run both suites together (`pytest && npm test`)"),
+            lambda s: None,
+        ),
         (lambda s: s.startswith("Routes may set `default_format`"), lambda s: None),
         (lambda s: s.startswith("- You can query DuckDB-native sources"), lambda s: None),
         (lambda s: s.startswith("- For derived inputs"), lambda s: None),

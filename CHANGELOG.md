@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Added a persistent light/dark theme toggle to the sticky header, refreshed the
+  shared CSS tokens for better contrast in both modes, and made the multi-select
+  drawer resizable with viewport-aware sizing so long option lists stay
+  navigable.
+- Introduced a Vitest-powered front-end test suite (`npm test`) that exercises
+  the header, multi-select widget, Chart.js boot loader, and CSS invariants, plus
+  documented the workflow in `docs/frontend_testing.md` and README testing
+  guidance.
 - Canonicalize cache invariant tokens for numeric inputs (ints, floats, and
   `decimal.Decimal`) and sort invariant filter definitions when hashing cache
   keys so semantically equivalent requests—including reordered filters or

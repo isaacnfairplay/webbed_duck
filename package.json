@@ -1,0 +1,17 @@
+{
+  "name": "webbed_duck-frontend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "@testing-library/dom": "^9.3.1",
+    "@testing-library/jest-dom": "^6.4.2",
+    "@testing-library/user-event": "^14.5.1",
+    "jsdom": "^24.0.0",
+    "postcss": "^8.4.38",
+    "vitest": "^1.4.0"
+  }
+}

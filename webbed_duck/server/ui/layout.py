@@ -121,18 +121,33 @@ def render_layout(
         )
 
     top_html = ""
-    if top_sections:
+    theme_button = (
+        "<button type='button' class='wd-top-button wd-top-button--ghost' data-wd-theme-toggle "
+        "data-dark-label='Use dark theme' data-light-label='Use light theme' "
+        "data-system-label='System theme ({theme})' "
+        "data-hint='Click to toggle theme. Alt-click to follow your system preference.' "
+        "aria-pressed='mixed'>System theme (light)</button>"
+    )
+
+    top_sections_html = "".join(top_sections)
+    if top_sections_html or filters_button or theme_button:
+        sections_block = (
+            "<div class='wd-top-sections'>" + top_sections_html + "</div>"
+            if top_sections_html
+            else ""
+        )
         top_html = (
             "<header class='wd-top' data-wd-top data-hidden='false' data-collapsed='false'>"
             "<div class='wd-top-inner'>"
             "<div class='wd-top-actions'>"
-            "<button type='button' class='wd-top-button' data-wd-top-toggle "
+            + theme_button
+            + "<button type='button' class='wd-top-button' data-wd-top-toggle "
             "data-hide-label='Hide header' data-show-label='Show header' "
             "aria-expanded='true'>Hide header</button>"
             + filters_button
-            + "</div><div class='wd-top-sections'>"
-            + "".join(top_sections)
-            + "</div></div></header>"
+            + "</div>"
+            + sections_block
+            + "</div></header>"
         )
 
     html_attrs = []

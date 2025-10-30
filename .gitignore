@@ -208,3 +208,4 @@ __marimo__/
 
 # webbed_duck runtime artifacts
 storage/
+node_modules/

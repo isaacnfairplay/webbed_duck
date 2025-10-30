@@ -14,12 +14,12 @@
 .wd-feed h3 {
   margin: 0;
   font-size: 1.05rem;
-  color: #111827;
+  color: var(--wd-text-primary);
 }
 
 .wd-feed article {
   padding: 0.75rem 0;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid var(--wd-border-muted);
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
@@ -32,16 +32,16 @@
 .wd-feed h4 {
   margin: 0;
   font-size: 1rem;
-  color: #111827;
+  color: var(--wd-text-primary);
 }
 
 .wd-feed p {
   margin: 0;
-  color: #374151;
+  color: var(--wd-text-secondary);
   font-size: 0.9rem;
 }
 
 .wd-feed time {
-  color: #6b7280;
+  color: var(--wd-text-muted);
   font-size: 0.8rem;
 }

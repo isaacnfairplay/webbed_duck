@@ -1,9 +1,10 @@
 .params-bar {
   margin-bottom: 1.25rem;
   padding: 0.85rem 1rem;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--wd-border-muted);
   border-radius: 0.75rem;
-  background: #f9fafb;
+  background: var(--wd-panel-muted);
+  color: var(--wd-text-secondary);
 }
 
 .params-form {
@@ -24,16 +25,17 @@
 .param-field label {
   font-size: 0.85rem;
   font-weight: 600;
-  color: #374151;
+  color: var(--wd-text-secondary);
 }
 
 .param-field input,
 .param-field select {
   padding: 0.45rem 0.6rem;
-  border: 1px solid #d1d5db;
+  border: 1px solid var(--wd-control-border);
   border-radius: 0.375rem;
   font: inherit;
-  background: #fff;
+  background: var(--wd-control-bg);
+  color: var(--wd-control-text);
   min-height: 2.25rem;
 }
 
@@ -41,9 +43,21 @@
   min-width: 10rem;
 }
 
+.param-field input::placeholder,
+.param-field select::placeholder {
+  color: var(--wd-control-placeholder);
+}
+
+.param-field input:focus-visible,
+.param-field select:focus-visible {
+  border-color: var(--wd-control-border-strong);
+  outline: 2px solid var(--wd-accent-soft);
+  outline-offset: 1px;
+}
+
 .param-help {
   font-size: 0.75rem;
-  color: #6b7280;
+  color: var(--wd-text-muted);
   margin: 0;
 }
 
@@ -56,20 +70,20 @@
 .param-actions button {
   padding: 0.45rem 0.95rem;
   border-radius: 0.375rem;
-  border: 1px solid #2563eb;
-  background: #2563eb;
-  color: #fff;
+  border: 1px solid var(--wd-accent);
+  background: var(--wd-accent);
+  color: var(--wd-accent-contrast);
   font: inherit;
   cursor: pointer;
 }
 
 .param-actions button:hover {
-  background: #1d4ed8;
-  border-color: #1d4ed8;
+  background: color-mix(in srgb, var(--wd-accent) 88%, black 12%);
+  border-color: color-mix(in srgb, var(--wd-accent) 88%, black 12%);
 }
 
 .param-actions .reset-link {
-  color: #2563eb;
+  color: var(--wd-accent);
   text-decoration: none;
   font-size: 0.9rem;
 }
@@ -80,7 +94,7 @@
 
 .result-summary {
   margin: 0.5rem 0 1rem;
-  color: #374151;
+  color: var(--wd-text-secondary);
   font-size: 0.9rem;
 }
 
@@ -92,7 +106,7 @@
 }
 
 .rpc-actions a {
-  color: #2563eb;
+  color: var(--wd-accent);
   text-decoration: none;
   font-weight: 600;
 }
@@ -106,7 +120,7 @@
 }
 
 .pagination a {
-  color: #2563eb;
+  color: var(--wd-accent);
   text-decoration: none;
   font-weight: 600;
 }
