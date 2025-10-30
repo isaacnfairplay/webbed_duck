@@ -1,3 +1,4 @@
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -79,3 +80,26 @@ def test_share_store_handles_ipv6_prefix_binding(share_store: ShareStore) -> Non
 
     mismatched = _make_request(user_agent="Browser/1.0", host="2001:db8:abcd:2::1")
     assert share_store.resolve(share.token, mismatched) is None
+
+
+def test_share_store_enforces_minimum_ttl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    config = load_config(None)
+    config.server.storage_root = tmp_path
+    config.email.share_token_ttl_minutes = 0
+    meta = MetaStore(tmp_path)
+    store = ShareStore(meta, config)
+
+    frozen_now = datetime(2024, 1, 1, 12, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr("webbed_duck.server.share._utcnow", lambda: frozen_now)
+
+    request = _make_request(user_agent=None, host=None)
+    share = store.create(
+        "route-ttl",
+        params={},
+        fmt="json",
+        redact_columns=(),
+        created_by_hash=None,
+        request=request,
+    )
+
+    assert share.expires_at == frozen_now + timedelta(minutes=1)

@@ -47,7 +47,8 @@ class ShareStore:
     ) -> CreatedShare:
         token = secrets.token_urlsafe(32)
         token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
-        ttl = timedelta(minutes=self._config.email.share_token_ttl_minutes)
+        ttl_minutes = max(1, int(self._config.email.share_token_ttl_minutes))
+        ttl = timedelta(minutes=ttl_minutes)
         now = _utcnow()
         expires_at = now + ttl
         bindings = _extract_bindings(self._config, request)

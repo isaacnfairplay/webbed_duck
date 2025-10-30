@@ -120,6 +120,10 @@ def _hours_to_seconds(value: Any) -> int:
     return _non_negative_int(float(value) * 3600)
 
 
+def _int_at_least(value: Any, minimum: int) -> int:
+    return max(minimum, int(value))
+
+
 def _load_toml(path: Path) -> Mapping[str, Any]:
     if not path.exists():
         return {}
@@ -247,7 +251,7 @@ def _parse_email(data: Mapping[str, Any], base: EmailConfig) -> EmailConfig:
     if "adapter" in data:
         overrides["adapter"] = str(data["adapter"]) if data["adapter"] is not None else None
     if "share_token_ttl_minutes" in data:
-        overrides["share_token_ttl_minutes"] = int(data["share_token_ttl_minutes"])
+        overrides["share_token_ttl_minutes"] = _int_at_least(data["share_token_ttl_minutes"], 1)
     if "bind_share_to_user_agent" in data:
         overrides["bind_share_to_user_agent"] = bool(data["bind_share_to_user_agent"])
     if "bind_share_to_ip_prefix" in data:

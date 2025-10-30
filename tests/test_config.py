@@ -102,6 +102,20 @@ watermark = false
     assert config.share.watermark is False
 
 
+def test_load_config_clamps_share_token_ttl(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path,
+        """
+[email]
+share_token_ttl_minutes = 0
+""".strip(),
+    )
+
+    config = load_config(path)
+
+    assert config.email.share_token_ttl_minutes == 1
+
+
 def test_load_config_parses_feature_flags(tmp_path: Path) -> None:
     path = _write_config(
         tmp_path,

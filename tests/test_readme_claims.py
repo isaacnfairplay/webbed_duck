@@ -312,6 +312,22 @@ def _inject_file_list_preprocessor(params, *, context, files):
     return updated
 
 
+def _config_clamps_share_ttl() -> bool:
+    with tempfile.NamedTemporaryFile("w", suffix=".toml", delete=False) as fh:
+        fh.write("""
+[email]
+share_token_ttl_minutes = 0
+""".strip())
+        fh.flush()
+        path = Path(fh.name)
+    try:
+        config = load_config(path)
+        return config.email.share_token_ttl_minutes == 1
+    finally:
+        with contextlib.suppress(FileNotFoundError):
+            path.unlink()
+
+
 def _install_email_adapter(records: list[tuple]) -> str:
     import types
     import sys
@@ -1375,6 +1391,9 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
             and ctx.share_payload["meta"]["attachments"] == []
             and ctx.share_payload["meta"]["zipped"] is False,
             s,
+        )),
+        (lambda s: s.startswith("- Share links always receive at least a one-minute lifetime"), lambda s: _ensure(
+            _config_clamps_share_ttl(), s
         )),
         (lambda s: s.startswith("- Internal tooling can reuse share-safe validation"), lambda s: _ensure(
             ctx.local_resolve_payload.get("route_id") == "hello"
