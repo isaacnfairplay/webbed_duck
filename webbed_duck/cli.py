@@ -147,7 +147,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     elif args.watch:
         watch_enabled = True
 
-    watch_interval = config.server.watch_interval
+    watch_interval = max(WATCH_INTERVAL_MIN, float(config.server.watch_interval))
     if args.watch_interval is not None:
         watch_interval = max(WATCH_INTERVAL_MIN, float(args.watch_interval))
 
