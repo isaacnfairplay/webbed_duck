@@ -128,13 +128,14 @@ def _hash_text(value: str | None) -> str | None:
 def _ip_prefix(ip: str | None) -> str | None:
     if not ip:
         return None
-    if ":" in ip:
-        parts = ip.split(":")
+    text = ip.strip()
+    if ":" in text:
+        parts = text.lower().split(":")
         return ":".join(parts[:4])
-    octets = ip.split(".")
+    octets = text.split(".")
     if len(octets) >= 3:
         return ".".join(octets[:3])
-    return ip
+    return text.lower()
 
 
 def _extract_bindings(config: Config, request: Request) -> _ShareBindings:

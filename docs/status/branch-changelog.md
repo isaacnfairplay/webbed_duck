@@ -1,5 +1,16 @@
 # Branch-level Changelog
 
+## IPv6 binding case hardening (work branch)
+
+- Add share and session regression tests that create bindings with uppercase
+  IPv6 hosts and assert the lowercase variants continue to resolve, preventing
+  case-only mismatches when proxies normalise address strings differently.
+- Normalise IPv6 literals to lowercase in the share and session IP prefix
+  helpers so persisted bindings are case-insensitive without weakening the
+  prefix truncation behaviour.
+- Document the case-normalisation behaviour in the README alongside the
+  existing binding overview so operators understand the runtime guarantees.
+
 ## Cache invariant large-string handling (work branch)
 
 - Guard case-insensitive invariant filters against Arrow `large_string` columns

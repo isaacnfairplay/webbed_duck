@@ -99,6 +99,28 @@ def test_session_store_resolve_requires_matching_bindings(monkeypatch, tmp_path)
     )
 
 
+def test_session_store_ipv6_binding_ignores_case(monkeypatch, tmp_path) -> None:
+    store, _ = _make_store(tmp_path)
+    base = datetime(2025, 8, 1, tzinfo=timezone.utc)
+    monkeypatch.setattr(session_module, "_utcnow", lambda: base)
+    monkeypatch.setattr(session_module.secrets, "token_urlsafe", lambda _: "fixed-token")
+    store.create(
+        email="user@example.com",
+        user_agent="Browser",
+        ip_address="2001:DB8:ABCD:1::1",
+        remember_me=False,
+    )
+
+    later = base + timedelta(minutes=1)
+    monkeypatch.setattr(session_module, "_utcnow", lambda: later)
+    resolved = store.resolve(
+        "fixed-token",
+        user_agent="Browser",
+        ip_address="2001:db8:abcd:1::5",
+    )
+    assert resolved is not None
+
+
 def test_session_store_resolve_purges_expired(monkeypatch, tmp_path) -> None:
     store, meta = _make_store(tmp_path)
     store._config.session_ttl_minutes = 5

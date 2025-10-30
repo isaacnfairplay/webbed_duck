@@ -79,3 +79,18 @@ def test_share_store_handles_ipv6_prefix_binding(share_store: ShareStore) -> Non
 
     mismatched = _make_request(user_agent="Browser/1.0", host="2001:db8:abcd:2::1")
     assert share_store.resolve(share.token, mismatched) is None
+
+
+def test_share_store_ipv6_binding_ignores_case(share_store: ShareStore) -> None:
+    create_request = _make_request(user_agent="Browser/1.0", host="2001:DB8:ABCD:1::1")
+    share = share_store.create(
+        "route-3",
+        params={},
+        fmt="json",
+        redact_columns=(),
+        created_by_hash=None,
+        request=create_request,
+    )
+
+    matching = _make_request(user_agent="Browser/1.0", host="2001:db8:abcd:1::9")
+    assert share_store.resolve(share.token, matching) is not None
