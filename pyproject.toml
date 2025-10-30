@@ -35,3 +35,4 @@ include = ["webbed_duck*"]
 
 [tool.setuptools.package-data]
 "webbed_duck.static.chartjs" = ["LICENSE", "chart.umd.min.js"]
+"webbed_duck.static" = ["assets/wd/*"]
