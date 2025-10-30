@@ -1,5 +1,15 @@
 # Branch-level Changelog
 
+## Cache invariant large-string handling (work branch)
+
+- Guard case-insensitive invariant filters against Arrow `large_string` columns
+  so cache reuse works for wide text datasets emitted by DuckDB.
+- Add a focused unit test that exercises `_apply_invariant_filters` with
+  mixed-case `large_string` values to catch regressions without requiring the
+  HTTP stack.
+- Document the fix in `CHANGELOG.md` so downstream consumers understand why the
+  cache helper changed.
+
 ## UI asset ordering guardrails (work branch)
 
 - Preserve canonical ordering for built-in styles/scripts while respecting
