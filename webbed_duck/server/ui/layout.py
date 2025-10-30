@@ -235,42 +235,97 @@ def _iter_metadata(raw: object) -> Iterator[str]:
             yield str(item)
 
 
-def _ordered_union(*sources: Iterable[str], canonical_order: Sequence[str] | None = None) -> tuple[str, ...]:
-    seen: set[str] = set()
-    first_seen: dict[str, int] = {}
-    index = 0
+def _ordered_union(
+    metadata: Iterable[str],
+    *sources: Iterable[str],
+    canonical_order: Sequence[str] | None = None,
+) -> tuple[str, ...]:
+    """Merge metadata and default asset requests while preserving anchors.
+
+    ``metadata`` is assumed to contain the per-route declarations. When
+    ``canonical_order`` is supplied the resulting tuple keeps canonical items in
+    their base order and only moves custom entries ahead of a canonical anchor
+    when they appear immediately before that anchor in ``metadata``.
+    """
+
+    def _normalize(items: Iterable[str]) -> Iterator[str]:
+        for raw in items:
+            if not raw:
+                continue
+            yield str(raw)
+
+    metadata_order: list[str] = []
+    metadata_seen: set[str] = set()
+    for item in _normalize(metadata):
+        if item in metadata_seen:
+            continue
+        metadata_seen.add(item)
+        metadata_order.append(item)
+
+    seen_all: set[str] = set()
+    all_items: list[str] = []
+    for item in metadata_order:
+        if item in seen_all:
+            continue
+        seen_all.add(item)
+        all_items.append(item)
     for source in sources:
-        for item in source:
-            if not item:
+        for item in _normalize(source):
+            if item in seen_all:
                 continue
-            if item in seen:
-                continue
-            seen.add(item)
-            first_seen[item] = index
-            index += 1
+            seen_all.add(item)
+            all_items.append(item)
 
-    if canonical_order:
-        canonical_positions = {name: pos for pos, name in enumerate(canonical_order)}
-        unknown_items = sorted(
-            ((name, order) for name, order in first_seen.items() if name not in canonical_positions),
-            key=lambda item: item[1],
-        )
-        unknown_index = 0
-        ordered: list[str] = []
-        for name in canonical_order:
-            if name not in first_seen:
-                continue
-            while unknown_index < len(unknown_items) and unknown_items[unknown_index][1] < first_seen[name]:
-                ordered.append(unknown_items[unknown_index][0])
-                unknown_index += 1
-            ordered.append(name)
-        while unknown_index < len(unknown_items):
-            ordered.append(unknown_items[unknown_index][0])
-            unknown_index += 1
-        return tuple(ordered)
+    if not canonical_order:
+        return tuple(all_items)
 
-    ordered_by_first_seen = sorted(first_seen, key=first_seen.get)
-    return tuple(ordered_by_first_seen)
+    canonical_set = set(canonical_order)
+    canonical_items = [name for name in canonical_order if name in seen_all]
+
+    before_map: dict[str, list[str]] = {}
+    after_map: dict[str, list[str]] = {}
+    trailing_custom: list[str] = []
+    used_custom: set[str] = set()
+    segment: list[str] = []
+    last_canonical: str | None = None
+    for item in metadata_order:
+        if item in canonical_set:
+            if segment:
+                target = before_map if last_canonical is None else after_map
+                key = item if last_canonical is None else last_canonical
+                target.setdefault(key, []).extend(segment)
+                used_custom.update(segment)
+                segment = []
+            last_canonical = item
+        else:
+            if item not in used_custom:
+                segment.append(item)
+
+    if segment:
+        if last_canonical is None:
+            trailing_custom = segment[:]
+        else:
+            after_map.setdefault(last_canonical, []).extend(segment)
+        used_custom.update(segment)
+
+    ordered: list[str] = []
+    for name in canonical_items:
+        ordered.extend(before_map.get(name, ()))
+        ordered.append(name)
+        ordered.extend(after_map.get(name, ()))
+
+    if trailing_custom:
+        for item in trailing_custom:
+            if item not in ordered:
+                ordered.append(item)
+
+    for item in all_items:
+        if item in canonical_set or item in used_custom:
+            continue
+        if item not in ordered:
+            ordered.append(item)
+
+    return tuple(ordered)
 
 
 def _escape_text(value: str) -> str:
