@@ -31,6 +31,7 @@ class UIConfig:
 
     show_http_warning: bool = True
     error_taxonomy_banner: bool = True
+    chartjs_source: str | None = None
 
 
 @dataclass(slots=True)
@@ -206,6 +207,9 @@ def _parse_ui(data: Mapping[str, Any], base: UIConfig) -> UIConfig:
         overrides["show_http_warning"] = bool(data["show_http_warning"])
     if "error_taxonomy_banner" in data:
         overrides["error_taxonomy_banner"] = bool(data["error_taxonomy_banner"])
+    if "chartjs_source" in data:
+        value = data["chartjs_source"]
+        overrides["chartjs_source"] = None if value is None else str(value)
     if not overrides:
         return base
     return replace(base, **overrides)

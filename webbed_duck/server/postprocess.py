@@ -236,7 +236,7 @@ def render_chartjs_html(
     embed: bool = False,
 ) -> str:
     meta = _merge_view_metadata(route_metadata, "chart_js", postprocess)
-    default_url = default_script_url or getattr(config.ui, "chartjs_source", "") or ""
+    default_url = default_script_url or (config.ui.chartjs_source or "")
     cdn_url = str(meta.get("cdn_url") or default_url)
     page_title = str(meta.get("page_title") or route_title or route_id)
     container_class = str(meta.get("container_class") or "wd-chart-grid")

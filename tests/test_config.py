@@ -102,6 +102,20 @@ watermark = false
     assert config.share.watermark is False
 
 
+def test_load_config_parses_ui_chartjs_source(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path,
+        """
+[ui]
+chartjs_source = "https://cdn.example.com/chart.js"
+""".strip(),
+    )
+
+    config = load_config(path)
+
+    assert config.ui.chartjs_source == "https://cdn.example.com/chart.js"
+
+
 def test_load_config_parses_feature_flags(tmp_path: Path) -> None:
     path = _write_config(
         tmp_path,
