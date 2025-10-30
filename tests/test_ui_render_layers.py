@@ -568,6 +568,22 @@ def test_table_to_records_serializes_temporals(sample_table: pa.Table) -> None:
     assert len(records) == sample_table.num_rows
 
 
+def test_table_to_records_serializes_time_values() -> None:
+    table = pa.table(
+        {
+            "event_time": pa.array(
+                [dt.time(8, 15, 0), dt.time(12, 30, 45, 123456)],
+                type=pa.time64("us"),
+            )
+        }
+    )
+
+    records = table_to_records(table)
+
+    assert records[0]["event_time"] == "08:15:00"
+    assert records[1]["event_time"] == "12:30:45.123456"
+
+
 def test_json_friendly_handles_datetime() -> None:
     value = dt.datetime(2024, 1, 1, 12, 0, tzinfo=dt.timezone.utc)
     assert json_friendly(value) == value.isoformat()
