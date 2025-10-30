@@ -29,13 +29,32 @@ SELECT 'Hello, ' || {{name}} || '!' AS greeting
 """
 
 
-def _build_runner(tmp_path: Path) -> LocalRouteRunner:
+ROUTE_JSON_ONLY = """+++
+id = "hello"
+path = "/hello"
+default_format = "json"
+allowed_formats = ["json"]
+[params.name]
+type = "str"
+required = false
+default = "World"
+[cache]
+order_by = ["greeting"]
++++
+
+```sql
+SELECT 'Hello, ' || {{name}} || '!' AS greeting
+```
+"""
+
+
+def _build_runner(tmp_path: Path, route_text: str = ROUTE_TEXT) -> LocalRouteRunner:
     src_dir = tmp_path / "src"
     build_dir = tmp_path / "build"
     storage_root = tmp_path / "storage"
     src_dir.mkdir()
     storage_root.mkdir()
-    write_sidecar_route(src_dir, "hello", ROUTE_TEXT)
+    write_sidecar_route(src_dir, "hello", route_text)
     compile_routes(src_dir, build_dir)
     routes = load_compiled_routes(build_dir)
     config = load_config(None)
@@ -65,6 +84,25 @@ def test_local_route_runner_rejects_unknown_format(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError):
         runner.run("hello", format="xml")
+
+
+def test_local_route_runner_honours_allowed_formats_and_default(tmp_path: Path) -> None:
+    runner = _build_runner(tmp_path, route_text=ROUTE_JSON_ONLY)
+
+    # Default format should follow metadata when not explicitly provided.
+    result = runner.run("hello")
+    assert result == [{"greeting": "Hello, World!"}]
+
+    # Explicit JSON alias should behave identically.
+    as_json = runner.run("hello", format="json")
+    assert as_json == result
+
+    with pytest.raises(ValueError) as excinfo:
+        runner.run("hello", format="arrow")
+    assert "not enabled" in str(excinfo.value)
+
+    with pytest.raises(ValueError):
+        runner.run("hello", format="table")
 
 
 def test_local_route_runner_wraps_execution_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

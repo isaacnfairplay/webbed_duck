@@ -1,5 +1,14 @@
 # Branch-level Changelog
 
+## Local runner format parity (feature/test-alignment)
+
+- Align `LocalRouteRunner` with HTTP format rules by honouring `default_format`
+  and rejecting requests that fall outside a route’s `allowed_formats` list.
+- Extend the local runner tests with a JSON-only route so default selection and
+  rejection semantics stay pinned alongside error messaging.
+- Document the parity in the README so batch jobs know that JSON/records are
+  supported aliases and that restricted formats remain enforced outside HTTP.
+
 ## Cache invariant large-string handling (work branch)
 
 - Guard case-insensitive invariant filters against Arrow `large_string` columns

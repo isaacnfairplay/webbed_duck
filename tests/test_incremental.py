@@ -127,7 +127,9 @@ def test_incremental_error_does_not_advance_checkpoint(tmp_path: Path) -> None:
     assert row is None
 
     # A second run with a working runner should process the first day.
-    good_runner = lambda *args, **kwargs: _DummyTable(2)  # type: ignore[no-redef]
+    def good_runner(*args, **kwargs):  # type: ignore[no-redef]
+        return _DummyTable(2)
+
     recovery = run_incremental(
         "by_date",
         cursor_param="day",

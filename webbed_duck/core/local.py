@@ -39,7 +39,7 @@ class LocalRouteRunner:
         route_id: str,
         params: Mapping[str, object] | None = None,
         *,
-        format: str = "arrow",
+        format: str | None = None,
     ) -> object:
         """Execute ``route_id`` and return the requested format."""
 
@@ -47,6 +47,7 @@ class LocalRouteRunner:
         route = self._routes.get(route_id)
         if route is None:
             raise RouteNotFoundError(route_id)
+        resolved_format = _resolve_format(route, format)
         executor = RouteExecutor(
             self._routes,
             cache_store=self._cache_store,
@@ -69,12 +70,11 @@ class LocalRouteRunner:
             self._overlay_store.list_for_route(route.id),
         )
 
-        fmt = format.lower()
-        if fmt in {"arrow", "table"}:
+        if resolved_format in {"arrow", "table"}:
             return table
-        if fmt == "records":
+        if resolved_format in {"json", "records"}:
             return table_to_records(table)
-        raise ValueError(f"Unsupported format '{format}'")
+        raise ValueError(f"Unsupported format '{resolved_format}'")
 
 
 def run_route(
@@ -84,12 +84,24 @@ def run_route(
     routes: Sequence[RouteDefinition] | None = None,
     build_dir: str | Path = "routes_build",
     config: Config | None = None,
-    format: str = "arrow",
+    format: str | None = None,
 ) -> object:
     """Execute ``route_id`` directly without HTTP transport."""
 
     runner = LocalRouteRunner(routes=routes, build_dir=build_dir, config=config)
     return runner.run(route_id, params=params, format=format)
+
+
+def _resolve_format(route: RouteDefinition, requested: str | None) -> str:
+    raw = requested if requested is not None else route.default_format
+    fmt = (raw or "arrow").lower()
+    allowed = {item.lower() for item in route.allowed_formats} if route.allowed_formats else None
+    if allowed and fmt not in allowed:
+        raise ValueError(f"Format '{fmt}' not enabled for route '{route.id}'")
+    supported = {"arrow", "table", "json", "records"}
+    if fmt not in supported:
+        raise ValueError(f"Unsupported format '{fmt}'")
+    return fmt
 
 
 __all__ = ["LocalRouteRunner", "run_route", "RouteNotFoundError"]

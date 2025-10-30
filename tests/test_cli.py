@@ -178,7 +178,7 @@ def test_cmd_perf_reports_stats(monkeypatch: pytest.MonkeyPatch, capsys: pytest.
 
     tables = [types.SimpleNamespace(num_rows=1), types.SimpleNamespace(num_rows=4)]
 
-    def fake_run_route(route_id, params, build_dir, config, format):  # type: ignore[no-untyped-def]
+    def fake_run_route(route_id, params, build_dir, config, format=None):  # type: ignore[no-untyped-def]
         assert route_id == "demo"
         assert params == {"limit": "5"}
         assert build_dir == "build"
