@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Ensure invariant cache filters treat Arrow `large_string` columns as eligible
+  for case-insensitive matching and add unit coverage around the helper to catch
+  future regressions.
 - Fixed the automated version bump workflow by indenting the embedded Python
   scripts so GitHub Actions can parse the YAML and execute the job that tags
   releases after merges.

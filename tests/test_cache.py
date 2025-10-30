@@ -4,12 +4,14 @@ from pathlib import Path
 
 import duckdb
 import pytest
+import pyarrow as pa
 
 from tests.conftest import write_sidecar_route
 from webbed_duck.config import load_config
 from webbed_duck.core.compiler import compile_routes
 from webbed_duck.core.routes import load_compiled_routes
 from webbed_duck.server.app import create_app
+from webbed_duck.server import cache as cache_mod
 
 try:
     from fastapi.testclient import TestClient
@@ -272,6 +274,30 @@ def test_invariant_filter_case_insensitive_values(
     assert len(calls) == 1
     gadget_values = [row["product_code"] for row in uppercase.json()["rows"]]
     assert gadget_values == ["gadget"]
+
+
+def test_invariant_filter_case_insensitive_handles_large_string() -> None:
+    table = pa.table(
+        {
+            "product_code": pa.array(
+                ["Widget", "widget", "Gadget"],
+                type=pa.large_string(),
+            )
+        }
+    )
+    setting = cache_mod.InvariantFilterSetting(
+        param="product_code",
+        column="product_code",
+        case_insensitive=True,
+    )
+
+    filtered = cache_mod._apply_invariant_filters(
+        table,
+        [setting],
+        {"product_code": ["WiDgEt"]},
+    )
+
+    assert filtered.column("product_code").to_pylist() == ["Widget", "widget"]
 
 
 @pytest.mark.skipif(TestClient is None, reason="fastapi is not available")

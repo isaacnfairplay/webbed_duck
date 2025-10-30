@@ -697,7 +697,11 @@ def _prepare_invariant_filter_values(
 
     include_null = any(value is None for value in values)
     non_null = [value for value in values if value is not None]
-    use_casefold = setting.case_insensitive and pa.types.is_string(column.type)
+    column_type = column.type
+    use_casefold = setting.case_insensitive and (
+        pa.types.is_string(column_type)
+        or pa.types.is_large_string(column_type)
+    )
     if use_casefold:
         normalised = [
             _normalize_casefold_text(str(item), case_insensitive=True)
