@@ -48,6 +48,24 @@ SELECT 'Hello, ' || {{name}} || '!' AS greeting
 """
 
 
+ROUTE_HTML_DEFAULT = """+++
+id = "hello"
+path = "/hello"
+default_format = "html_t"
+[params.name]
+type = "str"
+required = false
+default = "World"
+[cache]
+order_by = ["greeting"]
++++
+
+```sql
+SELECT 'Hello, ' || {{name}} || '!' AS greeting
+```
+"""
+
+
 def _build_runner(tmp_path: Path, route_text: str = ROUTE_TEXT) -> LocalRouteRunner:
     src_dir = tmp_path / "src"
     build_dir = tmp_path / "build"
@@ -64,6 +82,15 @@ def _build_runner(tmp_path: Path, route_text: str = ROUTE_TEXT) -> LocalRouteRun
 
 def test_local_route_runner_returns_arrow_table(tmp_path: Path) -> None:
     runner = _build_runner(tmp_path)
+
+    result = runner.run("hello")
+
+    assert isinstance(result, pa.Table)
+    assert result.to_pydict()["greeting"] == ["Hello, World!"]
+
+
+def test_local_route_runner_falls_back_for_unsupported_default(tmp_path: Path) -> None:
+    runner = _build_runner(tmp_path, route_text=ROUTE_HTML_DEFAULT)
 
     result = runner.run("hello")
 

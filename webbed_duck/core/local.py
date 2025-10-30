@@ -93,15 +93,34 @@ def run_route(
 
 
 def _resolve_format(route: RouteDefinition, requested: str | None) -> str:
-    raw = requested if requested is not None else route.default_format
-    fmt = (raw or "arrow").lower()
+    supported = ("arrow", "table", "json", "records")
     allowed = {item.lower() for item in route.allowed_formats} if route.allowed_formats else None
-    if allowed and fmt not in allowed:
-        raise ValueError(f"Format '{fmt}' not enabled for route '{route.id}'")
-    supported = {"arrow", "table", "json", "records"}
-    if fmt not in supported:
-        raise ValueError(f"Unsupported format '{fmt}'")
-    return fmt
+
+    if requested is not None:
+        fmt = requested.lower()
+        if allowed and fmt not in allowed:
+            raise ValueError(f"Format '{fmt}' not enabled for route '{route.id}'")
+        if fmt not in supported:
+            raise ValueError(f"Unsupported format '{fmt}'")
+        return fmt
+
+    default_fmt = (route.default_format or "").lower()
+    if default_fmt in supported and (allowed is None or default_fmt in allowed):
+        return default_fmt
+
+    for candidate in supported:
+        if candidate == default_fmt:
+            continue
+        if allowed and candidate not in allowed:
+            continue
+        return candidate
+
+    if allowed:
+        allowed_list = ", ".join(sorted(allowed))
+        raise ValueError(
+            f"Route '{route.id}' does not enable any supported local formats (allowed: {allowed_list})"
+        )
+    raise ValueError(f"Unsupported format '{default_fmt or 'arrow'}'")
 
 
 __all__ = ["LocalRouteRunner", "run_route", "RouteNotFoundError"]
