@@ -116,7 +116,7 @@ def token_to_option_value(token: str, entry: Mapping[str, object]) -> str:
     sample = entry.get("sample")
     sample_text = str(sample) if isinstance(sample, str) else None
     if token == "__null__":
-        return ""
+        return "__null__"
     prefix, _, payload = token.partition(":")
     if prefix == "str":
         return sample_text if sample_text is not None else payload
