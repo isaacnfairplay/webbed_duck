@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Fixed JSON responses for routes that emit DuckDB `DECIMAL` values by
+  teaching `table_to_records` to convert `decimal.Decimal` objects into
+  JSON-safe strings and adding regression coverage for the helper and HTTP
+  surface.
 - Ensure invariant cache filters treat Arrow `large_string` columns as eligible
   for case-insensitive matching and add unit coverage around the helper to catch
   future regressions.
