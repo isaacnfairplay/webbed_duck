@@ -67,4 +67,4 @@ if (document.readyState === 'loading') {
   bootCharts();
 }
 
-export { initCharts, initCanvas };
+export { initCharts, initCanvas, loadChartJs };

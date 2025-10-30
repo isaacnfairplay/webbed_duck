@@ -14,6 +14,21 @@ function initMultiSelect(container) {
   const clear = container.querySelector('.wd-multi-select-clear');
   const options = Array.from(container.querySelectorAll('.wd-multi-select-option'));
 
+  function adjustPanelHeight() {
+    if (!panel) {
+      return;
+    }
+    const visibleOptions = options.filter((li) => li.style.display !== 'none');
+    const visibleCount = visibleOptions.length || options.length || 1;
+    const rows = Math.min(Math.max(visibleCount, 4), 12);
+    const optionHeight = 32;
+    const chrome = 140; // search, padding, and actions controls
+    const desired = chrome + rows * optionHeight;
+    const viewportLimit = Math.max(220, Math.floor((window.innerHeight || 720) * 0.75));
+    const computed = Math.min(Math.max(desired, 220), viewportLimit);
+    container.style.setProperty('--wd-multi-panel-max-height', `${computed}px`);
+  }
+
   function updateFlags() {
     options.forEach((li) => {
       const cb = li.querySelector('input');
@@ -42,6 +57,7 @@ function initMultiSelect(container) {
       });
       updateFlags();
       updateSummary();
+      adjustPanelHeight();
     });
   });
 
@@ -58,6 +74,7 @@ function initMultiSelect(container) {
       });
       updateFlags();
       updateSummary();
+      adjustPanelHeight();
     });
   }
 
@@ -90,6 +107,7 @@ function initMultiSelect(container) {
             }
           }, 10);
         }
+        adjustPanelHeight();
       }
     });
   }
@@ -122,11 +140,17 @@ function initMultiSelect(container) {
           li.style.display = haystack.indexOf(term) === -1 ? 'none' : '';
         }
       });
+      adjustPanelHeight();
     });
   }
 
   updateFlags();
   updateSummary();
+  adjustPanelHeight();
+
+  window.addEventListener('resize', () => {
+    adjustPanelHeight();
+  });
 }
 
 function bootMultiSelect() {

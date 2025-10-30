@@ -5,11 +5,11 @@
 }
 
 .card {
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--wd-border-muted);
   border-radius: 0.75rem;
   padding: 1rem;
-  background: #fff;
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+  background: var(--wd-color-surface);
+  box-shadow: var(--wd-shadow-soft);
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
@@ -25,7 +25,7 @@
 .card h3 {
   margin: 0;
   font-size: 1.1rem;
-  color: #111827;
+  color: var(--wd-text-primary);
 }
 
 .card ul {
@@ -35,7 +35,7 @@
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
-  color: #374151;
+  color: var(--wd-text-secondary);
   font-size: 0.9rem;
 }
 
@@ -47,5 +47,5 @@
 
 .card li span {
   font-weight: 600;
-  color: #1f2937;
+  color: var(--wd-text-primary);
 }
