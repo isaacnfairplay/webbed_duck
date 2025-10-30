@@ -89,13 +89,17 @@ class SessionStore:
                 conn.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
                 conn.commit()
                 return None
-            if row["user_agent_hash"] and user_agent_hash and row["user_agent_hash"] != user_agent_hash:
+            stored_user_agent_hash = row["user_agent_hash"]
+            stored_ip_prefix = row["ip_prefix"]
+            if stored_ip_prefix:
+                stored_ip_prefix = stored_ip_prefix.lower()
+            if stored_user_agent_hash and user_agent_hash and stored_user_agent_hash != user_agent_hash:
                 return None
-            if row["ip_prefix"] and ip_prefix and row["ip_prefix"] != ip_prefix:
+            if stored_ip_prefix and ip_prefix and stored_ip_prefix != ip_prefix:
                 return None
-            if row["user_agent_hash"] and user_agent_hash is None:
+            if stored_user_agent_hash and user_agent_hash is None:
                 return None
-            if row["ip_prefix"] and ip_prefix is None:
+            if stored_ip_prefix and ip_prefix is None:
                 return None
         return StoredSession(token=token, email=row["email"], email_hash=row["email_hash"], expires_at=expires_at)
 

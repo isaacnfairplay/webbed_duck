@@ -102,9 +102,12 @@ class ShareStore:
                 conn.execute("DELETE FROM shares WHERE token_hash = ?", (token_hash,))
                 conn.commit()
                 return None
+            stored_ip_prefix = row["ip_prefix"]
+            if stored_ip_prefix:
+                stored_ip_prefix = stored_ip_prefix.lower()
             stored_bindings = _ShareBindings(
                 user_agent_hash=row["user_agent_hash"],
-                ip_prefix=row["ip_prefix"],
+                ip_prefix=stored_ip_prefix,
             )
             if not _bindings_match(stored_bindings, bindings):
                 return None
