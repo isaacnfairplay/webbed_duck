@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Mapping, Sequence
+from typing import Iterable, Iterator, Mapping, Sequence
 
 from ... import __version__ as PACKAGE_VERSION
 
@@ -23,6 +23,10 @@ _SCRIPT_PATHS: Mapping[str, str] = {
     "params": "params_form.js",
     "chart_boot": "chart_boot.js",
 }
+
+_WIDGET_ORDER: tuple[str, ...] = ("header", "params", "multi_select")
+_STYLE_ORDER: tuple[str, ...] = ("layout", "params", "multi_select", "table", "cards", "feed", "charts")
+_SCRIPT_ORDER: tuple[str, ...] = ("header", "params", "multi_select", "chart_boot")
 
 
 @dataclass(frozen=True)
@@ -50,26 +54,29 @@ def resolve_assets(
 
     The ``[ui]`` table in a compiled route metadata dictionary may define
     ``widgets``, ``styles``, and ``scripts`` arrays. This helper combines those
-    declarations with defaults supplied by the renderer.
+    declarations with defaults supplied by the renderer while preserving the
+    caller's requested order.
     """
 
-    widgets: set[str] = {item for item in default_widgets if item}
-    styles: set[str] = {item for item in default_styles if item}
-    scripts: set[str] = {item for item in default_scripts if item}
-
     ui_section = route_metadata.get("ui") if isinstance(route_metadata, Mapping) else None
-    if isinstance(ui_section, Mapping):
-        _apply_metadata_list(ui_section.get("widgets"), widgets)
-        _apply_metadata_list(ui_section.get("styles"), styles)
-        _apply_metadata_list(ui_section.get("scripts"), scripts)
-
-    _apply_metadata_list(extra_styles, styles)
-    _apply_metadata_list(extra_scripts, scripts)
-
-    ordered_widgets = tuple(sorted(widgets))
-    ordered_styles = tuple(_preserve_requested_order(styles))
-    ordered_scripts = tuple(_preserve_requested_order(scripts))
-    return UIAssets(ordered_widgets, ordered_styles, ordered_scripts)
+    widgets = _ordered_union(
+        _iter_metadata(ui_section.get("widgets")) if isinstance(ui_section, Mapping) else (),
+        default_widgets,
+        canonical_order=_WIDGET_ORDER,
+    )
+    styles = _ordered_union(
+        _iter_metadata(ui_section.get("styles")) if isinstance(ui_section, Mapping) else (),
+        default_styles,
+        extra_styles,
+        canonical_order=_STYLE_ORDER,
+    )
+    scripts = _ordered_union(
+        _iter_metadata(ui_section.get("scripts")) if isinstance(ui_section, Mapping) else (),
+        default_scripts,
+        extra_scripts,
+        canonical_order=_SCRIPT_ORDER,
+    )
+    return UIAssets(widgets, styles, scripts)
 
 
 def render_layout(
@@ -215,27 +222,110 @@ def _script_tags(script_names: Iterable[str]) -> list[str]:
     return tags
 
 
-def _apply_metadata_list(raw: object, target: set[str]) -> None:
+def _iter_metadata(raw: object) -> Iterator[str]:
     if isinstance(raw, str):
         for part in raw.split(","):
             value = part.strip()
             if value:
-                target.add(value)
+                yield value
     elif isinstance(raw, Iterable) and not isinstance(raw, (str, bytes)):
         for item in raw:
             if not item:
                 continue
-            target.add(str(item))
+            yield str(item)
 
 
-def _preserve_requested_order(values: set[str]) -> list[str]:
-    ordered = []
-    for key in ("layout", "params", "multi_select", "table", "cards", "feed", "charts"):
-        if key in values:
-            ordered.append(key)
-            values.remove(key)
-    ordered.extend(sorted(values))
-    return ordered
+def _ordered_union(
+    metadata: Iterable[str],
+    *sources: Iterable[str],
+    canonical_order: Sequence[str] | None = None,
+) -> tuple[str, ...]:
+    """Merge metadata and default asset requests while preserving anchors.
+
+    ``metadata`` is assumed to contain the per-route declarations. When
+    ``canonical_order`` is supplied the resulting tuple keeps canonical items in
+    their base order and only moves custom entries ahead of a canonical anchor
+    when they appear immediately before that anchor in ``metadata``.
+    """
+
+    def _normalize(items: Iterable[str]) -> Iterator[str]:
+        for raw in items:
+            if not raw:
+                continue
+            yield str(raw)
+
+    metadata_order: list[str] = []
+    metadata_seen: set[str] = set()
+    for item in _normalize(metadata):
+        if item in metadata_seen:
+            continue
+        metadata_seen.add(item)
+        metadata_order.append(item)
+
+    seen_all: set[str] = set()
+    all_items: list[str] = []
+    for item in metadata_order:
+        if item in seen_all:
+            continue
+        seen_all.add(item)
+        all_items.append(item)
+    for source in sources:
+        for item in _normalize(source):
+            if item in seen_all:
+                continue
+            seen_all.add(item)
+            all_items.append(item)
+
+    if not canonical_order:
+        return tuple(all_items)
+
+    canonical_set = set(canonical_order)
+    canonical_items = [name for name in canonical_order if name in seen_all]
+
+    before_map: dict[str, list[str]] = {}
+    after_map: dict[str, list[str]] = {}
+    trailing_custom: list[str] = []
+    used_custom: set[str] = set()
+    segment: list[str] = []
+    last_canonical: str | None = None
+    for item in metadata_order:
+        if item in canonical_set:
+            if segment:
+                target = before_map if last_canonical is None else after_map
+                key = item if last_canonical is None else last_canonical
+                target.setdefault(key, []).extend(segment)
+                used_custom.update(segment)
+                segment = []
+            last_canonical = item
+        else:
+            if item not in used_custom:
+                segment.append(item)
+
+    if segment:
+        if last_canonical is None:
+            trailing_custom = segment[:]
+        else:
+            after_map.setdefault(last_canonical, []).extend(segment)
+        used_custom.update(segment)
+
+    ordered: list[str] = []
+    for name in canonical_items:
+        ordered.extend(before_map.get(name, ()))
+        ordered.append(name)
+        ordered.extend(after_map.get(name, ()))
+
+    if trailing_custom:
+        for item in trailing_custom:
+            if item not in ordered:
+                ordered.append(item)
+
+    for item in all_items:
+        if item in canonical_set or item in used_custom:
+            continue
+        if item not in ordered:
+            ordered.append(item)
+
+    return tuple(ordered)
 
 
 def _escape_text(value: str) -> str:

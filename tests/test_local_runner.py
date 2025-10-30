@@ -9,6 +9,7 @@ from tests.conftest import write_sidecar_route
 from webbed_duck.config import load_config
 from webbed_duck.core.compiler import compile_routes
 from webbed_duck.core.local import LocalRouteRunner, RouteNotFoundError, run_route
+from webbed_duck.server.execution import RouteExecutionError
 from webbed_duck.core.routes import load_compiled_routes
 
 ROUTE_TEXT = """+++
@@ -64,6 +65,24 @@ def test_local_route_runner_rejects_unknown_format(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError):
         runner.run("hello", format="xml")
+
+
+def test_local_route_runner_wraps_execution_error(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    runner = _build_runner(tmp_path)
+
+    class _ExplodingExecutor:
+        def __init__(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            pass
+
+        def execute_relation(self, *args, **kwargs):  # type: ignore[no-untyped-def]
+            raise RouteExecutionError("boom")
+
+    monkeypatch.setattr("webbed_duck.core.local.RouteExecutor", _ExplodingExecutor)
+
+    with pytest.raises(ValueError) as excinfo:
+        runner.run("hello")
+
+    assert "boom" in str(excinfo.value)
 
 
 def test_run_route_preserves_existing_entrypoint(tmp_path: Path) -> None:

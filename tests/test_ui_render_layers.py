@@ -62,9 +62,9 @@ def test_resolve_assets_deduplicates_and_orders() -> None:
         extra_scripts=["multi_select", "header"],
     )
 
-    assert assets.widgets == ("multi_select", "params")
+    assert assets.widgets == ("params", "multi_select")
     assert assets.styles == ("layout", "table", "charts")
-    assert assets.scripts == ("multi_select", "chart_boot", "header")
+    assert assets.scripts == ("header", "multi_select", "chart_boot")
 
 
 def test_resolve_assets_accepts_csv_strings() -> None:
@@ -84,7 +84,49 @@ def test_resolve_assets_accepts_csv_strings() -> None:
 
     assert assets.widgets == ("params",)
     assert assets.styles == ("layout", "table", "charts")
-    assert assets.scripts == ("multi_select", "chart_boot", "header")
+    assert assets.scripts == ("header", "multi_select", "chart_boot")
+
+
+def test_resolve_assets_defaults_precede_custom_when_unanchored() -> None:
+    metadata = {"ui": {"styles": ["theme"]}}
+
+    assets = resolve_assets(
+        metadata,
+        default_styles=["layout", "table"],
+    )
+
+    assert assets.styles == ("layout", "table", "theme")
+
+
+def test_resolve_assets_can_anchor_custom_before_default() -> None:
+    metadata = {"ui": {"styles": ["theme", "layout"]}}
+
+    assets = resolve_assets(
+        metadata,
+        default_styles=["layout", "table"],
+    )
+
+    assert assets.styles == ("theme", "layout", "table")
+
+
+def test_resolve_assets_preserves_custom_order() -> None:
+    metadata = {
+        "ui": {
+            "styles": ["layout", "custom", "cards"],
+            "scripts": ["custom_a", "header", "custom_b"],
+        }
+    }
+
+    assets = resolve_assets(
+        metadata,
+        default_styles=["layout"],
+        default_scripts=["header"],
+        extra_styles=["charts"],
+        extra_scripts=["chart_boot"],
+    )
+
+    assert assets.styles == ("layout", "custom", "cards", "charts")
+    assert assets.scripts == ("custom_a", "header", "custom_b", "chart_boot")
 
 
 def test_render_layout_includes_assets_and_top_sections() -> None:

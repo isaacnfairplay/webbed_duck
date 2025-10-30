@@ -1,5 +1,18 @@
 # Branch-level Changelog
 
+## UI asset ordering guardrails (work branch)
+
+- Preserve canonical ordering for built-in styles/scripts while respecting
+  route-defined placement of custom assets so bespoke themes can control when
+  their files load.
+- Extend the UI renderer tests to cover CSV metadata parsing and explicit
+  ordering for custom styles/scripts, exercising the new deterministic helper.
+- Document the ordering semantics in the README and UI migration guide so route
+  authors know how to interleave custom assets without duplicating defaults.
+- Add a regression test around `LocalRouteRunner` error translation to ensure
+  execution failures continue to surface as `ValueError` instances for CLI and
+  library consumers.
+
 ## Version metadata alignment (work branch)
 
 - Restore the static `webbed_duck.__version__` constant and ensure it reflects
