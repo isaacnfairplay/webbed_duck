@@ -1,5 +1,14 @@
 # Branch-level Changelog
 
+## Decimal JSON serialization (work branch)
+
+- Convert DuckDB `DECIMAL` values into JSON-safe strings inside
+  `table_to_records` so JSON endpoints no longer raise serialization errors
+  when precision columns are requested.
+- Add regression coverage for both the helper and a FastAPI JSON response to
+  guard against future regressions.
+- Note the fix in the main changelog for downstream visibility.
+
 ## Cache invariant large-string handling (work branch)
 
 - Guard case-insensitive invariant filters against Arrow `large_string` columns
