@@ -9,7 +9,7 @@ import pyarrow as pa
 from tests.conftest import write_sidecar_route
 from webbed_duck.config import load_config
 from webbed_duck.core.compiler import compile_routes
-from webbed_duck.core.routes import load_compiled_routes
+from webbed_duck.core.routes import RouteDefinition, load_compiled_routes
 from webbed_duck.server.app import create_app
 from webbed_duck.server import cache as cache_mod
 
@@ -777,6 +777,102 @@ def test_normalize_invariant_value_interprets_null_tokens() -> None:
     ]
 
 
+def test_canonicalize_invariant_value_normalizes_decimals() -> None:
+    setting = cache_mod.InvariantFilterSetting(param="amount", column="amount")
+
+    token = cache_mod.canonicalize_invariant_value(Decimal("1.00"), setting)
+    assert token.startswith("num:")
+    assert token == cache_mod.canonicalize_invariant_value(Decimal("1.0"), setting)
+    assert token == cache_mod.canonicalize_invariant_value(Decimal("1"), setting)
+
+
+def test_canonicalize_invariant_value_aligns_numeric_types() -> None:
+    setting = cache_mod.InvariantFilterSetting(param="amount", column="amount")
+
+    base = cache_mod.canonicalize_invariant_value(1, setting)
+
+    assert base == cache_mod.canonicalize_invariant_value(1.0, setting)
+    assert base == cache_mod.canonicalize_invariant_value(Decimal("1.0"), setting)
+
+
+def test_canonicalize_invariant_value_normalizes_negative_zero() -> None:
+    setting = cache_mod.InvariantFilterSetting(param="amount", column="amount")
+
+    assert cache_mod.canonicalize_invariant_value(-0.0, setting) == cache_mod.canonicalize_invariant_value(
+        0, setting
+    )
+    assert cache_mod.canonicalize_invariant_value(-0.0, setting) == cache_mod.canonicalize_invariant_value(
+        Decimal("0"), setting
+    )
+
+
+def test_canonicalize_invariant_mapping_collapses_decimal_variants() -> None:
+    setting = cache_mod.InvariantFilterSetting(param="amount", column="amount")
+    mapping = cache_mod.canonicalize_invariant_mapping(
+        {"amount": (Decimal("2.500"), Decimal("2.50"))},
+        [setting],
+    )
+
+    assert mapping == {"amount": [cache_mod.canonicalize_invariant_value(Decimal("2.5"), setting)]}
+
+
+def test_canonicalize_invariant_mapping_collapses_numeric_variants() -> None:
+    setting = cache_mod.InvariantFilterSetting(param="amount", column="amount")
+
+    mapping = cache_mod.canonicalize_invariant_mapping(
+        {"amount": (1, 1.0, Decimal("1.00"), Decimal("1"), -0.0, 0)},
+        [setting],
+    )
+
+    expected_tokens = {
+        cache_mod.canonicalize_invariant_value(Decimal("1"), setting),
+        cache_mod.canonicalize_invariant_value(Decimal("0"), setting),
+    }
+
+    assert mapping == {"amount": sorted(expected_tokens)}
+
+
+def test_cache_key_ignores_invariant_order(tmp_path: Path) -> None:
+    store = cache_mod.CacheStore(tmp_path)
+    route = RouteDefinition(
+        id="inventory",
+        path="/inventory",
+        methods=("GET",),
+        raw_sql="SELECT 1",
+        prepared_sql="SELECT 1",
+        param_order=("product_code",),
+        params=(),
+        metadata={},
+        version="v1",
+    )
+
+    first = cache_mod.InvariantFilterSetting(param="product_code", column="product_code")
+    second = cache_mod.InvariantFilterSetting(param="region", column="region", case_insensitive=True)
+
+    params = {"product_code": "widget", "region": "EMEA"}
+
+    base_settings = dict(
+        enabled=True,
+        ttl_seconds=3600,
+        rows_per_page=10,
+        enforce_page_size=True,
+        order_by=("product_code",),
+    )
+
+    key_a = store.compute_key(
+        route,
+        params,
+        cache_mod.CacheSettings(invariant_filters=(first, second), **base_settings),
+    )
+    key_b = store.compute_key(
+        route,
+        params,
+        cache_mod.CacheSettings(invariant_filters=(second, first), **base_settings),
+    )
+
+    assert key_a.digest == key_b.digest
+
+
 @pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
 def test_invariant_unique_values_merge_with_static_options(tmp_path: Path) -> None:
     src = tmp_path / "src"
@@ -825,3 +921,4 @@ def test_invariant_unique_values_merge_with_static_options(tmp_path: Path) -> No
     assert "<option value='Engineering'>Engineering</option>" in text
     assert "<option value='Finance'>Finance</option>" in text
     assert "<option value='Other'>Custom</option>" in text
+from decimal import Decimal
