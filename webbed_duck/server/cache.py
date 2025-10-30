@@ -6,6 +6,8 @@ import json
 import shutil
 import time
 from dataclasses import dataclass, field, replace
+import decimal
+import math
 from itertools import product
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
@@ -111,7 +113,7 @@ class CacheStore:
                     "separator": setting.separator,
                     "case_insensitive": setting.case_insensitive,
                 }
-                for setting in settings.invariant_filters
+                for setting in _sorted_invariant_filters(settings.invariant_filters)
             ],
         }
         encoded = json.dumps(payload, sort_keys=True, default=_json_default).encode("utf-8")
@@ -632,6 +634,24 @@ def _collect_invariant_requests(
     return collected
 
 
+def _sorted_invariant_filters(
+    filters: Sequence[InvariantFilterSetting],
+) -> tuple[InvariantFilterSetting, ...]:
+    if not filters:
+        return ()
+    return tuple(
+        sorted(
+            filters,
+            key=lambda setting: (
+                setting.param,
+                setting.column,
+                setting.separator or "",
+                setting.case_insensitive,
+            ),
+        )
+    )
+
+
 def _string_represents_null(value: str) -> bool:
     return value.strip().lower() == "__null__"
 
@@ -690,6 +710,29 @@ def canonicalize_invariant_mapping(
     return canonical
 
 
+def _canonicalize_numeric_token(value: int | float | decimal.Decimal) -> str:
+    if isinstance(value, decimal.Decimal):
+        if not value.is_finite():
+            return "str:" + str(value)
+        numeric = value
+    elif isinstance(value, float):
+        if not math.isfinite(value):
+            return "num:" + str(value)
+        numeric = decimal.Decimal(str(value))
+    else:
+        numeric = decimal.Decimal(value)
+
+    normalized = numeric.normalize()
+    if normalized == 0:
+        normalized = decimal.Decimal(0)
+    token = format(normalized, "f")
+    if "." in token:
+        token = token.rstrip("0").rstrip(".")
+    if not token:
+        token = "0"
+    return "num:" + token
+
+
 def _normalize_casefold_text(value: str, *, case_insensitive: bool) -> str:
     """Return ``value`` lower-cased when ``case_insensitive`` is enabled."""
 
@@ -729,8 +772,8 @@ def canonicalize_invariant_value(value: object, setting: InvariantFilterSetting)
         token = "__null__"
     elif isinstance(value, bool):
         token = f"bool:{str(value).lower()}"
-    elif isinstance(value, (int, float)):
-        token = f"num:{value}"
+    elif isinstance(value, (int, float, decimal.Decimal)):
+        token = _canonicalize_numeric_token(value)
     elif isinstance(value, (bytes, bytearray)):
         token = "bytes:" + base64.b64encode(bytes(value)).decode("ascii")
     elif hasattr(value, "isoformat"):

@@ -1,5 +1,22 @@
 # Branch-level Changelog
 
+## Decimal invariant cache canonicalization (work branch)
+
+- Normalize cache invariant tokens for `decimal.Decimal` inputs so cache
+  metadata and superset reuse treat numerically equivalent forms as the same
+  request, preventing duplicate shards for values like `1.0` versus `1.00`.
+- Add unit tests in `tests/test_cache.py` covering decimal canonicalisation and
+  mapping, ensuring future regressions are caught without exercising the HTTP
+  stack.
+- Record the change in `CHANGELOG.md` so downstream consumers understand the
+  cache behaviour adjustment.
+- Extend the numeric canonicalisation to align ints, floats, and decimals
+  (including `-0.0`) under a single token format so invariant filters stop
+  generating duplicate shards for equivalent numeric inputs.
+- Sort invariant filter metadata when hashing cache keys so reordering TOML
+  definitions does not invalidate existing cache entries, and cover the
+  behaviour with a focused compute-key unit test.
+
 ## Local runner overlay refresh (feature/local-runner-overrides)
 
 - Teach the `OverlayStore` to reload its JSON payload from disk and have

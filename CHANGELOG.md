@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Canonicalize cache invariant tokens for numeric inputs (ints, floats, and
+  `decimal.Decimal`) and sort invariant filter definitions when hashing cache
+  keys so semantically equivalent requests—including reordered filters or
+  values like `-0.0`—reuse the same cached slice; covered by targeted
+  canonicalisation unit tests.
 - Fixed JSON responses for routes that emit DuckDB `DECIMAL` values by
   teaching `table_to_records` to convert `decimal.Decimal` objects into
   JSON-safe strings and adding regression coverage for the helper and HTTP
