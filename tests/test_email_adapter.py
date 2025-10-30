@@ -55,3 +55,27 @@ def test_load_email_sender_rejects_non_callable(monkeypatch):
 def test_load_email_sender_allows_missing_path():
     assert load_email_sender(None) is None
     assert load_email_sender("") is None
+
+
+def test_load_email_sender_trims_whitespace(monkeypatch):
+    module_name = "tests.email_sender_whitespace"
+
+    def send_email(*args, **kwargs):  # pragma: no cover - execution not needed
+        pass
+
+    _install_module(module_name, send_email=send_email)
+
+    sender = load_email_sender(f"  {module_name} : send_email  ")
+    assert sender is send_email
+
+    monkeypatch.delitem(sys.modules, module_name, raising=False)
+
+
+def test_load_email_sender_rejects_missing_callable(monkeypatch):
+    module_name = "tests.email_sender_missing"
+    _install_module(module_name)
+
+    with pytest.raises(ValueError):
+        load_email_sender(f"{module_name}:")
+
+    monkeypatch.delitem(sys.modules, module_name, raising=False)

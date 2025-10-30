@@ -3,6 +3,8 @@ from __future__ import annotations
 import importlib
 from typing import Callable, Sequence
 
+from ._adapter_utils import normalize_adapter_path
+
 EmailSender = Callable[[Sequence[str], str, str, str | None, Sequence[tuple[str, bytes]] | None], None]
 
 
@@ -15,9 +17,10 @@ def load_email_sender(path: str | None) -> EmailSender | None:
 
     if not path:
         return None
-    module_name, _, attr = path.partition(":")
-    if not attr:
-        module_name, attr = path.rsplit(".", 1)
+    resolved = normalize_adapter_path(path, optional=True)
+    if resolved is None:
+        return None
+    module_name, attr = resolved
     module = importlib.import_module(module_name)
     sender = getattr(module, attr)
     if not callable(sender):

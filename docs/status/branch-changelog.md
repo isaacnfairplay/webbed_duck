@@ -1,5 +1,15 @@
 # Branch-level Changelog
 
+## Adapter path normalization (work branch)
+
+- Trim whitespace when resolving email and external auth adapter references so
+  configuration typos raise friendly `ValueError`s instead of opaque import
+  errors.
+- Add regression tests for whitespace-padded adapter strings and missing
+  callable names across the email loader and external auth resolver.
+- Update the README configuration guidance to mention whitespace tolerance and
+  explicit validation for adapter paths.
+
 ## UI asset ordering guardrails (work branch)
 
 - Preserve canonical ordering for built-in styles/scripts while respecting

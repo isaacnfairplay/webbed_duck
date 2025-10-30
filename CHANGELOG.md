@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Normalized adapter path parsing for email and external auth adapters, trimming
+  whitespace, surfacing malformed references as `ValueError`s, and covering the
+  behaviour with regression tests and updated configuration docs.
 - Fixed the automated version bump workflow by indenting the embedded Python
   scripts so GitHub Actions can parse the YAML and execute the job that tags
   releases after merges.

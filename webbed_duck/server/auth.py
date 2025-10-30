@@ -9,6 +9,7 @@ from fastapi import Request
 
 from ..config import Config
 from .session import SESSION_COOKIE_NAME, SessionStore
+from ._adapter_utils import normalize_adapter_path
 
 
 @dataclass(slots=True)
@@ -75,9 +76,7 @@ def resolve_auth_adapter(mode: str, *, config: Config, session_store: SessionSto
 
 
 def _load_external_adapter(path: str, config: Config) -> AuthAdapter:
-    module_name, _, attr = path.partition(":")
-    if not attr:
-        module_name, attr = path.rsplit(".", 1)
+    module_name, attr = normalize_adapter_path(path, optional=False)
     module = importlib.import_module(module_name)
     factory = getattr(module, attr)
     adapter = _call_external_adapter_factory(factory, config)
