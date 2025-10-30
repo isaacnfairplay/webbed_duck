@@ -14,6 +14,7 @@ import pyarrow.csv as pacsv
 import pyarrow.parquet as pq
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 
 from .. import __version__ as PACKAGE_VERSION
 from ..config import Config
@@ -147,6 +148,15 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
     chartjs_route = f"/vendor/{CHARTJS_FILENAME}"
     _prepare_chartjs_assets(app, config.server.storage_root)
     app.state._dynamic_route_handles = _register_dynamic_routes(app, app.state.routes)
+
+    assets_root = Path(__file__).resolve().parent.parent / "static" / "assets" / "wd"
+    static_files = StaticFiles(
+        directory=str(assets_root) if assets_root.exists() else None,
+        packages=[("webbed_duck.static", "assets/wd")],
+        html=False,
+        check_dir=False,
+    )
+    app.mount("/assets/wd", static_files, name="wd-assets")
 
     @app.get(chartjs_route)
     async def serve_chartjs_asset() -> FileResponse:
