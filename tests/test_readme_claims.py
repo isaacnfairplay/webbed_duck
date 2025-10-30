@@ -156,9 +156,9 @@ order_by = ["seq"]
 ```sql
 SELECT product_code, quantity, seq
 FROM (
-    VALUES ('widget', 4, 1), ('gadget', 2, 2), ('widget', 3, 3)
+    VALUES ('widget', 4, 1), ('gadget', 2, 2), (NULL, 3, 3), ('widget', 5, 4)
 ) AS inventory(product_code, quantity, seq)
-WHERE product_code = COALESCE({{ product_code }}, product_code)
+WHERE product_code IS NOT DISTINCT FROM COALESCE(NULLIF({{ product_code }}, ''), product_code)
 ORDER BY seq;
 ```
 """
@@ -182,9 +182,9 @@ order_by = ["seq"]
 ```sql
 SELECT product_code, quantity, seq
 FROM (
-    VALUES ('widget', 4, 1), ('gadget', 2, 2), ('widget', 3, 3)
+    VALUES ('widget', 4, 1), ('gadget', 2, 2), (NULL, 3, 3), ('widget', 5, 4)
 ) AS inventory(product_code, quantity, seq)
-WHERE product_code = COALESCE({{ product_code }}, product_code)
+WHERE product_code IS NOT DISTINCT FROM COALESCE(NULLIF({{ product_code }}, ''), product_code)
 ORDER BY seq;
 ```
 """
@@ -298,6 +298,8 @@ class ReadmeContext:
     cache_config: object
     invariant_superset_payload: dict
     invariant_superset_counts: list[int]
+    invariant_null_payload: dict
+    invariant_null_counts: list[int]
     invariant_combined_payload: dict
     invariant_shard_counts: list[int]
     duckdb_binding_checks: dict[str, bool]
@@ -485,6 +487,23 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
         )
         invariant_superset_counts.append(duckdb_connect_counts[-1])
         invariant_superset_payload = superset_filtered.json()
+
+        invariant_null_counts: list[int] = []
+        null_filtered = request_with_tracking(
+            client,
+            "get",
+            "/cached_invariant",
+            params={"format": "json", "product_code": "__null__"},
+        )
+        invariant_null_counts.append(duckdb_connect_counts[-1])
+        invariant_null_payload = null_filtered.json()
+        request_with_tracking(
+            client,
+            "get",
+            "/cached_invariant",
+            params={"format": "json", "product_code": "__null__"},
+        )
+        invariant_null_counts.append(duckdb_connect_counts[-1])
 
         invariant_shard_counts: list[int] = []
         request_with_tracking(
@@ -835,6 +854,8 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
         share_config=config.share,
         invariant_superset_payload=invariant_superset_payload,
         invariant_superset_counts=invariant_superset_counts,
+        invariant_null_payload=invariant_null_payload,
+        invariant_null_counts=invariant_null_counts,
         invariant_combined_payload=invariant_combined_payload,
         invariant_shard_counts=invariant_shard_counts,
         duckdb_binding_checks=duckdb_binding_checks,
@@ -1174,7 +1195,7 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
             "reorders the combined rows by `cache.order_by`",
             "deterministic paging.",
         ): any(phrase in s for phrase in phrases), lambda s: _ensure(
-            [row["seq"] for row in ctx.invariant_combined_payload["rows"]] == [1, 2, 3],
+            [row["seq"] for row in ctx.invariant_combined_payload["rows"]] == [1, 2, 4],
             s,
         )),
         (lambda s: s.startswith("- The executor snaps requested offsets"), lambda s: _ensure(
@@ -1201,6 +1222,14 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
             and [row["product_code"] for row in ctx.invariant_superset_payload["rows"]] == ["gadget"],
             s,
         )),
+        (lambda s: s.startswith("- To request cached rows where an invariant column is `NULL`"), lambda s: _ensure(
+            ctx.invariant_null_counts
+            and ctx.invariant_null_counts[0] >= 0
+            and ctx.invariant_null_counts[-1] == 0
+            and ctx.invariant_null_payload["total_rows"] == 1
+            and [row["product_code"] for row in ctx.invariant_null_payload["rows"]] == [None],
+            f"{s} -> counts={ctx.invariant_null_counts}, rows={ctx.invariant_null_payload['rows']}",
+        )),
         (lambda s: s.startswith("> **Testing reminder:**"), lambda s: _ensure(
             {"duckdb", "pyarrow", "fastapi", "uvicorn"}.issubset(
                 _dependency_names(ctx.dependencies)
@@ -1210,7 +1239,7 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         (lambda s: s.startswith("- When invariant filters are configured"), lambda s: _ensure(
             ctx.invariant_shard_counts == [1, 1, 0]
             and {row["product_code"] for row in ctx.invariant_combined_payload["rows"]} == {"widget", "gadget"}
-            and [row["seq"] for row in ctx.invariant_combined_payload["rows"]] == [1, 2, 3],
+            and [row["seq"] for row in ctx.invariant_combined_payload["rows"]] == [1, 2, 4],
             s,
         )),
         (lambda s: s.startswith("- Every cache miss opens a fresh DuckDB connection"), lambda s: _ensure(

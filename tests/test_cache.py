@@ -301,6 +301,87 @@ def test_invariant_filter_case_insensitive_handles_large_string() -> None:
 
 
 @pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
+def test_invariant_filter_supports_null_requests(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    src = tmp_path / "src"
+    src.mkdir()
+    build = tmp_path / "build"
+    route_text = (
+        "+++\n"
+        "id = \"inventory_nulls\"\n"
+        "path = \"/inventory_nulls\"\n"
+        "title = \"Inventory nulls\"\n"
+        "[params.product_code]\n"
+        "type = \"str\"\n"
+        "required = false\n"
+        "[cache]\n"
+        "rows_per_page = 5\n"
+        "invariant_filters = [ { param = \"product_code\", column = \"product_code\" } ]\n"
+        "order_by = [\"seq\"]\n"
+        "+++\n\n"
+        "```sql\n"
+        "SELECT product_code, seq\n"
+        "FROM (VALUES\n"
+        "    ('widget', 1),\n"
+        "    (NULL, 2),\n"
+        "    ('gadget', 3)\n"
+        ") AS inventory(product_code, seq)\n"
+        "WHERE product_code IS NOT DISTINCT FROM COALESCE(NULLIF({{ product_code }}, ''), product_code)\n"
+        "ORDER BY seq\n"
+        "```\n"
+    )
+    write_sidecar_route(src, "inventory_nulls", route_text)
+    compile_routes(src, build)
+    routes = load_compiled_routes(build)
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+    config.server.storage_root.mkdir()
+    app = create_app(routes, config)
+    client = TestClient(app)
+
+    real_connect = duckdb.connect
+    calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def counting_connect(*args, **kwargs):
+        calls.append((args, kwargs))
+        return real_connect(*args, **kwargs)
+
+    monkeypatch.setattr(duckdb, "connect", counting_connect)
+
+    superset = client.get("/inventory_nulls", params={"format": "json"})
+    assert superset.status_code == 200
+    assert len(calls) == 1
+
+    payload = superset.json()
+    assert [row["product_code"] for row in payload["rows"]] == ["widget", None, "gadget"]
+
+    no_filter = client.get(
+        "/inventory_nulls",
+        params=[("format", "json"), ("product_code", "")],
+    )
+    assert no_filter.status_code == 200
+    assert no_filter.json()["rows"] == payload["rows"]
+
+    explicit_null = client.get(
+        "/inventory_nulls",
+        params=[("format", "json"), ("product_code", "__null__")],
+    )
+    assert explicit_null.status_code == 200
+    assert len(calls) == 2
+    explicit_rows = explicit_null.json()["rows"]
+    assert explicit_rows == [{"product_code": None, "seq": 2}]
+
+    repeated_null = client.get(
+        "/inventory_nulls",
+        params=[("format", "json"), ("product_code", "__null__")],
+    )
+    assert repeated_null.status_code == 200
+    assert len(calls) == 2
+    assert repeated_null.json()["rows"] == explicit_rows
+
+
+@pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
 def test_invariant_combines_filtered_caches(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     src = tmp_path / "src"
     src.mkdir()
@@ -678,6 +759,22 @@ def test_invariant_unique_values_respect_filter_context(tmp_path: Path) -> None:
     assert "Electrical Systems" in department_block
     assert "Payroll" not in department_block
     assert "Assembly Line 1" not in department_block
+
+
+def test_normalize_invariant_value_interprets_null_tokens() -> None:
+    setting = cache_mod.InvariantFilterSetting(param="code", column="code")
+
+    assert cache_mod.normalize_invariant_value("", setting) == []
+    assert cache_mod.normalize_invariant_value("__null__", setting) == [None]
+    assert cache_mod.normalize_invariant_value("__NULL__", setting) == [None]
+    assert cache_mod.normalize_invariant_value(["", "widget"], setting) == ["widget"]
+
+    multi_setting = cache_mod.InvariantFilterSetting(param="code", column="code", separator=",")
+    assert cache_mod.normalize_invariant_value("widget, __null__ , gadget", multi_setting) == [
+        "widget",
+        None,
+        "gadget",
+    ]
 
 
 @pytest.mark.skipif(TestClient is None, reason="fastapi is not available")

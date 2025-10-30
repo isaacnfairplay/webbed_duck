@@ -632,6 +632,10 @@ def _collect_invariant_requests(
     return collected
 
 
+def _string_represents_null(value: str) -> bool:
+    return value.strip().lower() == "__null__"
+
+
 def normalize_invariant_value(
     value: object,
     setting: InvariantFilterSetting,
@@ -639,13 +643,21 @@ def normalize_invariant_value(
     if value is None:
         return []
     if isinstance(value, str):
+        if value == "":
+            return []
+        if _string_represents_null(value):
+            return [None]
         if setting.separator:
-            parts = [
-                part.strip()
-                for part in value.split(setting.separator)
-                if part.strip()
-            ]
-            return [part for part in parts if part != ""]
+            normalized: list[object] = []
+            for part in value.split(setting.separator):
+                trimmed = part.strip()
+                if not trimmed:
+                    continue
+                if _string_represents_null(trimmed):
+                    normalized.append(None)
+                else:
+                    normalized.append(trimmed)
+            return normalized
         return [value]
     if isinstance(value, (bytes, bytearray)):
         return [value]

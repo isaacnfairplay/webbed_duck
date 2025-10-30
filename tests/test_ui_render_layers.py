@@ -526,7 +526,7 @@ def test_token_conversion_helpers() -> None:
     assert token_to_option_value("str:Finance", entry) == "Finance"
     assert token_to_option_label("str:Finance", entry) == "Finance"
     null_entry = {"sample": None}
-    assert token_to_option_value("__null__", null_entry) == ""
+    assert token_to_option_value("__null__", null_entry) == "__null__"
     assert token_to_option_label("__null__", null_entry) == "(null)"
 
 
