@@ -9,10 +9,27 @@ from webbed_duck.config import load_config
 from webbed_duck.core.compiler import compile_routes
 from webbed_duck.core.routes import (
     ParameterSpec,
+    ParameterType,
     RouteDefinition,
     load_compiled_routes,
 )
 from webbed_duck.server.execution import RouteExecutionError, RouteExecutor
+
+
+def test_parameter_spec_boolean_accepts_whitespace() -> None:
+    spec = ParameterSpec(name="flag", type=ParameterType.BOOLEAN)
+
+    assert spec.convert(" true ") is True
+    assert spec.convert("\tFALSE\n") is False
+    assert spec.convert(" 1 ") is True
+    assert spec.convert(" 0 ") is False
+
+
+def test_parameter_spec_boolean_rejects_unknown_literal() -> None:
+    spec = ParameterSpec(name="flag", type=ParameterType.BOOLEAN)
+
+    with pytest.raises(ValueError):
+        spec.convert("definitely")
 
 
 def _write_pair(base: Path, stem: str, toml: str, sql: str) -> None:
