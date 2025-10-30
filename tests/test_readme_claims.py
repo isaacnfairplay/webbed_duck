@@ -1708,6 +1708,16 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         )),
         (lambda s: s.startswith("MVP 0.4 is the first release"), lambda s: None),
         (lambda s: s.startswith("- **Preprocessors:**"), lambda s: None),
+        (
+            lambda s: s.startswith("- **Email adapters:**"),
+            lambda s: (
+                lambda ctx: _ensure(
+                    "module:callable" in str(ctx.value)
+                    and "module.attr" in str(ctx.value),
+                    s,
+                )
+            )(pytest.raises(ValueError, load_email_sender, "email_sender")),
+        ),
         (lambda s: s.startswith("- **Postprocessors and presentation:**"), lambda s: _ensure(
             "card" in ctx.cards_text.lower(), s
         )),

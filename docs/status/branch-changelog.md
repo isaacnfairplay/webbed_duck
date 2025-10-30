@@ -1,5 +1,15 @@
 # Branch-level Changelog
 
+## Email adapter path validation (work branch)
+
+- Harden `webbed_duck.server.email.load_email_sender` so adapter strings without
+  `module:callable` or `module.attr` separators raise a descriptive `ValueError`
+  instead of leaking Python unpack errors during startup.
+- Extend `tests/test_email_adapter.py` with regression coverage for malformed
+  adapter paths to keep the guard enforced during future refactors.
+- Document the valid adapter formats in the README so operators know the exact
+  syntax expected by `config.email.adapter`.
+
 ## Cache invariant large-string handling (work branch)
 
 - Guard case-insensitive invariant filters against Arrow `large_string` columns

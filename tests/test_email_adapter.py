@@ -55,3 +55,11 @@ def test_load_email_sender_rejects_non_callable(monkeypatch):
 def test_load_email_sender_allows_missing_path():
     assert load_email_sender(None) is None
     assert load_email_sender("") is None
+
+
+def test_load_email_sender_rejects_missing_separator():
+    with pytest.raises(ValueError) as excinfo:
+        load_email_sender("email_sender")
+    message = str(excinfo.value)
+    assert "module:callable" in message
+    assert "module.attr" in message

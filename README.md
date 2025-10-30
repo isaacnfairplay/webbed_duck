@@ -522,6 +522,7 @@ MVP 0.4 is the first release we expect to hand to an ops lead with no extra scaf
 ## Extending webbed_duck
 
 - **Preprocessors:** Register callables (e.g., `myapp.preprocess.resolve_shift_window`) and reference them in TOML metadata to derive or validate parameters before the SQL runs.
+- **Email adapters:** Point `config.email.adapter` at a callable using either `module:callable` or dotted `module.attr` form (for example `examples.emailer:send_email`). Other shapes will now raise a descriptive `ValueError` so misconfigured deployments fail fast with guidance.
 - **Postprocessors and presentation:** Use `[html_t]`, `[html_c]`, `[feed]`, and `[[charts]]` to pass configuration into the built-in renderers. Custom renderers can be registered via the plugin registries in `webbed_duck.plugins.*`.
 - **Assets and overlays:** `[assets]` metadata controls how related images are resolved; use `base_path = "media"` (or similar) to prefix relative card thumbnails before they flow through the configured `image_getter`. `[overrides]` enables per-cell overrides with audit trails managed by the overlay store.
 - **Local execution:** `webbed_duck.core.local.LocalRouteRunner` reuses the cache and overlay stores to execute compiled routes in-process. Call `runner.run("route_id", params={...}, format="arrow")` for repeated jobs, or keep using the convenience `run_route` wrapper for one-off invocations.
