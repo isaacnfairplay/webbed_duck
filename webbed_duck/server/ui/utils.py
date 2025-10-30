@@ -15,7 +15,7 @@ def table_to_records(table: pa.Table) -> list[dict[str, object]]:
 
 
 def json_friendly(value: object) -> object:
-    if isinstance(value, (dt.date, dt.datetime)):
+    if isinstance(value, (dt.date, dt.datetime, dt.time)):
         return value.isoformat()
     return value
 
