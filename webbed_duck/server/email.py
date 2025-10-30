@@ -15,9 +15,16 @@ def load_email_sender(path: str | None) -> EmailSender | None:
 
     if not path:
         return None
-    module_name, _, attr = path.partition(":")
-    if not attr:
+    module_name: str
+    attr: str
+    if ":" in path:
+        module_name, attr = path.split(":", 1)
+    elif "." in path:
         module_name, attr = path.rsplit(".", 1)
+    else:
+        raise ValueError("Email adapter path must include module:callable or module.attr syntax")
+    if not module_name or not attr:
+        raise ValueError("Email adapter path must include module:callable or module.attr syntax")
     module = importlib.import_module(module_name)
     sender = getattr(module, attr)
     if not callable(sender):
