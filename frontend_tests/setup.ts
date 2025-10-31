@@ -46,8 +46,39 @@ beforeEach(() => {
       removeEventListener: vi.fn(),
     })),
   });
+
+  const observers: Array<{
+    observe: ReturnType<typeof vi.fn>;
+    unobserve: ReturnType<typeof vi.fn>;
+    disconnect: ReturnType<typeof vi.fn>;
+    takeRecords: ReturnType<typeof vi.fn>;
+    trigger: (entry: IntersectionObserverEntry) => void;
+  }> = [];
+
+  Object.defineProperty(window, 'IntersectionObserver', {
+    configurable: true,
+    writable: true,
+    value: vi.fn().mockImplementation(
+      (callback: IntersectionObserverCallback): IntersectionObserver => {
+        const instance = {
+          observe: vi.fn(),
+          unobserve: vi.fn(),
+          disconnect: vi.fn(),
+          takeRecords: vi.fn().mockReturnValue([]),
+          trigger(entry: IntersectionObserverEntry) {
+            callback([entry], instance as unknown as IntersectionObserver);
+          },
+        };
+        observers.push(instance);
+        return instance as unknown as IntersectionObserver;
+      },
+    ),
+  });
+
+  (window as typeof window & { __wdIntersectionObservers?: typeof observers }).__wdIntersectionObservers = observers;
 });
 
 afterEach(() => {
+  delete (window as typeof window & { __wdIntersectionObservers?: unknown }).__wdIntersectionObservers;
   vi.restoreAllMocks();
 });

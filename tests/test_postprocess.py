@@ -59,6 +59,7 @@ def test_render_table_html_renders_controls_and_rpc() -> None:
     assert "/assets/wd/table.css" in html
     assert "/assets/wd/header.js" in html
     assert "/assets/wd/multi_select.js" in html
+    assert "/assets/wd/table_header.js" in html
     assert "data-wd-widget='params'" in html
     assert "<label for='param-name'>Name</label>" in html
     assert "placeholder='Friend'" in html
@@ -69,6 +70,9 @@ def test_render_table_html_renders_controls_and_rpc() -> None:
     assert "Download this slice (Arrow)" in html
     assert "<script type='application/json' id='wd-rpc-config'>" in html
     assert "Mallard" in html
+    assert "<div class='wd-table-mini' data-wd-table-mini hidden>" in html
+    assert "<span class='wd-table-mini-label'>greeting</span>" in html
+    assert "<span class='wd-table-mini-label'>count</span>" in html
 
 
 def test_render_table_html_uses_invariant_unique_values() -> None:

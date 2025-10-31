@@ -6,7 +6,7 @@ This guide maps the legacy HTML helpers to the refactored layered rendering syst
 
 | Legacy helper | New module | Notes |
 | ------------- | ---------- | ----- |
-| `webbed_duck.server.postprocess.render_table_html` | `webbed_duck.server.ui.views.table.render_table` | Emits the scroll container, sticky header `<th>`, and table body. Layout-level wrappers now live in `layout.render_layout`. |
+| `webbed_duck.server.postprocess.render_table_html` | `webbed_duck.server.ui.views.table.render_table` | Emits the scroll container, `<thead>`/body markup, and the `[data-wd-table]` wrapper with a mini header placeholder for column labels. Layout-level wrappers now live in `layout.render_layout`. |
 | `webbed_duck.server.postprocess.render_cards_html_with_assets` | `webbed_duck.server.ui.views.cards.render_cards` | Produces the card grid DOM; assets are requested through the `[ui]` metadata contract. |
 | `webbed_duck.server.postprocess.render_feed_html` | `webbed_duck.server.ui.views.feed.render_feed` | Renders grouped feed entries and defers sticky-header controls to the layout. |
 | `webbed_duck.server.postprocess.render_chartjs_html` | `webbed_duck.server.ui.views.charts.render_chart_grid` + `layout.render_layout` | Chart canvases render via `<canvas data-wd-chart="…">` markup, while `layout.render_layout` adds scripts/styles based on route metadata. |
@@ -14,6 +14,8 @@ This guide maps the legacy HTML helpers to the refactored layered rendering syst
 | `_render_multi_select_control` | `webbed_duck.server.ui.widgets.multi_select.render_multi_select` | Owns the multi-select markup and hidden `<select multiple>` element. |
 | `_TOP_BAR_SCRIPT` sticky header snippet | `webbed_duck/static/assets/wd/header.js` | Sticky-header behavior now boots from a shared front-end plugin referenced by the `[ui.scripts]` list. |
 | `_PARAMS_STYLES`, `_BASE_LAYOUT_STYLES` inline CSS | `webbed_duck/static/assets/wd/*.css` | Styles are split across `layout.css`, `params.css`, `multi_select.css`, `table.css`, `cards.css`, `feed.css`, and `charts.css`. |
+
+The mini header placeholder keeps the `<thead>` semantics intact for screen readers while offering a compact, high-contrast summary once the scrollable region hides the original headings. Removing the sticky `<th>` styling avoids duplicate announcement issues in assistive tech while still anchoring context for sighted users.
 
 ## Asset contract
 
@@ -47,7 +49,7 @@ The migration keeps the SSR-first contract:
 
 ## Testing updates
 
-- Unit tests now target the renderer modules directly (see `tests/test_postprocess.py`), verifying structure such as sticky table headers, chart config blocks, and hidden pagination inputs.
+- Unit tests now target the renderer modules directly (see `tests/test_postprocess.py`), verifying structure such as the mini header placeholder, chart config blocks, and hidden pagination inputs.
 - JavaScript plugins expose `init*` helpers that can be tested with DOM-like stubs to assert attribute toggles, summary text updates, and Chart.js bootstrapping without a browser.
 - README guidance outlines recommended Playwright/Cypress/Galen coverage for sticky headers, multi-select interactions, responsive cards, and chart rendering.
 
