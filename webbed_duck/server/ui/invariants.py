@@ -1,10 +1,12 @@
 """Invariant filter helpers for parameter widgets."""
 from __future__ import annotations
 
+import decimal
 from typing import Mapping, Sequence
 
 from ..cache import (
     InvariantFilterSetting,
+    canonicalize_invariant_value,
     normalize_invariant_value,
     parse_invariant_filters,
 )
@@ -78,12 +80,123 @@ def _tokens_for_values(
             lookup_value = _normalize_option_lookup(str(value), setting)
         if not lookup_value:
             continue
-        token = reverse_lookup.get(lookup_value)
+        token = _map_selection_to_index_token(
+            value,
+            lookup_value,
+            param_entry,
+            reverse_lookup,
+            setting,
+        )
+        if token is None:
+            fallback = canonicalize_invariant_value(value, setting)
+            if isinstance(param_entry.get(fallback), Mapping):
+                token = fallback
         if token is None:
             unknown = True
             continue
         matched.add(token)
     return matched, unknown
+
+
+def _map_selection_to_index_token(
+    value: object,
+    lookup_value: str,
+    param_entry: Mapping[str, Mapping[str, object]],
+    reverse_lookup: Mapping[str, str],
+    setting: InvariantFilterSetting,
+) -> str | None:
+    if not lookup_value:
+        return None
+
+    if lookup_value == "__null__":
+        entry = param_entry.get("__null__")
+        if isinstance(entry, Mapping):
+            return "__null__"
+        return None
+
+    if isinstance(value, str):
+        trimmed = value.strip()
+        if trimmed:
+            entry = param_entry.get(trimmed)
+            if isinstance(entry, Mapping):
+                return trimmed
+    elif value is None:
+        entry = param_entry.get("__null__")
+        if isinstance(entry, Mapping):
+            return "__null__"
+
+    boolean_token = _maybe_boolean_token(value, param_entry, setting)
+    if boolean_token is not None:
+        return boolean_token
+
+    numeric_token = _maybe_numeric_token(value, param_entry, setting)
+    if numeric_token is not None:
+        return numeric_token
+
+    token = reverse_lookup.get(lookup_value)
+    if token is not None:
+        return token
+
+    entry = param_entry.get(lookup_value)
+    if isinstance(entry, Mapping):
+        return lookup_value
+
+    return None
+
+
+def _maybe_boolean_token(
+    value: object,
+    param_entry: Mapping[str, Mapping[str, object]],
+    setting: InvariantFilterSetting,
+) -> str | None:
+    bool_value: bool | None
+    if isinstance(value, bool):
+        bool_value = value
+    elif isinstance(value, str):
+        lowered = value.strip().lower()
+        if lowered == "true":
+            bool_value = True
+        elif lowered == "false":
+            bool_value = False
+        else:
+            bool_value = None
+    else:
+        bool_value = None
+
+    if bool_value is None:
+        return None
+
+    token = canonicalize_invariant_value(bool_value, setting)
+    if isinstance(param_entry.get(token), Mapping):
+        return token
+    return None
+
+
+def _maybe_numeric_token(
+    value: object,
+    param_entry: Mapping[str, Mapping[str, object]],
+    setting: InvariantFilterSetting,
+) -> str | None:
+    text: str | None
+    if isinstance(value, (int, float, decimal.Decimal)):
+        text = str(value)
+    elif isinstance(value, str):
+        text = value.strip()
+    else:
+        text = str(value) if value is not None else None
+
+    if not text:
+        return None
+
+    try:
+        numeric_value = decimal.Decimal(text)
+    except decimal.InvalidOperation:
+        return None
+
+    token = canonicalize_invariant_value(numeric_value, setting)
+    if isinstance(param_entry.get(token), Mapping):
+        return token
+    return None
 
 
 def pages_for_other_invariants(
