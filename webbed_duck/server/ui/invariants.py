@@ -5,7 +5,6 @@ from typing import Mapping, Sequence
 
 from ..cache import (
     InvariantFilterSetting,
-    canonicalize_invariant_value,
     normalize_invariant_value,
     parse_invariant_filters,
 )
@@ -46,6 +45,47 @@ def coerce_invariant_index(
     return None
 
 
+def _normalize_option_lookup(value: str, setting: InvariantFilterSetting) -> str:
+    trimmed = value.strip()
+    if not trimmed:
+        return ""
+    return trimmed.lower() if setting.case_insensitive else trimmed
+
+
+def _tokens_for_values(
+    values: Sequence[object],
+    param_entry: Mapping[str, Mapping[str, object]],
+    setting: InvariantFilterSetting,
+) -> tuple[set[str], bool]:
+    reverse_lookup: dict[str, str] = {}
+    for token, entry in param_entry.items():
+        if not isinstance(entry, Mapping):
+            continue
+        option_value = token_to_option_value(token, entry)
+        normalized_option = _normalize_option_lookup(option_value, setting)
+        if not normalized_option:
+            continue
+        reverse_lookup.setdefault(normalized_option, token)
+
+    matched: set[str] = set()
+    unknown = False
+    for value in values:
+        if value is None:
+            lookup_value = _normalize_option_lookup("__null__", setting)
+        elif isinstance(value, str):
+            lookup_value = _normalize_option_lookup(value, setting)
+        else:
+            lookup_value = _normalize_option_lookup(str(value), setting)
+        if not lookup_value:
+            continue
+        token = reverse_lookup.get(lookup_value)
+        if token is None:
+            unknown = True
+            continue
+        matched.add(token)
+    return matched, unknown
+
+
 def pages_for_other_invariants(
     target_param: str,
     invariant_settings: Mapping[str, InvariantFilterSetting],
@@ -67,20 +107,17 @@ def pages_for_other_invariants(
         if not normalized:
             continue
         filters_applied = True
-        tokens = {
-            canonicalize_invariant_value(value, setting)
-            for value in normalized
-        }
-        if not tokens:
-            continue
         param_entry = index.get(param)
         if not isinstance(param_entry, Mapping):
             continue
+        tokens, unknown = _tokens_for_values(normalized, param_entry, setting)
+        if not tokens and not unknown:
+            continue
         token_pages: set[int] = set()
-        unknown = False
         for token in tokens:
             entry = param_entry.get(token)
             if not isinstance(entry, Mapping):
+                unknown = True
                 continue
             entry_pages = coerce_page_set(entry.get("pages"))
             if entry_pages is None:
