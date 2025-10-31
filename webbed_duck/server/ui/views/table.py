@@ -7,6 +7,9 @@ from typing import Mapping, Sequence
 
 def render_table(headers: Sequence[str], records: Sequence[Mapping[str, object]]) -> str:
     header_html = "".join(f"<th>{html.escape(col)}</th>" for col in headers)
+    mini_labels = "".join(
+        f"<span class='wd-table-mini-label'>{html.escape(col)}</span>" for col in headers
+    )
     rows: list[str] = []
     for row in records:
         cells = [
@@ -16,7 +19,10 @@ def render_table(headers: Sequence[str], records: Sequence[Mapping[str, object]]
         rows.append("<tr>" + "".join(cells) + "</tr>")
     rows_html = "".join(rows)
     return (
-        "<div class='wd-surface wd-surface--flush wd-table'>"
+        "<div class='wd-surface wd-surface--flush wd-table' data-wd-table>"
+        "<div class='wd-table-mini' data-wd-table-mini hidden>"
+        + mini_labels
+        + "</div>"
         "<div class='wd-table-scroller'>"
         "<table>"
         "<thead><tr>"

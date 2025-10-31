@@ -169,7 +169,7 @@ The HTML layer now follows a strict separation between server-rendered structure
 Static assets live in `webbed_duck/static/assets/wd/` and mirror those widgets:
 
 - `layout.css`, `params.css`, `multi_select.css`, `table.css`, `cards.css`, `feed.css`, and `charts.css` style the layout, filters, and data surfaces.
-- `header.js`, `params_form.js`, `multi_select.js`, and `chart_boot.js` attach behavior to `[data-wd-*]` attributes without altering the server-rendered markup. For example, `header.js` manages sticky-header offsets, `multi_select.js` enhances `<select multiple>` controls, and `chart_boot.js` reads `<canvas data-wd-chart>` elements and their JSON config blocks.
+- `header.js`, `params_form.js`, `multi_select.js`, and `chart_boot.js` attach behavior to `[data-wd-*]` attributes without altering the server-rendered markup. For example, `header.js` manages sticky-header offsets, `multi_select.js` enhances `<select multiple>` controls, and `chart_boot.js` reads `<canvas data-wd-chart>` elements and their JSON config blocks. `table_header.js` keeps the mini header in sync with the real `<thead>` when it scrolls out of view.
 
 Compiled routes declare the assets they require via a `[ui]` section. The metadata supports `widgets`, `styles`, and `scripts` arrays, which the server merges with renderer defaults and resolves through `resolve_assets`:
 
@@ -186,9 +186,9 @@ Progressive enhancement remains optional: all pages function when JavaScript is 
 
 ### UI testing strategy
 
-- Python unit tests exercise the renderers directly (see `tests/test_postprocess.py`), asserting structure such as sticky table headers, hidden pagination inputs, `<script type="application/json">` chart configs, and asset resolution.
-- Front-end plugins are written as modules that expose small `init*` helpers so they can be tested with DOM stubs. Keep those unit tests close to the asset sources to guard regressions in multi-select syncing, sticky-header offsets, and chart bootstrapping.
-- End-to-end and visual verification should be automated with a browser automation framework such as [Playwright](https://playwright.dev/?utm_source=chatgpt.com) or [Cypress](https://testsigma.com/tools/open-source-testing-tools/?utm_source=chatgpt.com). Include scenarios for sticky header behavior on scroll, multi-select open/close/filter flows, card grid responsiveness, and chart canvas bootstrapping. Pair those runs with a visual regression tool like [Galen Framework](https://en.wikipedia.org/wiki/Galen_Framework?utm_source=chatgpt.com) to catch layout drift across browsers and screen sizes.
+- Python unit tests exercise the renderers directly (see `tests/test_postprocess.py`), asserting structure such as the table mini header placeholder, hidden pagination inputs, `<script type="application/json">` chart configs, and asset resolution.
+- Front-end plugins are written as modules that expose small `init*` helpers so they can be tested with DOM stubs. Keep those unit tests close to the asset sources to guard regressions in multi-select syncing, header offsets, mini-header visibility, and chart bootstrapping.
+- End-to-end and visual verification should be automated with a browser automation framework such as [Playwright](https://playwright.dev/?utm_source=chatgpt.com) or [Cypress](https://testsigma.com/tools/open-source-testing-tools/?utm_source=chatgpt.com). Include scenarios for header collapse/expand behavior, the table mini header on scroll, multi-select open/close/filter flows, card grid responsiveness, and chart canvas bootstrapping. Pair those runs with a visual regression tool like [Galen Framework](https://en.wikipedia.org/wiki/Galen_Framework?utm_source=chatgpt.com) to catch layout drift across browsers and screen sizes.
 - Front-end unit tests live in `frontend_tests/` and run with `npm test`. They exercise the theme toggle, multi-select widget, Chart.js boot loader, and CSS tokens described in [`docs/frontend_testing.md`](docs/frontend_testing.md).
 - Run both suites together (`pytest && npm test`) before shipping UI changes so Python renderers, generated HTML, JavaScript, and CSS stay aligned.
 

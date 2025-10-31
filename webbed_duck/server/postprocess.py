@@ -69,7 +69,7 @@ def render_table_html(
         route_metadata,
         default_widgets=["header", "params", "multi_select"],
         default_styles=["layout", "table", "params", "multi_select"],
-        default_scripts=["header", "multi_select", "params"],
+        default_scripts=["header", "multi_select", "params", "table_header"],
     )
 
     return render_layout(

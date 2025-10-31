@@ -21,12 +21,13 @@ _SCRIPT_PATHS: Mapping[str, str] = {
     "header": "header.js",
     "multi_select": "multi_select.js",
     "params": "params_form.js",
+    "table_header": "table_header.js",
     "chart_boot": "chart_boot.js",
 }
 
 _WIDGET_ORDER: tuple[str, ...] = ("header", "params", "multi_select")
 _STYLE_ORDER: tuple[str, ...] = ("layout", "params", "multi_select", "table", "cards", "feed", "charts")
-_SCRIPT_ORDER: tuple[str, ...] = ("header", "params", "multi_select", "chart_boot")
+_SCRIPT_ORDER: tuple[str, ...] = ("header", "params", "multi_select", "table_header", "chart_boot")
 
 
 @dataclass(frozen=True)
