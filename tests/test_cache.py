@@ -590,6 +590,60 @@ def test_invariant_filters_apply_to_html_views(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
+def test_invariant_filters_coerce_numeric_strings(tmp_path: Path) -> None:
+    src = tmp_path / "src"
+    src.mkdir()
+    build = tmp_path / "build"
+    route_text = (
+        "+++\n"
+        "id = \"numeric_invariant\"\n"
+        "path = \"/numeric_invariant\"\n"
+        "title = \"Numeric invariant filters\"\n"
+        "[params.OperationCode]\n"
+        "type = \"str\"\n"
+        "required = false\n"
+        "ui_label = \"Operation\"\n"
+        "[cache]\n"
+        "rows_per_page = 50\n"
+        "order_by = [\"RouteCode\", \"OperationCode\"]\n"
+        "invariant_filters = [ { param = \"OperationCode\", column = \"OperationCode\" } ]\n"
+        "+++\n\n"
+        "```sql\n"
+        "SELECT * FROM (VALUES\n"
+        "    ('A', 0),\n"
+        "    ('A', 10),\n"
+        "    ('B', 20)\n"
+        ") AS t(RouteCode, OperationCode)\n"
+        "ORDER BY RouteCode, OperationCode\n"
+        "```\n"
+    )
+    write_sidecar_route(src, "numeric_invariant", route_text)
+    compile_routes(src, build)
+    routes = load_compiled_routes(build)
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+    config.server.storage_root.mkdir()
+    app = create_app(routes, config)
+    client = TestClient(app)
+
+    ten_response = client.get(
+        "/numeric_invariant",
+        params={"format": "json", "OperationCode": "10"},
+    )
+    assert ten_response.status_code == 200
+    ten_payload = ten_response.json()
+    assert [row["OperationCode"] for row in ten_payload["rows"]] == [10]
+
+    zero_response = client.get(
+        "/numeric_invariant",
+        params={"format": "json", "OperationCode": "0"},
+    )
+    assert zero_response.status_code == 200
+    zero_payload = zero_response.json()
+    assert [row["OperationCode"] for row in zero_payload["rows"]] == [0]
+
+
+@pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
 def test_invariant_select_defaults_to_unique_values(tmp_path: Path) -> None:
     src = tmp_path / "src"
     src.mkdir()

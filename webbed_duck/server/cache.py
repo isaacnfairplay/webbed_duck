@@ -382,22 +382,36 @@ class CacheStore:
             )
 
         filters_to_apply: dict[str, Sequence[object]] = {}
+        schema = _schema_from_meta(meta)
+        column_types = {field.name: field.type for field in schema}
         for setting in invariant_filters:
             values = requested_invariants.get(setting.param)
             if not values:
                 continue
+            column_type = column_types.get(setting.column)
+            normalized_for_tokens: list[object]
+            if column_type is not None:
+                normalized_for_tokens = []
+                for value in values:
+                    converted = _coerce_invariant_value_for_column(value, column_type)
+                    if converted is _INVALID_INVARIANT_VALUE:
+                        normalized_for_tokens.append(value)
+                    else:
+                        normalized_for_tokens.append(converted)
+            else:
+                normalized_for_tokens = list(values)
             requested_tokens = {
                 canonicalize_invariant_value(value, setting)
-                for value in values
+                for value in normalized_for_tokens
             }
             meta_tokens = meta_values.get(setting.param)
             if meta_tokens is None:
-                filters_to_apply[setting.param] = values
+                filters_to_apply[setting.param] = tuple(normalized_for_tokens)
                 continue
             if not requested_tokens.issubset(meta_tokens):
                 return None
             if requested_tokens != meta_tokens:
-                filters_to_apply[setting.param] = values
+                filters_to_apply[setting.param] = tuple(normalized_for_tokens)
 
         if not filters_to_apply:
             table, total_rows, applied_offset, applied_limit = self._read_slice(entry_path, meta, offset, limit)
@@ -739,6 +753,98 @@ def _normalize_casefold_text(value: str, *, case_insensitive: bool) -> str:
     return value.lower() if case_insensitive else value
 
 
+_INVALID_INVARIANT_VALUE = object()
+
+
+def _coerce_invariant_value_for_column(
+    value: object, column_type: pa.DataType
+) -> object:
+    """Attempt to coerce ``value`` to the Arrow column's logical type."""
+
+    try:
+        if pa.types.is_integer(column_type):
+            return _coerce_integer_like(value)
+        if pa.types.is_floating(column_type):
+            return _coerce_float_like(value)
+        if pa.types.is_decimal(column_type):
+            return _coerce_decimal_like(value)
+    except (TypeError, ValueError, decimal.InvalidOperation):
+        return _INVALID_INVARIANT_VALUE
+    return value
+
+
+def _coerce_integer_like(value: object) -> int:
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int):
+        return value
+    if isinstance(value, decimal.Decimal):
+        if not value.is_finite() or value != value.to_integral_value():
+            raise ValueError("decimal value is not an integer")
+        return int(value)
+    if isinstance(value, float):
+        if not math.isfinite(value) or not value.is_integer():
+            raise ValueError("float value is not an integer")
+        return int(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            raise ValueError("empty string")
+        return int(text, 10)
+    return int(value)  # type: ignore[arg-type]
+
+
+def _coerce_float_like(value: object) -> float:
+    if isinstance(value, bool):
+        return 1.0 if value else 0.0
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("non-finite float")
+        return value
+    if isinstance(value, decimal.Decimal):
+        if not value.is_finite():
+            raise ValueError("non-finite decimal")
+        return float(value)
+    if isinstance(value, int):
+        return float(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            raise ValueError("empty string")
+        result = float(text)
+        if not math.isfinite(result):
+            raise ValueError("non-finite float")
+        return result
+    result = float(value)  # type: ignore[arg-type]
+    if not math.isfinite(result):
+        raise ValueError("non-finite float")
+    return result
+
+
+def _coerce_decimal_like(value: object) -> decimal.Decimal:
+    if isinstance(value, decimal.Decimal):
+        decimal_value = value
+    elif isinstance(value, bool):
+        decimal_value = decimal.Decimal(int(value))
+    elif isinstance(value, (int, float)):
+        if isinstance(value, float):
+            if not math.isfinite(value):
+                raise ValueError("non-finite float")
+            decimal_value = decimal.Decimal(str(value))
+        else:
+            decimal_value = decimal.Decimal(value)
+    elif isinstance(value, str):
+        text = value.strip()
+        if not text:
+            raise ValueError("empty string")
+        decimal_value = decimal.Decimal(text)
+    else:
+        decimal_value = decimal.Decimal(value)  # type: ignore[arg-type]
+    if not decimal_value.is_finite():
+        raise ValueError("non-finite decimal")
+    return decimal_value
+
+
 def _prepare_invariant_filter_values(
     values: Sequence[object],
     column: pa.ChunkedArray,
@@ -753,6 +859,14 @@ def _prepare_invariant_filter_values(
     include_null = any(value is None for value in values)
     non_null = [value for value in values if value is not None]
     column_type = column.type
+
+    coerced: list[object] = []
+    for item in non_null:
+        converted = _coerce_invariant_value_for_column(item, column_type)
+        if converted is _INVALID_INVARIANT_VALUE:
+            continue
+        coerced.append(converted)
+
     use_casefold = setting.case_insensitive and (
         pa.types.is_string(column_type)
         or pa.types.is_large_string(column_type)
@@ -760,10 +874,10 @@ def _prepare_invariant_filter_values(
     if use_casefold:
         normalised = [
             _normalize_casefold_text(str(item), case_insensitive=True)
-            for item in non_null
+            for item in coerced
         ]
     else:
-        normalised = non_null
+        normalised = coerced
     return normalised, include_null, use_casefold
 
 
