@@ -694,6 +694,78 @@ def test_invariant_select_defaults_to_unique_values(tmp_path: Path) -> None:
 
 
 @pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
+def test_invariant_html_form_filters_after_numeric_selection(tmp_path: Path) -> None:
+    src = tmp_path / "src"
+    src.mkdir()
+    build = tmp_path / "build"
+    route_text = (
+        "+++\n"
+        "id = \"invariant_year_division\"\n"
+        "path = \"/invariant_year_division\"\n"
+        "title = \"Year and division selector\"\n"
+        "[params.year]\n"
+        "type = \"str\"\n"
+        "default = \"\"\n"
+        "ui_label = \"Year\"\n"
+        "ui_control = \"select\"\n"
+        "[params.division]\n"
+        "type = \"str\"\n"
+        "default = \"\"\n"
+        "ui_label = \"Division\"\n"
+        "ui_control = \"select\"\n"
+        "[cache]\n"
+        "rows_per_page = 10\n"
+        "order_by = [\"Year\", \"Division\"]\n"
+        "invariant_filters = [\n"
+        "    { param = \"year\", column = \"Year\" },\n"
+        "    { param = \"division\", column = \"Division\" },\n"
+        "]\n"
+        "[html_t]\n"
+        "show_params = [\"year\", \"division\"]\n"
+        "+++\n\n"
+        "```sql\n"
+        "SELECT * FROM (VALUES\n"
+        "    (2023, 'Engineering', 'ENG-01'),\n"
+        "    (2023, 'Finance', 'FIN-02'),\n"
+        "    (2024, 'Engineering', 'ENG-10'),\n"
+        "    (2024, 'Operations', 'OPS-11')\n"
+        ") AS t(Year, Division, Code)\n"
+        "WHERE ({{ year }} = '' OR Year = CAST({{ year }} AS INTEGER))\n"
+        "  AND ({{ division }} = '' OR Division = {{ division }})\n"
+        "ORDER BY Year, Division\n"
+        "```\n"
+    )
+    write_sidecar_route(src, "invariant_year_division", route_text)
+    compile_routes(src, build)
+    routes = load_compiled_routes(build)
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+    config.server.storage_root.mkdir()
+    app = create_app(routes, config)
+    client = TestClient(app)
+
+    json_response = client.get(
+        "/invariant_year_division",
+        params={"format": "json", "year": "2024"},
+    )
+    assert json_response.status_code == 200
+    payload = json_response.json()
+    assert [row["Year"] for row in payload["rows"]] == [2024, 2024]
+    assert [row["Division"] for row in payload["rows"]] == ["Engineering", "Operations"]
+
+    html_response = client.get(
+        "/invariant_year_division",
+        params={"format": "html_t", "year": "2024"},
+    )
+    assert html_response.status_code == 200
+    text = html_response.text
+    assert "<option value='2024' selected>2024</option>" in text
+    assert "<option value='Engineering'>Engineering</option>" in text
+    assert "<option value='Operations'>Operations</option>" in text
+    assert "<option value='Finance'>Finance</option>" not in text
+
+
+@pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
 def test_html_filters_render_for_invariants_without_params(tmp_path: Path) -> None:
     src = tmp_path / "src"
     src.mkdir()
