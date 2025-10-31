@@ -78,6 +78,16 @@
 - Documented the workflow repair in `CHANGELOG.md` to highlight why the release
   automation resumed working after the merge that introduced the job.
 
+## Local runner pagination knobs (work branch)
+
+- Extend `LocalRouteRunner.run` and `run_route` with `offset`/`limit` keyword
+  arguments so scripts can iterate through cached slices without recreating HTTP
+  clients.
+- Add pagination-focused regression tests in `tests/test_local_runner.py` to
+  prove offsets are respected and negative values are sanitized to zero.
+- Refresh the README and changelog entries to highlight the new pagination
+  controls for local executions.
+
 ## Watch iteration helper and feature flag parsing (work branch)
 
 - Extracted a reusable `_watch_iteration` helper for the CLI file watcher and

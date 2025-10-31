@@ -40,13 +40,22 @@ class LocalRouteRunner:
         params: Mapping[str, object] | None = None,
         *,
         format: str = "arrow",
+        offset: int | None = None,
+        limit: int | None = None,
     ) -> object:
-        """Execute ``route_id`` and return the requested format."""
+        """Execute ``route_id`` and return the requested format.
+
+        ``offset`` and ``limit`` mirror the HTTP pagination semantics, ensuring
+        callers can reuse the helper for paged batch jobs without reimplementing
+        slicing logic.
+        """
 
         params = params or {}
         route = self._routes.get(route_id)
         if route is None:
             raise RouteNotFoundError(route_id)
+        sanitized_offset = max(0, int(offset or 0))
+        sanitized_limit = None if limit is None else max(0, int(limit))
         executor = RouteExecutor(
             self._routes,
             cache_store=self._cache_store,
@@ -57,8 +66,8 @@ class LocalRouteRunner:
             cache_result = executor.execute_relation(
                 route,
                 params,
-                offset=0,
-                limit=None,
+                offset=sanitized_offset,
+                limit=sanitized_limit,
             )
         except RouteExecutionError as exc:
             raise ValueError(str(exc)) from exc
@@ -86,11 +95,13 @@ def run_route(
     build_dir: str | Path = "routes_build",
     config: Config | None = None,
     format: str = "arrow",
+    offset: int | None = None,
+    limit: int | None = None,
 ) -> object:
     """Execute ``route_id`` directly without HTTP transport."""
 
     runner = LocalRouteRunner(routes=routes, build_dir=build_dir, config=config)
-    return runner.run(route_id, params=params, format=format)
+    return runner.run(route_id, params=params, format=format, offset=offset, limit=limit)
 
 
 __all__ = ["LocalRouteRunner", "run_route", "RouteNotFoundError"]
