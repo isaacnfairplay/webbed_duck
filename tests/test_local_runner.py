@@ -48,6 +48,22 @@ SELECT 1 AS id, 'baseline' AS note
 """
 
 
+ROUTE_WITH_PAGINATION = """+++
+id = "paginated"
+path = "/paginated"
+
+[cache]
+order_by = ["id"]
++++
+
+```sql
+SELECT *
+FROM (VALUES (1), (2), (3), (4)) AS t(id)
+ORDER BY id
+```
+"""
+
+
 def _build_runner(tmp_path: Path, *, route_text: str = ROUTE_TEXT, stem: str = "hello") -> LocalRouteRunner:
     src_dir = tmp_path / "src"
     build_dir = tmp_path / "build"
@@ -147,4 +163,20 @@ def test_local_route_runner_refreshes_overrides(tmp_path: Path) -> None:
 
     refreshed = runner.run("overridable", format="records")
     assert refreshed == [{"id": 1, "note": "patched"}]
+
+
+def test_local_route_runner_applies_offset_and_limit(tmp_path: Path) -> None:
+    runner = _build_runner(tmp_path, route_text=ROUTE_WITH_PAGINATION, stem="paginated")
+
+    result = runner.run("paginated", format="records", offset=1, limit=2)
+
+    assert result == [{"id": 2}, {"id": 3}]
+
+
+def test_local_route_runner_sanitizes_negative_pagination(tmp_path: Path) -> None:
+    runner = _build_runner(tmp_path, route_text=ROUTE_WITH_PAGINATION, stem="paginated")
+
+    result = runner.run("paginated", format="records", offset=-4, limit=-1)
+
+    assert result == []
 

@@ -6,6 +6,10 @@
   shared CSS tokens for better contrast in both modes, and made the multi-select
   drawer resizable with viewport-aware sizing so long option lists stay
   navigable.
+- Exposed `offset`/`limit` pagination controls on
+  `webbed_duck.core.local.LocalRouteRunner.run` (and the `run_route` wrapper) so
+  batch jobs can request the same slices as HTTP clients, covered by local
+  runner regression tests and README guidance.
 - Introduced a Vitest-powered front-end test suite (`npm test`) that exercises
   the header, multi-select widget, Chart.js boot loader, and CSS invariants, plus
   documented the workflow in `docs/frontend_testing.md` and README testing
