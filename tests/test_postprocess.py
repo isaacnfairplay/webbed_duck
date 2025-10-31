@@ -364,6 +364,58 @@ def test_render_table_html_invariant_options_keep_multiple_selected_values() -> 
     assert "<option value='Engineering' selected>Engineering</option>" in html
 
 
+def test_render_table_html_numeric_invariant_filters_other_options() -> None:
+    config = load_config(None)
+    table = pa.table({"region": ["EMEA", "APAC"], "year": [2023, 2024]})
+    params = [
+        ParameterSpec(
+            name="year",
+            type=ParameterType.INTEGER,
+            extra={
+                "ui_control": "select",
+                "options": "...unique_values...",
+            },
+        ),
+        ParameterSpec(
+            name="region",
+            type=ParameterType.STRING,
+            extra={
+                "ui_control": "select",
+                "options": "...unique_values...",
+            },
+        ),
+    ]
+    cache_meta = {
+        "invariant_index": {
+            "year": {
+                "num:2023": {"pages": [0], "rows": 5, "sample": "2023"},
+                "num:2024": {"pages": [1], "rows": 4, "sample": "2024"},
+            },
+            "region": {
+                "str:EMEA": {"pages": [0], "rows": 5, "sample": "EMEA"},
+                "str:APAC": {"pages": [1], "rows": 4, "sample": "APAC"},
+            },
+        }
+    }
+
+    html = render_table_html(
+        table,
+        {"html_t": {"show_params": ["year", "region"]}},
+        config,
+        charts=[],
+        params=params,
+        param_values={"year": 2023, "region": ""},
+        format_hint="html_t",
+        cache_meta=cache_meta,
+    )
+
+    assert "<select id='param-year' name='year' class='wd-multi-select-input' multiple" in html
+    assert "<option value='2023' selected>2023</option>" in html
+    assert "<option value='2024'" in html
+    assert "data-search='emea emea'" in html
+    assert "data-search='apac apac'" not in html
+
+
 def test_render_cards_html_includes_assets_and_select_options() -> None:
     config = load_config(None)
     config.ui.show_http_warning = True
