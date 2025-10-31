@@ -111,7 +111,9 @@ def pages_for_other_invariants(
         if not isinstance(param_entry, Mapping):
             continue
         tokens, unknown = _tokens_for_values(normalized, param_entry, setting)
-        if not tokens and not unknown:
+        if not tokens:
+            if unknown:
+                return set(), True
             continue
         token_pages: set[int] = set()
         for token in tokens:
@@ -124,10 +126,8 @@ def pages_for_other_invariants(
                 unknown = True
                 continue
             token_pages.update(entry_pages)
-        if not token_pages and not unknown:
+        if not token_pages:
             return set(), True
-        if not token_pages and unknown:
-            continue
         if pages is None:
             pages = token_pages
         else:
