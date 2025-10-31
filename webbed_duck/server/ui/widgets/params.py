@@ -21,6 +21,16 @@ from .multi_select import render_multi_select
 _UNIQUE_VALUES_SENTINEL = "...unique_values..."
 
 
+def _default_ui_label(name: str) -> str:
+    # Preserve the long-standing behavior of turning snake_case into
+    # space-separated words so default labels still resemble the column
+    # headers that inspired them.
+    spaced = name.replace("_", " ")
+    if any(char.isupper() for char in name):
+        return spaced
+    return spaced.title()
+
+
 def render_params_form(
     view_meta: Mapping[str, object] | None,
     params: Sequence[ParameterSpec] | None,
@@ -100,7 +110,7 @@ def render_params_form(
         control = str(spec.extra.get("ui_control", "")).lower()
         if control not in {"input", "select"}:
             continue
-        label = str(spec.extra.get("ui_label") or spec.name.replace("_", " ").title())
+        label = str(spec.extra.get("ui_label") or _default_ui_label(spec.name))
         value = values.get(spec.name, spec.default)
         selected_values = _normalize_selected_values(value)
         value_str = _stringify_param_value(value)
@@ -199,7 +209,7 @@ def _parameter_from_invariant(setting: InvariantFilterSetting) -> ParameterSpec:
     if "options" not in extra:
         extra["options"] = _UNIQUE_VALUES_SENTINEL
     if "ui_label" not in extra:
-        extra["ui_label"] = setting.param.replace("_", " ").title()
+        extra["ui_label"] = _default_ui_label(setting.param)
     if "ui_allow_blank" not in extra:
         extra["ui_allow_blank"] = True
     description = str(description_raw) if description_raw is not None else None
