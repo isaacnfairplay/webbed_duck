@@ -181,7 +181,9 @@ def render_params_form(
     if not fields:
         return ""
 
-    form_html = ["<div class='params-bar'><form method='get' class='params-form' data-wd-widget='params'>"]
+    form_html = [
+        "<div class='params-bar'><form method='get' action='?' class='params-form' data-wd-widget='params'>"
+    ]
     form_html.extend(hidden_inputs)
     form_html.extend(fields)
     form_html.append(
