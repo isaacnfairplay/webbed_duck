@@ -142,8 +142,8 @@
   when both the requested getter and the `static_fallback` entry are missing.
 - Extend `tests/test_plugins.py` to cover empty registries and the new
   `LookupError` signalling.
-- Document the requirement to re-register a fallback getter in
-  `docs/demos/plugin_registry.md`, keeping downstream plugin tests aligned.
+- Document the requirement to re-register a fallback getter in the README's
+  plugin registry guidance so downstream plugin tests stay aligned.
 
 ## Pseudo auth HTTP coverage (work branch)
 
@@ -233,8 +233,8 @@
 - Add coverage showing dynamic invariant options merge cleanly with additional
   static choices so TOML `options = ["...unique_values...", { value = "Other" }]`
   yields the expected select menu.
-- Document the sentinel workflow in the README and `docs/demos/invariant_select_options.md`
-  so route authors can adopt dynamic select lists without digging through tests.
+- Document the sentinel workflow in the README so route authors can adopt
+  dynamic select lists without digging through tests.
 
 ## Local reference parser consolidation (work branch)
 
