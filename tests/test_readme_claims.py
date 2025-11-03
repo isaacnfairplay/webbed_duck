@@ -5,6 +5,7 @@ import contextlib
 import hashlib
 import io
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -19,7 +20,7 @@ import duckdb
 
 from tests.conftest import write_sidecar_route
 from webbed_duck import cli as cli_module
-from webbed_duck.config import Config, load_config
+from webbed_duck.config import Config, _as_path, load_config
 from webbed_duck.core.compiler import compile_route_file, compile_routes
 from webbed_duck.core.incremental import run_incremental
 from webbed_duck.core.routes import ParameterSpec, RouteDefinition, load_compiled_routes
@@ -345,6 +346,29 @@ def _extract_statements(readme: str) -> list[str]:
             continue
         statements.append(stripped)
     return statements
+
+
+def _validate_path_resolution_statement() -> None:
+    """Assert the README path resolution narrative remains accurate."""
+
+    base = Path.cwd()
+    resolved = _as_path("relative/data", relative_to=base)
+    assert resolved == (base / "relative/data").resolve(strict=False)
+
+    import webbed_duck.config as config_module
+
+    original = config_module._is_wsl
+    try:
+        config_module._is_wsl = lambda: False
+        if os.name != "nt":
+            with pytest.raises(ValueError):
+                _as_path("E:/analytics")
+
+        config_module._is_wsl = lambda: True
+        rewritten = _as_path("E:/analytics")
+        assert str(rewritten).startswith("/mnt/e/analytics")
+    finally:
+        config_module._is_wsl = original
 
 
 @pytest.fixture(scope="module")
@@ -1774,6 +1798,7 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         (lambda s: s.startswith("- Declarative caching / snapshot controls"), lambda s: None),
         (lambda s: s.startswith("- Richer auto-generated parameter forms"), lambda s: None),
         (lambda s: s.startswith("- Additional auth adapter examples"), lambda s: None),
+        (lambda s: s.startswith("- **Path resolution:**"), lambda s: _validate_path_resolution_statement()),
         (lambda s: s.startswith("All runtime paths derive"), lambda s: _ensure(
             ctx.storage_root_layout["runtime"], s
         )),
