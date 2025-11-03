@@ -1,6 +1,6 @@
 # Testing Conventions
 
-This guide establishes the shared expectations for writing and organising tests in `webbed_duck`. Adhering to these conventions keeps the suite predictable, fast, and self-documenting.
+This guide establishes the shared expectations for writing and organising tests in `webbed_duck`. Adhering to these conventions keeps the suite predictable, fast, and self-documenting. See the [branch changelog entry on upcoming compiler/executor/HTTP/UI/demo test initiatives](../status/branch-changelog.md#upcoming-compilerexecutorhttpuidemo-test-initiatives-planning) for the roadmap that reviewers can use to track the forthcoming suite expansions.
 
 ## Docstrings & Narratives
 

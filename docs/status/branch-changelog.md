@@ -1,5 +1,23 @@
 # Branch-level Changelog
 
+## Upcoming compiler/executor/HTTP/UI/demo test initiatives (planning)
+
+- Stage the compiler regression harness to cover route parsing edge cases before
+  the executor and HTTP layers attach, keeping parser drift visible during the
+  refactor cycle.
+- Expand executor coverage with fixture-driven DuckDB runs that mirror compiled
+  demo routes, then flow the same datasets through FastAPI to validate HTTP
+  payloads and error semantics before UI renderers pick them up.
+- Rebuild the demo gallery tests around Playwright smoke runs so the UI widgets
+  and compiled routes stay in sync with the documented analyst workflows.
+- Draft follow-up work items for each suite as they merge so gaps in coverage or
+  unexpected regressions surface in a single queue instead of scattered notes.
+- **Pass rate snapshot:** _TBD – populate after compiler/executor suites land._
+- **Failure analytics:** _TBD – fill in with HTTP/UI/demo failure counts once
+  their pipelines are active._
+- **Follow-up actions:** _TBD – record remediation tasks alongside the suites
+  that introduce them._
+
 ## Decimal invariant cache canonicalization (work branch)
 
 - Normalize cache invariant tokens for `decimal.Decimal` inputs so cache
