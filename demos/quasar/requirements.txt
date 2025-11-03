@@ -1,0 +1,3 @@
+# Optional visualization dependencies for the Quasar demos
+plotly>=5.0
+altair>=5.0
