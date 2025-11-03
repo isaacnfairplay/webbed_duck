@@ -1,6 +1,6 @@
 # Testing Conventions
 
-This guide establishes the shared expectations for writing and organising tests in `webbed_duck`. Adhering to these conventions keeps the suite predictable, fast, and self-documenting.
+This guide establishes the shared expectations for writing and organising tests in `webbed_duck`. Adhering to these conventions keeps the suite predictable, fast, and self-documenting. See the [branch changelog entry on upcoming compiler/executor/HTTP/UI/demo test initiatives](../status/branch-changelog.md#upcoming-compilerexecutorhttpuidemo-test-initiatives-planning) for the roadmap that reviewers can use to track the forthcoming suite expansions.
 
 ## Docstrings & Narratives
 
@@ -25,3 +25,9 @@ This guide establishes the shared expectations for writing and organising tests 
 - Document the **expected side effects** (files written, routes generated) in assertion messages so failures highlight the intent.
 
 Following these patterns keeps developer velocity high while ensuring the suite continues to offer actionable diagnostics for regressions.
+
+## Coverage updates — March 2025
+
+- Added `tests/compiler/` modules that stress the directive payload collectors, parameter merging, preprocess normalisation, cache metadata helpers, and SQL placeholder rewrites. Property-based cases (skipped automatically when Hypothesis is unavailable) now exercise edge combinations of directive payloads and cache declarations that previously required manual reproduction.
+- Introduced `tests/execution/` with lightweight `RouteExecutor` fixtures covering relation execution, invariant-aware caching, parquet dependency registration, and recovery paths after dependency failures. The suite also wires the optional `pytest-benchmark` fixture to ensure we can benchmark cached executions without additional harness glue.
+- Known limitation kept for triage: routes that enable invariant filters remain incompatible with `parquet_path` dependencies. The new failure-mode regression test documents the behaviour until a safe orchestration strategy is designed.
