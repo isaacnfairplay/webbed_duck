@@ -4,14 +4,58 @@
   "type": "module",
   "scripts": {
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "lint": "eslint frontend_tests --ext .js,.jsx,.ts,.tsx --max-warnings=0",
+    "lint:fix": "npm run lint -- --fix"
   },
   "devDependencies": {
     "@testing-library/dom": "^9.3.1",
     "@testing-library/jest-dom": "^6.4.2",
     "@testing-library/user-event": "^14.5.1",
+    "@playwright/test": "^1.44.0",
+    "eslint": "^8.57.0",
+    "eslint-config-prettier": "^9.1.0",
+    "eslint-plugin-vitest": "^0.4.1",
     "jsdom": "^24.0.0",
     "postcss": "^8.4.38",
     "vitest": "^1.4.0"
+  },
+  "eslintConfig": {
+    "env": {
+      "browser": true,
+      "es2022": true
+    },
+    "extends": [
+      "eslint:recommended",
+      "plugin:vitest/recommended",
+      "prettier"
+    ],
+    "parserOptions": {
+      "ecmaVersion": 2022,
+      "sourceType": "module"
+    },
+    "ignorePatterns": [
+      "dist/",
+      "coverage/",
+      "routes_build/"
+    ],
+    "rules": {
+      "eqeqeq": [
+        "error",
+        "smart"
+      ],
+      "no-console": [
+        "warn",
+        {
+          "allow": [
+            "error",
+            "warn"
+          ]
+        }
+      ]
+    }
   }
 }
