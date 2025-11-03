@@ -394,7 +394,7 @@ def test_render_params_form_renders_inputs_and_hidden_fields(sample_table: pa.Ta
         current_table=sample_table,
     )
 
-    assert "<form method='get' class='params-form' data-wd-widget='params'>" in html
+    assert "<form method='get' action='?' class='params-form' data-wd-widget='params'>" in html
     assert "placeholder='Friend'" in html
     assert "value='Waddles'" in html
     assert "name='format' value='html_t'" in html
