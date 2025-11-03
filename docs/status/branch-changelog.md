@@ -1,5 +1,15 @@
 # Branch-level Changelog
 
+## HTTP error taxonomy hardening (work branch)
+
+- Added FastAPI regression tests under `tests/http/` that exercise override,
+  append, share, and local negative flows, asserting status codes, categories,
+  and hints emitted from `_ERROR_TAXONOMY` remain stable.
+- Introduced reusable pytest fixtures to mint pseudo-auth sessions (including
+  expiry handling), simulate email adapter failures, and toggle analytics flags
+  with automatic cleanup, keeping HTTP suites isolated.
+- Confirmed the targeted `pytest tests/http` run passes without flakes or
+  expected failures; no follow-up stabilisation work is required.
 ## Upcoming compiler/executor/HTTP/UI/demo test initiatives (planning)
 
 - Stage the compiler regression harness to cover route parsing edge cases before
