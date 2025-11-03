@@ -19,6 +19,72 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency
     TestClient = None  # type: ignore
 
 
+def test_cache_store_respects_configured_storage_root(tmp_path: Path) -> None:
+    storage_root = tmp_path / "custom-root" / "nested"
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        f"""
+[server]
+storage_root = "{storage_root.as_posix()}"
+""".strip(),
+        encoding="utf-8",
+    )
+    config = load_config(config_path)
+
+    assert config.server.storage_root == storage_root
+
+    store = cache_mod.CacheStore(config.server.storage_root)
+
+    expected_cache_dir = storage_root / "cache"
+    assert store._root == expected_cache_dir
+    assert expected_cache_dir.is_dir()
+
+
+@pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
+def test_cache_files_materialize_under_configured_storage_root(tmp_path: Path) -> None:
+    src = tmp_path / "src"
+    src.mkdir()
+    build = tmp_path / "build"
+    storage_root = tmp_path / "custom-storage"
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        f"""
+[server]
+storage_root = "{storage_root.as_posix()}"
+""".strip(),
+        encoding="utf-8",
+    )
+    route_text = (
+        "+++\n"
+        "id = \"config-cache\"\n"
+        "path = \"/config-cache\"\n"
+        "title = \"Config cache\"\n"
+        "[cache]\n"
+        "order_by = [\"bird\"]\n"
+        "rows_per_page = 1\n"
+        "+++\n\n"
+        "```sql\nSELECT 'duck' AS bird\n```\n"
+    )
+    write_sidecar_route(src, "config-cache", route_text)
+    compile_routes(src, build)
+    routes = load_compiled_routes(build)
+    config = load_config(config_path)
+    app = create_app(routes, config)
+    client = TestClient(app)
+
+    response = client.get("/config-cache")
+    assert response.status_code == 200
+
+    cache_root = storage_root / "cache"
+    route_cache_dir = cache_root / "config-cache"
+    assert route_cache_dir.is_dir()
+    parquet_pages = list(route_cache_dir.rglob("page-*.parquet"))
+    assert parquet_pages
+
+    cwd_cache_dir = Path.cwd() / "storage" / "cache" / "config-cache"
+    assert not cwd_cache_dir.exists()
+
+
 @pytest.mark.skipif(TestClient is None, reason="fastapi is not available")
 def test_cache_hit_skips_duckdb(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     src = tmp_path / "src"
