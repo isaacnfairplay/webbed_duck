@@ -153,3 +153,47 @@ enforce_global_page_size = true
     assert config.cache.page_rows == 150
     assert config.cache.enforce_global_page_size is True
 
+
+def test_load_config_allows_storage_root_alias(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path,
+        """
+[storage]
+root = "E:/web_storage"
+""".strip(),
+    )
+
+    config = load_config(path)
+
+    assert config.server.storage_root == Path("E:/web_storage")
+
+
+def test_load_config_rejects_conflicting_storage_alias(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path,
+        """
+[storage]
+root = "E:/web_storage"
+
+[server]
+storage_root = "F:/other"
+""".strip(),
+    )
+
+    with pytest.raises(ValueError, match="conflicts"):
+        load_config(path)
+
+
+def test_load_config_rejects_unknown_storage_keys(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path,
+        """
+[storage]
+root = "E:/web_storage"
+extra = true
+""".strip(),
+    )
+
+    with pytest.raises(ValueError, match="unknown keys"):
+        load_config(path)
+

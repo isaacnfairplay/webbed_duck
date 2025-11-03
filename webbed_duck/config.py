@@ -143,9 +143,31 @@ def load_config(path: str | Path | None = None) -> Config:
         return cfg
 
     data = _load_toml(Path(path))
+    storage_data = data.get("storage")
+    storage_root_override: Path | None = None
+    if isinstance(storage_data, Mapping):
+        unknown_storage_keys = set(storage_data) - {"root"}
+        if unknown_storage_keys:
+            unknown = ", ".join(sorted(unknown_storage_keys))
+            raise ValueError(f"storage.* contains unknown keys: {unknown}")
+        if "root" in storage_data:
+            storage_root_override = _as_path(storage_data["root"])
+
     server_data = data.get("server")
+    server_declared_storage_root = False
     if isinstance(server_data, Mapping):
+        server_declared_storage_root = "storage_root" in server_data
         cfg.server = _parse_server(server_data, base=cfg.server)
+
+    if storage_root_override is not None:
+        if (
+            server_declared_storage_root
+            and Path(cfg.server.storage_root) != storage_root_override
+        ):
+            raise ValueError(
+                "storage.root conflicts with server.storage_root; choose one"
+            )
+        cfg.server.storage_root = storage_root_override
     ui_data = data.get("ui")
     if isinstance(ui_data, Mapping):
         cfg.ui = _parse_ui(ui_data, base=cfg.ui)
