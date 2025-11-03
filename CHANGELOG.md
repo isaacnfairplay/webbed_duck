@@ -6,6 +6,13 @@
   shared CSS tokens for better contrast in both modes, and made the multi-select
   drawer resizable with viewport-aware sizing so long option lists stay
   navigable.
+- Added targeted regression suites under `tests/compiler/` (directive payload
+  parsing, parameter merging, preprocess and cache normalisation, SQL placeholder
+  rewriting) and `tests/execution/` (RouteExecutor cache invariants, parquet
+  dependencies, benchmark fixture wiring, and failure recovery). Documented the
+  retained limitation where invariant filters still block `parquet_path`
+  dependencies so downstream hardening work can reference the new regression
+  harness.
 - Exposed `offset`/`limit` pagination controls on
   `webbed_duck.core.local.LocalRouteRunner.run` (and the `run_route` wrapper) so
   batch jobs can request the same slices as HTTP clients, covered by local
