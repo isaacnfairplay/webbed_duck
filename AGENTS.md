@@ -44,6 +44,7 @@
 ### Maintainer Log — 2025-03-10
 
 * Re-centered the Arjan/Ports doctrine with explicit port tables, added refactor cues, and reverted unintended test/runtime edits from the prior sweep.
+* Temporary demo planning: a root-level `to-do/` folder now tracks upcoming walkthrough tasks. Each Markdown file there maps to a placeholder directory under `demos/` (see the `TO_DO.md` in each demo folder) and will guide future contributors as we build the showcase guides.
 
 ### Maintainer Log — 2025-03-07
 
