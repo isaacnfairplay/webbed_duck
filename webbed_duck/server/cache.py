@@ -90,7 +90,12 @@ class CacheStore:
     """Persist and reuse paged query results."""
 
     def __init__(self, storage_root: Path) -> None:
-        self._root = Path(storage_root) / "cache"
+        root = Path(storage_root).expanduser()
+        try:
+            root = root.resolve(strict=False)
+        except RuntimeError:  # pragma: no cover - defensive on exotic path objects
+            root = Path(root)
+        self._root = root / "cache"
         self._root.mkdir(parents=True, exist_ok=True)
 
     def compute_key(

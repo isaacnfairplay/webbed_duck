@@ -443,6 +443,7 @@ This trio mirrors the canonical on-disk structure: metadata in TOML, SQL in its 
 - **Default behaviour:** `webbed-duck serve` compiles the configured source directory before launching so you always run with fresh artifacts.
 - **Configurable toggles:** Set `server.auto_compile = false` or pass `--no-auto-compile` to serve an existing `routes_build/` snapshot without touching the source tree. Enable `server.watch = true` (or `--watch`) to keep a background watcher running for instant reloads.
 - **Configuration surface:** `config.toml` still controls storage (`server.storage_root`), analytics weights, auth mode, email adapter, and share behaviour alongside the new `source_dir` / `build_dir` settings. Projects migrating from older configs can also declare `[storage] root = "/mnt/web_duck"`; the loader treats it as an alias for `server.storage_root` and will raise if both are set to conflicting values.
+- **Path resolution:** When running on Linux the loader resolves relative paths against the configuration file's directory and, when executed inside WSL, rewrites Windows-style drive paths such as `E:/analytics` to `/mnt/e/analytics`. On native Windows deployments the same drive-letter paths are honoured directly so caches land on the configured volume. Supplying a Windows-style path on a non-WSL POSIX host raises a validation error so misconfigured storage roots do not silently fall back to the working directory.
 
 ## Formats and responses
 

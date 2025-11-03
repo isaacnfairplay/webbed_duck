@@ -1,6 +1,9 @@
 """Configuration loading for webbed_duck."""
 from __future__ import annotations
 
+import contextlib
+import os
+import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Mapping, MutableMapping, Sequence
@@ -9,6 +12,10 @@ try:
     import tomllib  # Python 3.11+
 except ModuleNotFoundError:  # pragma: no cover - fallback for older interpreters
     import tomli as tomllib  # type: ignore
+
+
+_WINDOWS_ABSOLUTE_PATH = re.compile(r"^(?P<drive>[A-Za-z]):[\\/](?P<rest>.*)$")
+_WSL_MOUNT_ROOT: Path = Path("/mnt")
 
 
 @dataclass(slots=True)
@@ -107,10 +114,47 @@ class Config:
     feature_flags: FeatureFlagsConfig = field(default_factory=FeatureFlagsConfig)
 
 
-def _as_path(value: Any) -> Path:
-    if isinstance(value, Path):
-        return value
-    return Path(str(value))
+def _is_wsl() -> bool:
+    """Return ``True`` when running under Windows Subsystem for Linux."""
+
+    if os.name != "posix":
+        return False
+    if os.environ.get("WSL_DISTRO_NAME"):
+        return True
+    with contextlib.suppress(OSError):
+        release = Path("/proc/sys/kernel/osrelease").read_text().lower()
+        if "microsoft" in release or "wsl" in release:
+            return True
+    return False
+
+
+def _as_path(value: Any, *, relative_to: Path | None = None) -> Path:
+    """Coerce ``value`` into a :class:`Path` with platform-aware semantics."""
+
+    text = str(value)
+    match = _WINDOWS_ABSOLUTE_PATH.match(text)
+    if match:
+        if os.name == "nt":
+            path = Path(text)
+        else:
+            if not _is_wsl():
+                raise ValueError(
+                    "Windows-style absolute paths are not supported on this platform; "
+                    "use a POSIX path such as '/mnt/c/...'."
+                )
+            drive = match.group("drive").lower()
+            remainder = match.group("rest").replace("\\", "/")
+            path = _WSL_MOUNT_ROOT / drive
+            if remainder:
+                path /= Path(remainder)
+    else:
+        path = Path(text)
+    path = path.expanduser()
+    if path.is_absolute():
+        return path
+    if relative_to is not None:
+        return (relative_to / path).resolve(strict=False)
+    return path
 
 
 def _non_negative_int(value: Any) -> int:
@@ -142,7 +186,9 @@ def load_config(path: str | Path | None = None) -> Config:
     if path is None:
         return cfg
 
-    data = _load_toml(Path(path))
+    config_path = Path(path)
+    data = _load_toml(config_path)
+    base_dir = config_path.parent.resolve()
     storage_data = data.get("storage")
     storage_root_override: Path | None = None
     if isinstance(storage_data, Mapping):
@@ -151,13 +197,17 @@ def load_config(path: str | Path | None = None) -> Config:
             unknown = ", ".join(sorted(unknown_storage_keys))
             raise ValueError(f"storage.* contains unknown keys: {unknown}")
         if "root" in storage_data:
-            storage_root_override = _as_path(storage_data["root"])
+            storage_root_override = _as_path(
+                storage_data["root"], relative_to=base_dir
+            )
 
     server_data = data.get("server")
     server_declared_storage_root = False
     if isinstance(server_data, Mapping):
         server_declared_storage_root = "storage_root" in server_data
-        cfg.server = _parse_server(server_data, base=cfg.server)
+        cfg.server = _parse_server(
+            server_data, base=cfg.server, relative_to=base_dir
+        )
 
     if storage_root_override is not None:
         if (
@@ -192,10 +242,17 @@ def load_config(path: str | Path | None = None) -> Config:
     return cfg
 
 
-def _parse_server(data: Mapping[str, Any], base: ServerConfig) -> ServerConfig:
+def _parse_server(
+    data: Mapping[str, Any],
+    base: ServerConfig,
+    *,
+    relative_to: Path | None = None,
+) -> ServerConfig:
     overrides: MutableMapping[str, Any] = {}
     if "storage_root" in data:
-        overrides["storage_root"] = _as_path(data["storage_root"])
+        overrides["storage_root"] = _as_path(
+            data["storage_root"], relative_to=relative_to
+        )
     if "host" in data:
         overrides["host"] = str(data["host"])
     if "port" in data:
@@ -205,10 +262,14 @@ def _parse_server(data: Mapping[str, Any], base: ServerConfig) -> ServerConfig:
         overrides["port"] = port
     if "source_dir" in data:
         overrides["source_dir"] = (
-            None if data["source_dir"] is None else _as_path(data["source_dir"])
+            None
+            if data["source_dir"] is None
+            else _as_path(data["source_dir"], relative_to=relative_to)
         )
     if "build_dir" in data:
-        overrides["build_dir"] = _as_path(data["build_dir"])
+        overrides["build_dir"] = _as_path(
+            data["build_dir"], relative_to=relative_to
+        )
     if "auto_compile" in data:
         overrides["auto_compile"] = bool(data["auto_compile"])
     if "watch" in data:
