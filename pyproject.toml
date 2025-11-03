@@ -20,6 +20,7 @@ dependencies = [
 [project.optional-dependencies]
 test = [
   "build>=1.2",
+  "hypothesis>=6.100",
 ]
 
 [project.scripts]
@@ -36,3 +37,20 @@ include = ["webbed_duck*"]
 [tool.setuptools.package-data]
 "webbed_duck.static.chartjs" = ["LICENSE", "chart.umd.min.js"]
 "webbed_duck.static" = ["assets/wd/*"]
+
+[tool.pytest.ini_options]
+addopts = "--strict-config --strict-markers"
+markers = [
+  "duckdb: tests that interact with DuckDB connections or files",
+  "integration: tests that span multiple subsystems or require compiled routes",
+  "docs: tests that validate documentation examples or narratives",
+]
+filterwarnings = [
+  "error::DeprecationWarning",
+]
+
+[tool.hypothesis]
+deadline = 750
+max_examples = 75
+stateful_step_count = 15
+print_blob = true
