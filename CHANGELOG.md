@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Added negative-path HTTP tests for override, append, share, and local routes that assert responses honour the shared `_ERROR_TAXONOMY`, alongside new pytest fixtures for pseudo-auth sessions, email adapter failures, and analytics toggling; no flaky or expected-fail cases were observed during the focused `tests/http` run.
+- Removed the placeholder demo notebooks and accompanying plugin helper module that did not exercise the `webbed_duck` runtime so contributors are not pointed at misleading examples.
 - Added a persistent light/dark theme toggle to the sticky header, refreshed the
   shared CSS tokens for better contrast in both modes, and made the multi-select
   drawer resizable with viewport-aware sizing so long option lists stay
@@ -138,7 +139,7 @@
 - Added extensive plugin registry tests that verify custom image getters,
   fallback behaviour, and chart renderer edge cases.
 - Documented the plugin architecture with a standalone demo script and guide
-  under `docs/demos/`.
+  (later removed during the 0.4.7 cleanup cycle).
 - Documented the optional `pyzipper` dependency for encrypted share archives
   and exposed `zip_encrypted` metadata so passphrase requests fail fast when
   encryption is unavailable.
