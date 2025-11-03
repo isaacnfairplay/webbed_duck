@@ -1,5 +1,16 @@
 # Branch-level Changelog
 
+## HTTP error taxonomy hardening (work branch)
+
+- Added FastAPI regression tests under `tests/http/` that exercise override,
+  append, share, and local negative flows, asserting status codes, categories,
+  and hints emitted from `_ERROR_TAXONOMY` remain stable.
+- Introduced reusable pytest fixtures to mint pseudo-auth sessions (including
+  expiry handling), simulate email adapter failures, and toggle analytics flags
+  with automatic cleanup, keeping HTTP suites isolated.
+- Confirmed the targeted `pytest tests/http` run passes without flakes or
+  expected failures; no follow-up stabilisation work is required.
+
 ## Decimal invariant cache canonicalization (work branch)
 
 - Normalize cache invariant tokens for `decimal.Decimal` inputs so cache

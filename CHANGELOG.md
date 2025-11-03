@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Added negative-path HTTP tests for override, append, share, and local routes that assert responses honour the shared `_ERROR_TAXONOMY`, alongside new pytest fixtures for pseudo-auth sessions, email adapter failures, and analytics toggling; no flaky or expected-fail cases were observed during the focused `tests/http` run.
 - Added a persistent light/dark theme toggle to the sticky header, refreshed the
   shared CSS tokens for better contrast in both modes, and made the multi-select
   drawer resizable with viewport-aware sizing so long option lists stay

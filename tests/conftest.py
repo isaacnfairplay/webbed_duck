@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import sys
 import textwrap
+from datetime import timedelta
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator
 
 import pytest
 
@@ -159,3 +161,129 @@ def temporary_storage(tmp_path_factory: pytest.TempPathFactory) -> Iterator[Path
 
     with storage_utils.temporary_storage(tmp_path_factory) as path:
         yield path
+
+
+class _PseudoSessionHarness:
+    """Manage pseudo-auth sessions for HTTP integration tests."""
+
+    def __init__(self, client: "TestClient") -> None:
+        from webbed_duck.server import session as session_module
+
+        self.client = client
+        self._session_store = self.client.app.state.session_store
+        self._meta_store = self.client.app.state.meta
+        self._created_tokens: list[str] = []
+        self._session_module = session_module
+        self._original_user_agent = self.client.headers.get("user-agent")
+        self.client.headers.update({"user-agent": "pytest-pseudo/1.0"})
+
+    def issue(
+        self,
+        *,
+        email: str = "user@example.com",
+        user_agent: str | None = None,
+        remember_me: bool = False,
+        expired: bool = False,
+    ) -> object:
+        if user_agent:
+            self.client.headers.update({"user-agent": user_agent})
+        payload = {"email": email}
+        if remember_me:
+            payload["remember_me"] = True
+        response = self.client.post("/auth/pseudo/session", json=payload)
+        response.raise_for_status()
+        token = self.client.cookies.get(self._session_module.SESSION_COOKIE_NAME)
+        if not token:
+            raise RuntimeError("pseudo session cookie was not set")
+        record = self._session_store.resolve(
+            token,
+            user_agent=self.client.headers.get("user-agent"),
+            ip_address="testclient",
+        )
+        if record is None:
+            raise RuntimeError("pseudo session could not be resolved")
+        self._created_tokens.append(token)
+        if expired:
+            self.expire(token)
+        return record
+
+    def expire(self, token: str) -> None:
+        serialize_datetime = self._session_module.serialize_datetime
+        utcnow = self._session_module._utcnow  # type: ignore[attr-defined]
+        hash_token = self._session_module._hash_token  # type: ignore[attr-defined]
+        expired_at = serialize_datetime(utcnow() - timedelta(minutes=1))
+        with self._meta_store.connect() as conn:
+            conn.execute(
+                "UPDATE sessions SET expires_at = ? WHERE token_hash = ?",
+                (expired_at, hash_token(token)),
+            )
+            conn.commit()
+
+    def cleanup(self) -> None:
+        for token in self._created_tokens:
+            with contextlib.suppress(Exception):
+                self._session_store.destroy(token)
+        self.client.cookies.clear()
+        if self._original_user_agent is None:
+            self.client.headers.pop("user-agent", None)
+        else:
+            self.client.headers.update({"user-agent": self._original_user_agent})
+
+
+@pytest.fixture
+def pseudo_session_factory():
+    """Return a factory that provisions pseudo-auth sessions with cleanup."""
+
+    helpers: list[_PseudoSessionHarness] = []
+
+    def factory(client: "TestClient") -> _PseudoSessionHarness:
+        helper = _PseudoSessionHarness(client)
+        helpers.append(helper)
+        return helper
+
+    yield factory
+
+    for helper in helpers:
+        helper.cleanup()
+
+
+@pytest.fixture
+def failing_email_sender():
+    """Patch the FastAPI app's email sender to raise predictable failures."""
+
+    installs: list[tuple[object, Callable[[], None]]] = []
+
+    def installer(app, exception: Exception | None = None) -> Callable[[], None]:
+        previous = getattr(app.state, "email_sender", None)
+
+        def restore() -> None:
+            app.state.email_sender = previous
+
+        def failing_sender(*_args, **_kwargs):  # pragma: no cover - helper stub
+            raise exception or RuntimeError("email adapter failure")
+
+        app.state.email_sender = failing_sender
+        installs.append((app, restore))
+        return restore
+
+    yield installer
+
+    for _app, restore in reversed(installs):
+        restore()
+
+
+@pytest.fixture
+def analytics_toggle():
+    """Temporarily adjust the app's analytics-enabled flag with cleanup."""
+
+    toggles: list[tuple[object, bool]] = []
+
+    def toggle(app, *, enabled: bool) -> None:
+        previous = bool(getattr(app.state.analytics, "_enabled", True))
+        app.state.analytics._enabled = bool(enabled)
+        toggles.append((app, previous))
+
+    yield toggle
+
+    for app, previous in reversed(toggles):
+        app.state.analytics._enabled = previous
