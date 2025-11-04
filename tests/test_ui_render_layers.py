@@ -154,6 +154,7 @@ def test_render_layout_includes_assets_and_top_sections() -> None:
     assert f"/assets/wd/layout.css?v={__version__}" in html
     assert f"<link rel='modulepreload' href='/assets/wd/multi_select.js?v={__version__}'" in html
     assert f"<script type='module' src='/assets/wd/header.js?v={__version__}'></script>" in html
+    assert "data-wd-progress" in html
     assert "data-wd-widgets='header params'" in html
     assert "data-wd-chart-src='https://charts.example/cdn.js'" in html
     assert "data-wd-wd-test='value'" not in html

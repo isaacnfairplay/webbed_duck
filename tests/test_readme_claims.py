@@ -1340,10 +1340,10 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
             ),
             s,
         )),
-        (lambda s: s.startswith("- `header.js`, `params_form.js`"), lambda s: _ensure(
+        (lambda s: s.startswith("- `progress.js`, `header.js`"), lambda s: _ensure(
             all(
                 (ctx.repo_root / f"webbed_duck/static/assets/wd/{name}.js").is_file()
-                for name in ("header", "params_form", "multi_select", "chart_boot")
+                for name in ("progress", "header", "params_form", "multi_select", "chart_boot")
             ),
             s,
         )),

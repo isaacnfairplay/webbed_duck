@@ -69,7 +69,7 @@ def render_table_html(
         route_metadata,
         default_widgets=["header", "params", "multi_select"],
         default_styles=["layout", "table", "params", "multi_select"],
-        default_scripts=["header", "multi_select", "params", "table_header"],
+        default_scripts=["progress", "header", "multi_select", "params", "table_header"],
     )
 
     return render_layout(
@@ -160,7 +160,7 @@ def render_cards_html_with_assets(
         route_metadata,
         default_widgets=["header", "params", "multi_select"],
         default_styles=["layout", "cards", "params", "multi_select"],
-        default_scripts=["header", "multi_select", "params"],
+        default_scripts=["progress", "header", "multi_select", "params"],
     )
 
     return render_layout(
@@ -210,7 +210,7 @@ def render_feed_html(
         route_metadata,
         default_widgets=["header"],
         default_styles=["layout", "feed"],
-        default_scripts=["header"],
+        default_scripts=["progress", "header"],
     )
 
     return render_layout(
