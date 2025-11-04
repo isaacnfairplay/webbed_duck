@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Auto-generated documentation index now surfaces a GitHub-linked inventory of
+  Python, SQL, and JavaScript source files so reviewers can jump straight to
+  the repository snapshot behind each document.
 - Reworked every demo TODO/placeholder so contributors must ship runnable
   generators that execute the real flows and rebuild `demo.md` artifacts from
   captured outputs, preventing hand-written walkthrough drift.
