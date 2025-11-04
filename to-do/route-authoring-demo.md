@@ -1,12 +1,23 @@
 # TODO: Route Authoring & Serving Demo
 
 - **Demo directory:** `demos/route-authoring/`
-- **Scenario focus:** Show how a TOML+SQL route compiles and is served through the CLI, including format negotiation.
-- **What the finished demo should include:**
-  1. Step-by-step commands for `webbed-duck compile` and `webbed-duck serve` against the sample sources.
-  2. Example HTTP requests (HTML, CSV, Arrow) with captured outputs or screenshots.
-  3. Notes on how the demo route maps back to source files in `routes_src/`.
-  4. Guidance for resetting build/runtime directories before and after the walkthrough.
-- **Artifacts to produce:** `demos/route-authoring/demo.md` with CLI transcripts, request snippets, and explanatory captions.
+- **Scenario focus:** Validate compile/serve flows and response formats by
+  executing the real CLI and HTTP clients.
+- **Automation requirements:**
+  1. Provide a generator script (e.g., `generate_demo.py`) that runs
+     `webbed-duck compile`, boots `webbed-duck serve`, and issues HTTP requests
+     for HTML/CSV/Arrow responses while the server is live.
+  2. Capture stdout/stderr, HTTP payloads, and any ancillary files created
+     during the run without faking the results.
+  3. Assemble `demo.md` from those captures inside the generator (overwrite on
+     each execution) so the walkthrough is guaranteed accurate.
+  4. Reset build/runtime directories before and after the run to keep the script
+     idempotent.
+- **Artifacts to produce:**
+  - `demos/route-authoring/generate_demo.*` (or similar entry point) plus helper
+    modules to manage process lifecycle.
+  - Auto-generated `demos/route-authoring/demo.md` sourced solely from captured
+    outputs.
 
-Document assumptions (e.g., ports, expected datasets) so another contributor can replay the demo verbatim.
+Never edit `demo.md` manually—rerun the generator to refresh assumptions and
+documented behaviour.

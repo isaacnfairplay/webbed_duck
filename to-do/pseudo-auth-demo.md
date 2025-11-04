@@ -1,12 +1,23 @@
 # TODO: Pseudo Auth & Sharing Demo
 
 - **Demo directory:** `demos/pseudo-auth/`
-- **Scenario focus:** Walk through the pseudo-session lifecycle and trigger a share request guarded by that session.
-- **What the finished demo should include:**
-  1. Configuration notes for enabling `auth.mode = "pseudo"` and restarting the server.
-  2. HTTP examples for creating, inspecting, and deleting a pseudo session (capturing cookies).
-  3. A share submission that reuses the issued cookie and highlights the returned metadata/artifacts.
-  4. Optional tie-in with `/local/resolve` to demonstrate how share validation mirrors internal chaining.
-- **Artifacts to produce:** `demos/pseudo-auth/demo.md` featuring configuration snippets, HTTP transcripts, and guidance on cleaning up sessions/shares.
+- **Scenario focus:** Execute the pseudo-session lifecycle and share flow for
+  real, capturing live cookies and responses.
+- **Automation requirements:**
+  1. Deliver a generator script (e.g., `generate_demo.py`) that switches the
+     config to pseudo auth, restarts/bootstraps the server as needed, and runs
+     the create/inspect/delete session calls alongside a share submission.
+  2. Record raw HTTP requests, headers, cookies, and returned metadata/artifacts
+     straight from the run (including optional `/local/resolve` validations).
+  3. Emit `demo.md` programmatically from the captured results, overwriting the
+     file each time.
+  4. Enforce teardown in the generator so sessions/shares are removed or expire
+     at the end of the script.
+- **Artifacts to produce:**
+  - `demos/pseudo-auth/generate_demo.*` (or comparable automation entry point)
+    and any helper fixtures.
+  - Auto-generated `demos/pseudo-auth/demo.md` written solely from captured
+    outputs.
 
-Emphasize security caveats (trusted networks, non-production usage) to mirror the README positioning.
+Never manually edit `demo.md`; refresh it by rerunning the generator. Retain the
+securable-network caveats within the generated output.

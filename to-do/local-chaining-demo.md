@@ -1,12 +1,23 @@
 # TODO: Local Route Chaining Demo
 
 - **Demo directory:** `demos/local-chaining/`
-- **Scenario focus:** Demonstrate calling routes from other routes via `/local/resolve` and the Python `run_route` helper.
-- **What the finished demo should include:**
-  1. Example `curl` or HTTPie interactions with `/local/resolve` that show parameter overrides and response payloads.
-  2. A Python REPL transcript using `LocalRouteRunner` or `run_route` to execute a secondary route without HTTP.
-  3. Discussion of caching/validation behavior and how errors are surfaced when references are invalid.
-  4. Suggestions for composing chained results into follow-on processing.
-- **Artifacts to produce:** `demos/local-chaining/demo.md` mixing terminal transcripts, JSON snippets, and explanatory text.
+- **Scenario focus:** Prove chaining behaviour by running the actual `/local/resolve`
+  endpoint and local runner helpers, capturing their live outputs.
+- **Automation requirements:**
+  1. Build a generator script (e.g., `generate_demo.py`) that executes both HTTP
+     and in-process chaining calls, exercising parameter overrides, cache hits,
+     and error paths.
+  2. Record the exact commands, inputs, and JSON responses emitted during the
+     run—no mocked data or static transcripts.
+  3. Emit `demo.md` directly from the generator by templating the captured data
+     (overwrite on each run) so the walkthrough reflects reality.
+  4. Ensure the generator configures any required feature flags/auth toggles and
+     tears them down afterwards.
+- **Artifacts to produce:**
+  - `demos/local-chaining/generate_demo.*` (or similar automation entry point)
+    plus helper modules.
+  - Auto-generated `demos/local-chaining/demo.md` assembled from captured
+    outputs.
 
-Call out any configuration toggles (e.g., auth requirements) that must be satisfied before the chaining examples will run.
+Manual editing of `demo.md` is forbidden—rerun the generator to refresh the
+scenario.

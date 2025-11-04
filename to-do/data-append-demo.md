@@ -1,12 +1,24 @@
 # TODO: Data Append Demo
 
 - **Demo directory:** `demos/data-append/`
-- **Scenario focus:** Capture how operators can append new rows through `/routes/{id}/append` and inspect the persisted CSV.
-- **What the finished demo should include:**
-  1. Steps to identify a route with `[append]` metadata and prepare a valid JSON payload.
-  2. Sample POST requests (happy path and validation failure) highlighting required columns.
-  3. File system inspection of the generated CSV under `runtime/appends/`, including discussion of headers and row structure.
-  4. A follow-up fetch of the base route demonstrating how appended records appear in downstream views.
-- **Artifacts to produce:** `demos/data-append/demo.md` documenting commands, payloads, and the resulting CSV excerpt.
+- **Scenario focus:** Execute the append workflow end-to-end so the resulting
+  demo is generated from real runs rather than prose.
+- **Automation requirements:**
+  1. Author a generator script within the demo directory (e.g.,
+     `generate_demo.py`) that resets the append storage, performs real
+     `/routes/{id}/append` POSTs (happy path + validation failure), and reads the
+     resulting CSV from `runtime/appends/`.
+  2. Capture every command, payload, HTTP status, and filesystem snapshot from
+     the live run; do not hard-code expected outputs.
+  3. Render the captured artefacts into `demo.md` as part of the generator
+     execution (overwrite on each run) so the file mirrors current behaviour.
+  4. Include a cleanup step in the generator that restores the append storage to
+     its pre-run state.
+- **Artifacts to produce:**
+  - `demos/data-append/generate_demo.*` (or equivalent entry point) plus
+    supporting fixtures.
+  - Auto-generated `demos/data-append/demo.md` built exclusively from captured
+    outputs.
 
-Note any cleanup procedures to remove appended rows after the demo concludes.
+Manual edits to `demo.md` are not allowed—rerun the generator whenever the code
+changes.
