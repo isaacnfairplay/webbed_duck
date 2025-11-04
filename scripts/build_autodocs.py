@@ -8,6 +8,7 @@ GitHub Pages.
 from __future__ import annotations
 
 import argparse
+import html
 import os
 import shutil
 from dataclasses import dataclass, field
@@ -86,6 +87,21 @@ nav h1 {
   text-decoration: underline;
 }
 
+.nav-tree .file a {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.nav-tree .file-name {
+  font-weight: 600;
+}
+
+.nav-tree .file-path {
+  font-size: 0.75rem;
+  color: var(--fg-muted);
+}
+
 .nav-tree .active > a {
   font-weight: 700;
 }
@@ -116,6 +132,31 @@ main article {
 
 .back-links a:hover {
   opacity: 0.9;
+}
+
+.doc-list {
+  list-style: none;
+  margin: 0.75rem 0 0.75rem 0;
+  padding-left: 1.2rem;
+}
+
+.doc-list li {
+  margin: 0.3rem 0;
+}
+
+.doc-list .folder-name {
+  font-weight: 600;
+  display: inline-block;
+  margin-bottom: 0.25rem;
+}
+
+.doc-list a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.doc-list a:hover {
+  text-decoration: underline;
 }
 
 code, pre {
@@ -242,7 +283,18 @@ def render_nav_html(node: NavNode, output_dir: Path, from_page: Path, active_pag
             if active_page is not None and rel_file == active_page:
                 classes.append("active")
             class_attr = " ".join(classes)
-            items.append(f"<li class=\"{class_attr}\"><a href=\"{href}\">{rel_file.name}</a></li>")
+            file_name = html.escape(rel_file.name)
+            file_path = html.escape(rel_file.as_posix())
+            items.append(
+                """
+<li class=\"{class_attr}\">
+  <a href=\"{href}\">
+    <span class=\"file-name\">{file_name}</span>
+    <span class=\"file-path\">{file_path}</span>
+  </a>
+</li>
+""".format(class_attr=class_attr, href=href, file_name=file_name, file_path=file_path)
+            )
         for child_name in sorted(current.children):
             child = current.children[child_name]
             summary_id = child.anchor_id
@@ -256,6 +308,37 @@ def render_nav_html(node: NavNode, output_dir: Path, from_page: Path, active_pag
         return "".join(items)
 
     return render_node(node)
+
+
+def render_directory_listing(node: NavNode, output_dir: Path, from_page: Path) -> str:
+    def render_children(current: NavNode) -> str:
+        items: List[str] = []
+        for child_name in sorted(current.children):
+            child = current.children[child_name]
+            anchor = f"#{child.anchor_id}"
+            label = html.escape(child_name)
+            nested = render_children(child)
+            items.append(
+                """
+<li class=\"folder\">
+  <span class=\"folder-name\"><a href=\"{anchor}\">{label}</a></span>
+  {nested}
+</li>
+""".format(anchor=anchor, label=label, nested=nested)
+            )
+        for rel_file in sorted(current.files, key=lambda p: p.as_posix()):
+            target = output_dir / rel_file.with_suffix(".html")
+            href = rel_href(from_page, target)
+            label = html.escape(rel_file.as_posix())
+            items.append(f"<li class=\"file\"><a href=\"{href}\">{label}</a></li>")
+        if not items:
+            return ""
+        return "<ul class=\"doc-list\">" + "".join(items) + "</ul>"
+
+    listing = render_children(node)
+    if not listing:
+        return "<p>No Markdown files were found.</p>"
+    return listing
 
 
 def convert_markdown_to_html(markdown_text: str) -> str:
@@ -345,10 +428,12 @@ def build_index_page(output_dir: Path, nav_root: NavNode, pages: List[Page]) -> 
     ensure_directory(index_path)
     nav_html = render_nav_html(nav_root, output_dir=output_dir, from_page=index_path)
     css_href = rel_href(index_path, output_dir / "assets" / "styles.css")
-    content = """
+    listing_html = render_directory_listing(nav_root, output_dir, index_path)
+    content = f"""
 <h1>Repository Documentation Index</h1>
-<p>Select any document from the navigation to view it. The navigation reflects the folder hierarchy
+<p>Select a document below to jump directly to it. The entries mirror the directory structure
 of Markdown files within the repository.</p>
+{listing_html}
 """
     back_links: List[tuple[str, str]] = []
     index_html = build_page_html(content, nav_html, css_href, "Repository Docs", back_links)
