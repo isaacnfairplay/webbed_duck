@@ -1,12 +1,22 @@
 # TODO: Parameter Forms & Progressive UI Demo
 
 - **Demo directory:** `demos/parameter-forms/`
-- **Scenario focus:** Highlight the server-rendered parameter form, progressive enhancement widgets, and non-JavaScript submission path.
-- **What the finished demo should include:**
-  1. Screenshots or HTML captures of the `/hello` form with and without JavaScript enabled.
-  2. A walkthrough of adjusting parameters and observing the refreshed results.
-  3. Callouts for metadata options like `show_params`, `invariant_filters`, and pagination fields.
-  4. Tips for inspecting the network requests to confirm graceful degradation.
-- **Artifacts to produce:** `demos/parameter-forms/demo.md` combining narrative, command snippets, and asset references.
+- **Scenario focus:** Demonstrate progressive enhancement by generating assets
+  from an executable run that toggles JavaScript and inspects metadata.
+- **Automation requirements:**
+  1. Ship a generator script (e.g., `generate_demo.py`) that starts the app,
+     captures HTML snapshots of the `/hello` form with and without JavaScript,
+     and records the responses for multiple parameter sets.
+  2. Gather network traces or CLI outputs directly from the run to prove how
+     `show_params`, `invariant_filters`, pagination, etc. behave.
+  3. Produce `demo.md` automatically from the captured assets, overwriting the
+     file every time the generator executes.
+  4. Export artefacts (screenshots, HAR files, etc.) deterministically so the
+     demo can be regenerated in CI/locally without manual intervention.
+- **Artifacts to produce:**
+  - `demos/parameter-forms/generate_demo.*` (or similar automation entry point)
+    plus capture helpers.
+  - Auto-generated `demos/parameter-forms/demo.md` assembled exclusively from
+    the recorded outputs.
 
-Make sure to mention any browser settings or developer tools required to replicate the demo faithfully.
+Never hand-edit `demo.md`; re-run the generator to refresh it.

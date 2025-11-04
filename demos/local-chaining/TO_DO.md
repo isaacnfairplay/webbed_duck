@@ -1,8 +1,15 @@
-# Local Route Chaining Demo (Placeholder)
+# Local Route Chaining Demo (Automation Placeholder)
 
-See the detailed task instructions in `../../to-do/local-chaining-demo.md`.
+See the generator requirements in `../../to-do/local-chaining-demo.md`.
 
-This directory will eventually contain:
-- `demo.md` capturing `/local/resolve` calls and Python helper usage.
-- JSON/terminal transcripts illustrating parameter overrides and caching notes.
-- Commentary on configuration prerequisites for chaining scenarios.
+Everything committed here must either drive or be emitted by an automated
+generator. Plan for:
+- A runnable entry point (for example `generate_demo.py`) that calls the real
+  chaining APIs (`/local/resolve`, `LocalRouteRunner`, etc.) and records live
+  outputs.
+- An auto-generated `demo.md` rebuilt by that entry point with the captured
+  command invocations, JSON payloads, and verification notes.
+- Supporting fixtures or scripts needed to make the generator deterministic.
+
+Avoid manually authored descriptions—run the generator again whenever the code
+changes.

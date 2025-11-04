@@ -1,12 +1,22 @@
 # TODO: Overrides & Annotations Demo
 
 - **Demo directory:** `demos/overrides/`
-- **Scenario focus:** Illustrate creating, listing, and observing per-cell overrides via `/routes/{id}/overrides`.
-- **What the finished demo should include:**
-  1. Example POST payloads that adjust a comment or note column, including author metadata.
-  2. Screenshots or responses showing the override applied in the rendered HTML view.
-  3. Retrieval of stored overrides to emphasize the audit trail (timestamp, author hash).
-  4. Discussion of key column requirements and rollback/removal options.
-- **Artifacts to produce:** `demos/overrides/demo.md` with HTTP transcripts, UI captures, and explanatory text.
+- **Scenario focus:** Exercise the overrides API and surface the results through
+  the UI using live calls, not static descriptions.
+- **Automation requirements:**
+  1. Implement a generator script (e.g., `generate_demo.py`) that seeds the
+     necessary route data, submits override mutations, fetches audit trails, and
+     captures evidence from the HTML renderer.
+  2. Capture raw HTTP requests/responses, rendered HTML fragments/screenshots,
+     and any rollback operations triggered during the run.
+  3. Compose `demo.md` directly from those captures as part of the generator
+     execution, overwriting prior content on each run.
+  4. Include teardown logic that removes created overrides to keep the demo
+     idempotent.
+- **Artifacts to produce:**
+  - `demos/overrides/generate_demo.*` (or equivalent automation entry point) and
+    supporting fixtures.
+  - Auto-generated `demos/overrides/demo.md` sourced exclusively from captured
+    outputs.
 
-Highlight any pre-demo setup (e.g., ensuring the route exposes the annotated column) so the instructions remain reproducible.
+Do not modify `demo.md` by hand—rerun the generator whenever behaviour changes.
