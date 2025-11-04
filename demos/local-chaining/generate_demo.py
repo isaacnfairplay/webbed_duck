@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import shutil
 import sys
 from contextlib import contextmanager
@@ -31,6 +32,95 @@ DEMO_PATH = DEMO_DIR / "demo.md"
 ROUTE_SOURCE = DEMO_DIR / "routes_src"
 
 
+def _sanitize_mermaid_identifier(label: str, *, used: set[str]) -> str:
+    """Return a Mermaid-safe identifier that is stable for a given label."""
+
+    base = re.sub(r"[^0-9A-Za-z_]", "_", label)
+    if not base:
+        base = "node"
+    if base[0].isdigit():
+        base = f"n_{base}"
+    candidate = base
+    counter = 1
+    while candidate in used:
+        candidate = f"{base}_{counter}"
+        counter += 1
+    used.add(candidate)
+    return candidate
+
+
+def _escape_mermaid_text(text: str) -> str:
+    """Escape text for inclusion inside Mermaid node labels."""
+
+    return text.replace("\\", "\\\\").replace("\"", "\\\"")
+
+
+def _normalize_dependency_target(target: str) -> str:
+    """Normalize dependency targets to their route identifiers."""
+
+    if not target:
+        return target
+    if target.startswith("local:"):
+        target = target.split(":", 1)[1]
+    if "?" in target:
+        target = target.split("?", 1)[0]
+    return target
+
+
+def _build_dependency_diagram(root_route: str, dependencies: list[Mapping[str, Any]]) -> str:
+    """Generate a Mermaid flowchart for the captured dependency chain."""
+
+    used_ids: set[str] = set()
+    node_ids: dict[str, str] = {}
+    nodes: set[str] = {root_route}
+
+    normalized_dependencies: list[tuple[str, str, str]] = []
+    for dep in dependencies:
+        parent = dep.get("parent") or root_route
+        target = _normalize_dependency_target(str(dep.get("target", "")))
+        alias = str(dep.get("alias", "")).strip()
+        if parent:
+            nodes.add(parent)
+        if target:
+            nodes.add(target)
+        normalized_dependencies.append((parent or root_route, alias, target))
+
+    for label in sorted(nodes):
+        node_ids[label] = _sanitize_mermaid_identifier(label, used=used_ids)
+
+    lines = ["flowchart TD"]
+    for label, identifier in sorted(node_ids.items(), key=lambda item: item[0]):
+        lines.append(f'    {identifier}["{_escape_mermaid_text(label)}"]')
+
+    for parent, alias, target in normalized_dependencies:
+        if not target:
+            continue
+        parent_id = node_ids[parent]
+        target_id = node_ids[target]
+        alias_label = alias.replace("|", "/").replace("\n", " ").replace("\\", "\\\\").replace("\"", "'")
+        if alias_label:
+            lines.append(f"    {parent_id} -->|{alias_label}| {target_id}")
+        else:
+            lines.append(f"    {parent_id} --> {target_id}")
+
+    if len(lines) == 1:
+        # No dependencies at all; render the root node for completeness.
+        identifier = node_ids[root_route]
+        lines.append(f'    {identifier}["{_escape_mermaid_text(root_route)}"]')
+
+    return "\n".join(lines)
+
+
+def _load_route_sources() -> dict[str, dict[str, str]]:
+    sources: dict[str, dict[str, str]] = {}
+    for path in ROUTE_SOURCE.glob("*.*"):
+        if path.suffix not in {".sql", ".toml"}:
+            continue
+        route_sources = sources.setdefault(path.stem, {})
+        route_sources[path.suffix.lstrip(".")] = path.read_text(encoding="utf-8")
+    return sources
+
+
 @dataclass(slots=True)
 class DemoEntry:
     """Single transcript item captured by the generator."""
@@ -41,6 +131,7 @@ class DemoEntry:
     response: dict[str, Any] | None = None
     error: str | None = None
     meta: dict[str, Any] | None = None
+    diagrams: list[tuple[str, str]] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -49,6 +140,7 @@ class DemoRecorder:
 
     entries: list[DemoEntry] = field(default_factory=list)
     toggles: dict[str, dict[str, Any]] = field(default_factory=dict)
+    route_sources: dict[str, dict[str, str]] = field(default_factory=dict)
 
     def add(self, entry: DemoEntry) -> None:
         self.entries.append(entry)
@@ -104,6 +196,13 @@ class DemoRecorder:
                 for key, value in entry.meta.items():
                     lines.append(f"- {key}: {value}")
                 lines.append("")
+            for title, diagram in entry.diagrams:
+                lines.append(f"**{title}**")
+                lines.append("")
+                lines.append("```mermaid")
+                lines.extend(diagram.splitlines())
+                lines.append("```")
+                lines.append("")
             if entry.error is not None:
                 lines.append("**Error**")
                 lines.append("")
@@ -111,6 +210,25 @@ class DemoRecorder:
                 lines.append(entry.error.strip())
                 lines.append("```")
                 lines.append("")
+        if self.route_sources:
+            lines.append("## Route Source Files")
+            lines.append("")
+            for route_id in sorted(self.route_sources):
+                files = self.route_sources[route_id]
+                lines.append(f"### {route_id}")
+                lines.append("")
+                toml_text = files.get("toml")
+                if toml_text is not None:
+                    lines.append("```toml")
+                    lines.append(toml_text.rstrip())
+                    lines.append("```")
+                    lines.append("")
+                sql_text = files.get("sql")
+                if sql_text is not None:
+                    lines.append("```sql")
+                    lines.append(sql_text.rstrip())
+                    lines.append("```")
+                    lines.append("")
         return "\n".join(lines).strip() + "\n"
 
 
@@ -198,12 +316,23 @@ def _run_with_cache_capture(runner: LocalRouteRunner, **kwargs: Any) -> tuple[An
             }
         )
     captured["call_sequence"] = call_sequence
-    captured["dependencies"] = dependencies
+    captured["dependencies"] = [
+        {
+            "parent": dep.get("parent"),
+            "alias": dep.get("alias"),
+            "target": _normalize_dependency_target(str(dep.get("target", ""))),
+        }
+        for dep in dependencies
+    ]
+    captured["dependency_diagram"] = _build_dependency_diagram(
+        str(kwargs.get("route_id", "route")), captured["dependencies"]
+    )
     return output, captured
 
 
-def _format_meta(meta: Mapping[str, Any]) -> dict[str, Any]:
+def _format_meta(meta: Mapping[str, Any]) -> tuple[dict[str, Any], list[tuple[str, str]]]:
     formatted: dict[str, Any] = {}
+    diagrams: list[tuple[str, str]] = []
     for key in ("used_cache", "cache_hit", "total_rows", "applied_offset", "applied_limit"):
         if key in meta:
             formatted[key] = meta[key]
@@ -211,11 +340,15 @@ def _format_meta(meta: Mapping[str, Any]) -> dict[str, Any]:
         formatted["call_sequence"] = json.dumps(meta["call_sequence"], indent=2)
     if meta.get("dependencies"):
         formatted["dependencies"] = json.dumps(meta["dependencies"], indent=2)
-    return formatted
+    diagram_text = meta.get("dependency_diagram")
+    if isinstance(diagram_text, str) and diagram_text.strip():
+        diagrams.append(("Dependency Diagram", diagram_text))
+    return formatted, diagrams
 
 
 def generate_demo() -> None:
     recorder = DemoRecorder()
+    recorder.route_sources = _load_route_sources()
     _reset_workspace()
     _seed_routes()
     compiled = compile_routes(SRC_DIR, BUILD_DIR)
@@ -251,12 +384,14 @@ def generate_demo() -> None:
             params={"prefix": "PN"},
             format="records",
         )
+        prefix_notes, prefix_diagrams = _format_meta(prefix_meta)
         recorder.add(
             DemoEntry(
                 title="Prefix mapping lookup",
                 command="runner.run(route_id=\"traceability_prefix_map\", params={\"prefix\": \"PN\"}, format=\"records\")",
                 response=_serialize_records(prefix_run),
-                meta=_format_meta(prefix_meta),
+                meta=prefix_notes,
+                diagrams=prefix_diagrams,
             )
         )
 
@@ -266,12 +401,14 @@ def generate_demo() -> None:
             params={"barcode": "PN-1001"},
             format="records",
         )
+        panel_notes, panel_diagrams = _format_meta(panel_meta)
         recorder.add(
             DemoEntry(
                 title="Panel events lookup",
                 command="runner.run(route_id=\"traceability_panel_events\", params={\"barcode\": \"PN-1001\"}, format=\"records\")",
                 response=_serialize_records(panel_run),
-                meta=_format_meta(panel_meta),
+                meta=panel_notes,
+                diagrams=panel_diagrams,
             )
         )
 
@@ -282,12 +419,14 @@ def generate_demo() -> None:
             params=summary_params,
             format="records",
         )
+        summary_notes, summary_diagrams = _format_meta(summary_meta)
         recorder.add(
             DemoEntry(
                 title="Traceability summary first execution",
                 command="runner.run(route_id=\"traceability_barcode_summary\", params={\"barcode\": \"PN-1001\"}, format=\"records\")",
                 response=_serialize_records(summary_run),
-                meta=_format_meta(summary_meta),
+                meta=summary_notes,
+                diagrams=summary_diagrams,
             )
         )
 
@@ -297,12 +436,14 @@ def generate_demo() -> None:
             params=summary_params,
             format="records",
         )
+        summary_cached_notes, summary_cached_diagrams = _format_meta(summary_cached_meta)
         recorder.add(
             DemoEntry(
                 title="Traceability summary cached execution",
                 command="runner.run(route_id=\"traceability_barcode_summary\", params={\"barcode\": \"PN-1001\"}, format=\"records\")",
                 response=_serialize_records(summary_cached_run),
-                meta=_format_meta(summary_cached_meta),
+                meta=summary_cached_notes,
+                diagrams=summary_cached_diagrams,
             )
         )
 
@@ -312,12 +453,14 @@ def generate_demo() -> None:
             params={"barcode": "MD-5005"},
             format="records",
         )
+        module_notes, module_diagrams = _format_meta(module_summary_meta)
         recorder.add(
             DemoEntry(
                 title="Traceability summary for module barcode",
                 command="runner.run(route_id=\"traceability_barcode_summary\", params={\"barcode\": \"MD-5005\"}, format=\"records\")",
                 response=_serialize_records(module_summary_run),
-                meta=_format_meta(module_summary_meta),
+                meta=module_notes,
+                diagrams=module_diagrams,
             )
         )
 
