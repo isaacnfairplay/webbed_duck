@@ -1,0 +1,19 @@
+id = "traceability_panel_events"
+path = "/demos/traceability/panel-events"
+title = "Panel assembly traceability"
+description = "Station history for assembled panels."
+methods = ["GET"]
+
+[params]
+[params.barcode]
+type = "str"
+required = true
+description = "Full barcode or prefix to search"
+
+[cache]
+ttl_hours = 6
+order_by = ["event_time", "barcode"]
+
+[overrides]
+key_columns = ["barcode", "event_time"]
+allowed = ["status"]

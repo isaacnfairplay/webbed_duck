@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, Mapping
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 if str(REPO_ROOT) not in sys.path:
@@ -17,11 +17,10 @@ from fastapi.testclient import TestClient
 
 from webbed_duck.config import Config, load_config
 from webbed_duck.core.compiler import compile_routes
-from webbed_duck.core.local import LocalRouteRunner, RouteNotFoundError, run_route
+from webbed_duck.core.local import LocalRouteRunner, run_route
 from webbed_duck.core.routes import load_compiled_routes
 from webbed_duck.server.app import create_app
 from webbed_duck.server.execution import RouteExecutor
-from webbed_duck.server.overlay import OverlayStore, compute_row_key_from_values
 
 DEMO_DIR = Path(__file__).resolve().parent
 WORKSPACE_DIR = DEMO_DIR / "_workspace"
@@ -29,7 +28,7 @@ SRC_DIR = WORKSPACE_DIR / "routes_src"
 BUILD_DIR = WORKSPACE_DIR / "routes_build"
 STORAGE_DIR = WORKSPACE_DIR / "storage"
 DEMO_PATH = DEMO_DIR / "demo.md"
-ROUTE_SOURCE = Path("routes_src")
+ROUTE_SOURCE = DEMO_DIR / "routes_src"
 
 
 @dataclass(slots=True)
@@ -141,7 +140,9 @@ def _reset_workspace() -> None:
 
 
 def _seed_routes() -> None:
-    for source in ROUTE_SOURCE.glob("hello.*"):
+    for source in ROUTE_SOURCE.iterdir():
+        if not source.is_file():
+            continue
         destination = SRC_DIR / source.name
         shutil.copy2(source, destination)
 
@@ -154,12 +155,16 @@ def _serialize_records(data: Any) -> dict[str, Any]:
 
 def _run_with_cache_capture(runner: LocalRouteRunner, **kwargs: Any) -> tuple[Any, dict[str, Any]]:
     captured: dict[str, Any] = {}
-    original = RouteExecutor.execute_relation
+    call_sequence: list[dict[str, Any]] = []
+    dependencies: list[dict[str, Any]] = []
+    original_run_relation = RouteExecutor._run_relation  # type: ignore[attr-defined]
+    original_register_dependency = RouteExecutor._register_dependency  # type: ignore[attr-defined]
 
-    def wrapped(self: RouteExecutor, route, params, **inner_kwargs):  # type: ignore[override]
-        result = original(self, route, params, **inner_kwargs)
-        captured.update(
+    def wrapped_run_relation(self: RouteExecutor, route, prepared, **inner_kwargs):  # type: ignore[override]
+        result = original_run_relation(self, route, prepared, **inner_kwargs)
+        call_sequence.append(
             {
+                "route_id": route.id,
                 "used_cache": result.used_cache,
                 "cache_hit": result.cache_hit,
                 "total_rows": result.total_rows,
@@ -169,12 +174,44 @@ def _run_with_cache_capture(runner: LocalRouteRunner, **kwargs: Any) -> tuple[An
         )
         return result
 
-    RouteExecutor.execute_relation = wrapped  # type: ignore[assignment]
+    def wrapped_register_dependency(self: RouteExecutor, con, route, params, use, **inner_kwargs):  # type: ignore[override]
+        dependencies.append({"parent": route.id, "alias": use.alias, "target": use.call})
+        return original_register_dependency(self, con, route, params, use, **inner_kwargs)
+
+    RouteExecutor._run_relation = wrapped_run_relation  # type: ignore[assignment]
+    RouteExecutor._register_dependency = wrapped_register_dependency  # type: ignore[assignment]
     try:
         output = runner.run(**kwargs)
     finally:
-        RouteExecutor.execute_relation = original  # type: ignore[assignment]
+        RouteExecutor._run_relation = original_run_relation  # type: ignore[assignment]
+        RouteExecutor._register_dependency = original_register_dependency  # type: ignore[assignment]
+
+    if call_sequence:
+        final = call_sequence[-1]
+        captured.update(
+            {
+                "used_cache": final["used_cache"],
+                "cache_hit": final["cache_hit"],
+                "total_rows": final["total_rows"],
+                "applied_offset": final["applied_offset"],
+                "applied_limit": final["applied_limit"],
+            }
+        )
+    captured["call_sequence"] = call_sequence
+    captured["dependencies"] = dependencies
     return output, captured
+
+
+def _format_meta(meta: Mapping[str, Any]) -> dict[str, Any]:
+    formatted: dict[str, Any] = {}
+    for key in ("used_cache", "cache_hit", "total_rows", "applied_offset", "applied_limit"):
+        if key in meta:
+            formatted[key] = meta[key]
+    if meta.get("call_sequence"):
+        formatted["call_sequence"] = json.dumps(meta["call_sequence"], indent=2)
+    if meta.get("dependencies"):
+        formatted["dependencies"] = json.dumps(meta["dependencies"], indent=2)
+    return formatted
 
 
 def generate_demo() -> None:
@@ -208,102 +245,103 @@ def generate_demo() -> None:
 
         runner = LocalRouteRunner(routes=routes, config=config)
 
-        first_run, first_meta = _run_with_cache_capture(
+        prefix_run, prefix_meta = _run_with_cache_capture(
             runner,
-            route_id="hello_world",
-            params={"name": "Ada"},
+            route_id="traceability_prefix_map",
+            params={"prefix": "PN"},
             format="records",
         )
         recorder.add(
             DemoEntry(
-                title="LocalRouteRunner first execution",
-                command="runner.run(route_id=\"hello_world\", params={\"name\": \"Ada\"}, format=\"records\")",
-                response=_serialize_records(first_run),
-                meta=first_meta,
+                title="Prefix mapping lookup",
+                command="runner.run(route_id=\"traceability_prefix_map\", params={\"prefix\": \"PN\"}, format=\"records\")",
+                response=_serialize_records(prefix_run),
+                meta=_format_meta(prefix_meta),
             )
         )
 
-        second_run, second_meta = _run_with_cache_capture(
+        panel_run, panel_meta = _run_with_cache_capture(
             runner,
-            route_id="hello_world",
-            params={"name": "Ada"},
+            route_id="traceability_panel_events",
+            params={"barcode": "PN-1001"},
             format="records",
         )
         recorder.add(
             DemoEntry(
-                title="LocalRouteRunner cached execution",
-                command="runner.run(route_id=\"hello_world\", params={\"name\": \"Ada\"}, format=\"records\")",
-                response=_serialize_records(second_run),
-                meta=second_meta,
+                title="Panel events lookup",
+                command="runner.run(route_id=\"traceability_panel_events\", params={\"barcode\": \"PN-1001\"}, format=\"records\")",
+                response=_serialize_records(panel_run),
+                meta=_format_meta(panel_meta),
+            )
+        )
+
+        summary_params = {"barcode": "PN-1001"}
+        summary_run, summary_meta = _run_with_cache_capture(
+            runner,
+            route_id="traceability_barcode_summary",
+            params=summary_params,
+            format="records",
+        )
+        recorder.add(
+            DemoEntry(
+                title="Traceability summary first execution",
+                command="runner.run(route_id=\"traceability_barcode_summary\", params={\"barcode\": \"PN-1001\"}, format=\"records\")",
+                response=_serialize_records(summary_run),
+                meta=_format_meta(summary_meta),
+            )
+        )
+
+        summary_cached_run, summary_cached_meta = _run_with_cache_capture(
+            runner,
+            route_id="traceability_barcode_summary",
+            params=summary_params,
+            format="records",
+        )
+        recorder.add(
+            DemoEntry(
+                title="Traceability summary cached execution",
+                command="runner.run(route_id=\"traceability_barcode_summary\", params={\"barcode\": \"PN-1001\"}, format=\"records\")",
+                response=_serialize_records(summary_cached_run),
+                meta=_format_meta(summary_cached_meta),
+            )
+        )
+
+        module_summary_run, module_summary_meta = _run_with_cache_capture(
+            runner,
+            route_id="traceability_barcode_summary",
+            params={"barcode": "MD-5005"},
+            format="records",
+        )
+        recorder.add(
+            DemoEntry(
+                title="Traceability summary for module barcode",
+                command="runner.run(route_id=\"traceability_barcode_summary\", params={\"barcode\": \"MD-5005\"}, format=\"records\")",
+                response=_serialize_records(module_summary_run),
+                meta=_format_meta(module_summary_meta),
             )
         )
 
         baseline = run_route(
-            "hello_world",
-            {"name": "Ada"},
+            "traceability_barcode_summary",
+            {"barcode": "PN-1001"},
             routes=routes,
             config=config,
             format="records",
         )
         recorder.add(
             DemoEntry(
-                title="run_route baseline",
-                command="run_route(\"hello_world\", {\"name\": \"Ada\"}, routes=routes, config=config, format=\"records\")",
+                title="run_route summary baseline",
+                command="run_route(\"traceability_barcode_summary\", {\"barcode\": \"PN-1001\"}, routes=routes, config=config, format=\"records\")",
                 response=_serialize_records(baseline),
-            )
-        )
-
-        try:
-            runner.run(route_id="missing_route")
-        except RouteNotFoundError as exc:
-            recorder.add(
-                DemoEntry(
-                    title="LocalRouteRunner error path",
-                    command="runner.run(route_id=\"missing_route\")",
-                    error=str(exc),
-                )
-            )
-
-        overlay_store = OverlayStore(STORAGE_DIR)
-        row_key = compute_row_key_from_values({"greeting": "Hello, Ada!"}, ["greeting"])
-        override = overlay_store.upsert(
-            route_id="hello_world",
-            row_key=row_key,
-            column="note",
-            value="Override injected by demo",
-            reason="Demo override",
-            author="demo",
-        )
-        recorder.add(
-            DemoEntry(
-                title="Overlay override applied",
-                command="overlay_store.upsert(route_id=\"hello_world\", row_key=row_key, column=\"note\", value=\"Override injected by demo\", reason=\"Demo override\", author=\"demo\")",
-                response=override.to_dict(),
-            )
-        )
-
-        override_run, override_meta = _run_with_cache_capture(
-            runner,
-            route_id="hello_world",
-            params={"name": "Ada"},
-            format="records",
-        )
-        recorder.add(
-            DemoEntry(
-                title="LocalRouteRunner after override",
-                command="runner.run(route_id=\"hello_world\", params={\"name\": \"Ada\"}, format=\"records\")",
-                response=_serialize_records(override_run),
-                meta=override_meta,
             )
         )
 
         app = create_app(routes, config)
         client = TestClient(app)
-        client.app.state.overlays.reload()
 
         http_payload = {
-            "reference": "local:hello_world?column=greeting&column=note",
-            "params": {"name": "Ada"},
+            "reference": "local:traceability_barcode_summary?column=table_route&column=event_time&column=status",
+            "params": {"barcode": "PN-1001"},
             "format": "json",
             "record_analytics": True,
         }

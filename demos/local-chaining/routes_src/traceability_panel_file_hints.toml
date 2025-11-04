@@ -1,0 +1,19 @@
+id = "traceability_panel_file_hints"
+path = "/demos/traceability/panel-files"
+title = "Panel parquet locations"
+description = "Recommend parquet files that contain panel-level traceability snapshots."
+methods = ["GET"]
+
+[params]
+[params.barcode]
+type = "str"
+required = true
+description = "Full barcode or prefix to search"
+
+[cache]
+ttl_hours = 12
+order_by = ["file_hint"]
+
+[overrides]
+key_columns = ["barcode_root", "file_hint"]
+allowed = []
