@@ -12,7 +12,18 @@ function initMultiSelect(container) {
   const search = container.querySelector('.wd-multi-select-search input');
   const summary = container.querySelector('.wd-multi-select-summary');
   const clear = container.querySelector('.wd-multi-select-clear');
+  const selectAll = container.querySelector('.wd-multi-select-select-all');
   const options = Array.from(container.querySelectorAll('.wd-multi-select-option'));
+  const optionByValue = new Map(
+    Array.from(select.options).map((option) => [option.value, option])
+  );
+
+  function syncOptionSelection(value, isSelected) {
+    const option = optionByValue.get(value);
+    if (option) {
+      option.selected = isSelected;
+    }
+  }
 
   function adjustPanelHeight() {
     if (!panel) {
@@ -50,11 +61,7 @@ function initMultiSelect(container) {
       return;
     }
     cb.addEventListener('change', () => {
-      Array.from(select.options).forEach((option) => {
-        if (option.value === cb.value) {
-          option.selected = cb.checked;
-        }
-      });
+      syncOptionSelection(cb.value, cb.checked);
       updateFlags();
       updateSummary();
       adjustPanelHeight();
@@ -63,7 +70,7 @@ function initMultiSelect(container) {
 
   if (clear) {
     clear.addEventListener('click', () => {
-      Array.from(select.options).forEach((option) => {
+      optionByValue.forEach((option) => {
         option.selected = false;
       });
       options.forEach((li) => {
@@ -71,6 +78,25 @@ function initMultiSelect(container) {
         if (cb) {
           cb.checked = false;
         }
+      });
+      updateFlags();
+      updateSummary();
+      adjustPanelHeight();
+    });
+  }
+
+  if (selectAll) {
+    selectAll.addEventListener('click', () => {
+      options.forEach((li) => {
+        if (li.style.display === 'none') {
+          return;
+        }
+        const cb = li.querySelector('input');
+        if (!cb) {
+          return;
+        }
+        cb.checked = true;
+        syncOptionSelection(cb.value, true);
       });
       updateFlags();
       updateSummary();

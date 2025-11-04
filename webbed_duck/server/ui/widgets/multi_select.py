@@ -61,7 +61,10 @@ def render_multi_select(
         )
     parts.append("</ul>")
     parts.append(
-        "<div class='wd-multi-select-actions'><button type='button' class='wd-multi-select-clear'>Clear</button></div>"
+        "<div class='wd-multi-select-actions'>"
+        "<button type='button' class='wd-multi-select-select-all'>Select all matches</button>"
+        "<button type='button' class='wd-multi-select-clear'>Clear</button>"
+        "</div>"
     )
     parts.append("</div>")
     parts.append(
