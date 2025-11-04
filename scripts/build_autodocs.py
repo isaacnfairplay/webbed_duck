@@ -30,6 +30,17 @@ EXCLUDED_DIR_PARTS = {
     "storage",
 }
 
+CODE_FILE_EXTENSIONS = {
+    ".py",
+    ".sql",
+    ".js",
+    ".jsx",
+    ".ts",
+    ".tsx",
+    ".mjs",
+    ".cjs",
+}
+
 STYLESHEET_CONTENT = """
 :root {
   color-scheme: light dark;
@@ -159,6 +170,57 @@ main article {
   text-decoration: underline;
 }
 
+.source-section {
+  margin: 0 0 2.5rem 0;
+  padding: 1.25rem;
+  background: var(--bg-alt);
+  border: 1px solid var(--border);
+  border-radius: 0.75rem;
+}
+
+.source-section h2 {
+  margin-top: 0;
+}
+
+.source-note {
+  color: var(--fg-muted);
+  font-size: 0.9rem;
+  margin-top: 0.35rem;
+}
+
+.source-tree {
+  list-style: none;
+  margin: 0.75rem 0 0.75rem 0;
+  padding-left: 1.2rem;
+}
+
+.source-tree ul {
+  list-style: none;
+  margin: 0.35rem 0 0.35rem 0;
+  padding-left: 1.1rem;
+}
+
+.source-tree .folder-name {
+  font-weight: 600;
+  display: inline-block;
+  margin-bottom: 0.15rem;
+}
+
+.source-tree .file,
+.source-tree .folder {
+  margin: 0.2rem 0;
+}
+
+.source-tree a {
+  color: var(--accent);
+  text-decoration: none;
+  word-break: break-all;
+}
+
+.source-tree a:hover {
+  text-decoration: underline;
+}
+
 code, pre {
   font-family: "JetBrains Mono", "Fira Code", "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
   background: rgba(37, 99, 235, 0.08);
@@ -245,6 +307,41 @@ def collect_markdown_files(source_dir: Path, output_dir: Path) -> List[Page]:
         output_path = output_dir / rel_path.with_suffix(".html")
         pages.append(Page(source=md_file, relative_path=rel_path, output_path=output_path))
     return pages
+
+
+def collect_source_tree(source_dir: Path) -> NavNode:
+    """Collect source files grouped by directory for linking on the index page."""
+
+    root = NavNode(name="")
+    for current_path, dirnames, filenames in os.walk(source_dir):
+        current = Path(current_path)
+        rel_dir = current.relative_to(source_dir)
+        if rel_dir == Path("."):
+            rel_parts: Tuple[str, ...] = ()
+        else:
+            rel_parts = rel_dir.parts
+
+        if any(part in EXCLUDED_DIR_PARTS for part in rel_parts):
+            dirnames[:] = []
+            continue
+
+        dirnames[:] = [d for d in dirnames if d not in EXCLUDED_DIR_PARTS]
+
+        node = root
+        for part in rel_parts:
+            node = node.add_child(part)
+
+        for filename in filenames:
+            ext = Path(filename).suffix.lower()
+            if ext not in CODE_FILE_EXTENSIONS:
+                continue
+            if rel_parts:
+                rel_file = Path(*rel_parts) / filename
+            else:
+                rel_file = Path(filename)
+            node.add_file(rel_file)
+
+    return root
 
 
 def build_nav_tree(pages: Iterable[Page]) -> NavNode:
@@ -341,6 +438,101 @@ def render_directory_listing(node: NavNode, output_dir: Path, from_page: Path) -
     return listing
 
 
+def determine_repo_link_info() -> tuple[str, str] | None:
+    repo = os.getenv("GITHUB_REPOSITORY")
+    if not repo:
+        return None
+
+    sha = os.getenv("GITHUB_SHA")
+    ref_name = os.getenv("GITHUB_REF_NAME")
+
+    if sha:
+        base_url = f"https://github.com/{repo}/blob/{sha}/"
+        if ref_name:
+            label = f"{ref_name} @ {sha[:7]}"
+        else:
+            label = sha
+        return base_url, label
+
+    ref = os.getenv("GITHUB_REF")
+    if ref and ref.startswith("refs/"):
+        ref = ref.split("/", 2)[2]
+    elif ref_name:
+        ref = ref_name
+
+    if not ref:
+        ref = "main"
+
+    base_url = f"https://github.com/{repo}/blob/{ref}/"
+    return base_url, ref
+
+
+def render_source_listing(node: NavNode, base_url: str | None) -> str:
+    def render_node(current: NavNode, depth: int = 0) -> str:
+        items: List[str] = []
+
+        for child_name in sorted(current.children):
+            child = current.children[child_name]
+            child_html = render_node(child, depth + 1)
+            if not child_html:
+                continue
+            label = html.escape(child_name) + "/"
+            items.append(
+                """
+<li class=\"folder\">
+  <span class=\"folder-name\">{label}</span>
+  {child_html}
+</li>
+""".format(label=label, child_html=child_html)
+            )
+
+        for rel_file in sorted(current.files, key=lambda p: p.as_posix()):
+            rel_path = rel_file.as_posix()
+            label = html.escape(rel_path)
+            if base_url:
+                href = base_url.rstrip("/") + "/" + rel_path
+                link = f"<a href=\"{href}\" target=\"_blank\" rel=\"noopener noreferrer\">{label}</a>"
+            else:
+                link = label
+            items.append(f"<li class=\"file\">{link}</li>")
+
+        if not items:
+            return ""
+
+        list_class = "source-tree" if depth == 0 else ""
+        class_attr = f' class=\"{list_class}\"' if list_class else ""
+        return f"<ul{class_attr}>" + "".join(items) + "</ul>"
+
+    return render_node(node)
+
+
+def build_source_section(source_root: NavNode, link_info: tuple[str, str] | None) -> str:
+    base_url = link_info[0] if link_info else None
+    listing_html = render_source_listing(source_root, base_url)
+
+    if listing_html:
+        body = listing_html
+    else:
+        body = "<p>No Python, SQL, or JavaScript-family source files were discovered.</p>"
+
+    if link_info:
+        label = html.escape(link_info[1])
+        note = f"<p class=\"source-note\">Links open the <code>{label}</code> snapshot on GitHub.</p>"
+    else:
+        note = (
+            "<p class=\"source-note\">Set GITHUB_REPOSITORY when building to add clickable GitHub URLs.</p>"
+        )
+
+    return """
+<section class=\"source-section\">
+  <h2 id=\"source-directory\">Repository Source Directory</h2>
+  <p>Browse a comprehensive inventory of Python, SQL, and JavaScript-family files tracked in this repository.</p>
+  {note}
+  {body}
+</section>
+""".format(note=note, body=body)
+
+
 def convert_markdown_to_html(markdown_text: str) -> str:
     return markdown.markdown(
         markdown_text,
@@ -423,18 +615,26 @@ def generate_pages(pages: List[Page], output_dir: Path, nav_root: NavNode) -> No
         page.output_path.write_text(full_html, encoding="utf-8")
 
 
-def build_index_page(output_dir: Path, nav_root: NavNode, pages: List[Page]) -> None:
+def build_index_page(
+    output_dir: Path,
+    nav_root: NavNode,
+    pages: List[Page],
+    source_section_html: str,
+) -> None:
     index_path = output_dir / "index.html"
     ensure_directory(index_path)
     nav_html = render_nav_html(nav_root, output_dir=output_dir, from_page=index_path)
     css_href = rel_href(index_path, output_dir / "assets" / "styles.css")
     listing_html = render_directory_listing(nav_root, output_dir, index_path)
-    content = f"""
+    content = """
 <h1>Repository Documentation Index</h1>
-<p>Select a document below to jump directly to it. The entries mirror the directory structure
-of Markdown files within the repository.</p>
-{listing_html}
-"""
+{source_section}
+<section class=\"docs-section\">
+  <h2 id=\"docs-directory\">Documentation Pages</h2>
+  <p>Select a document below to jump directly to it. The entries mirror the directory structure of Markdown files within the repository.</p>
+  {listing}
+</section>
+""".format(source_section=source_section_html, listing=listing_html)
     back_links: List[tuple[str, str]] = []
     index_html = build_page_html(content, nav_html, css_href, "Repository Docs", back_links)
     index_path.write_text(index_html, encoding="utf-8")
@@ -477,10 +677,13 @@ def main() -> None:
         raise SystemExit("No Markdown files found to document.")
 
     nav_root = build_nav_tree(pages)
+    source_root = collect_source_tree(source_dir)
+    link_info = determine_repo_link_info()
+    source_section_html = build_source_section(source_root, link_info)
 
     write_stylesheet(output_dir)
     generate_pages(pages, output_dir, nav_root)
-    build_index_page(output_dir, nav_root, pages)
+    build_index_page(output_dir, nav_root, pages, source_section_html)
 
 
 if __name__ == "__main__":
