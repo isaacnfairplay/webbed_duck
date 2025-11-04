@@ -5,6 +5,9 @@
 - Reworked every demo TODO/placeholder so contributors must ship runnable
   generators that execute the real flows and rebuild `demo.md` artifacts from
   captured outputs, preventing hand-written walkthrough drift.
+- Added an annotated-share demo that combines pseudo-auth overrides, share
+  redaction, and LocalRouteRunner snapshots so users can see the sanitized
+  export alongside the annotated internal view.
 - Updated the route authoring demo generator to emit sanitised HTML previews
   alongside fenced source blocks and documented the GitHub Markdown HTML
   embedding workflow so transcripts remain readable directly on GitHub.
