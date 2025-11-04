@@ -122,10 +122,13 @@
   padding: 0.45rem 0.65rem;
   border-top: 1px solid var(--wd-border-muted);
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.5rem;
   background: var(--wd-panel-muted);
 }
 
+.wd-multi-select-select-all,
 .wd-multi-select-clear {
   border: none;
   background: none;
@@ -136,6 +139,7 @@
   border-radius: 0.35rem;
 }
 
+.wd-multi-select-select-all:hover,
 .wd-multi-select-clear:hover {
   background: var(--wd-accent-soft);
 }
