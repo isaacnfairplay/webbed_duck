@@ -1,0 +1,47 @@
+{
+  "append": {
+    "columns": [
+      "greeting",
+      "note",
+      "created_at"
+    ],
+    "destination": "hello_appends.csv"
+  },
+  "form": [
+    {
+      "default": "world",
+      "description": "Name to greet",
+      "name": "name",
+      "required": false,
+      "type": "str"
+    }
+  ],
+  "overrides": {
+    "allowed": [
+      "note"
+    ],
+    "key_columns": [
+      "greeting"
+    ]
+  },
+  "path": "/hello",
+  "route_id": "hello_world",
+  "schema": [
+    {
+      "name": "greeting",
+      "type": "string"
+    },
+    {
+      "name": "note",
+      "type": "string"
+    },
+    {
+      "name": "greeting_length",
+      "type": "int32"
+    },
+    {
+      "name": "created_at",
+      "type": "timestamp[us, tz=Etc/UTC]"
+    }
+  ]
+}
