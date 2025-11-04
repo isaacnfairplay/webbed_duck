@@ -1,0 +1,19 @@
+id = "traceability_module_events"
+path = "/demos/traceability/module-events"
+title = "Module traceability events"
+description = "Downstream module pairings that reference the parent panel barcode."
+methods = ["GET"]
+
+[params]
+[params.barcode]
+type = "str"
+required = true
+description = "Full barcode or prefix to search"
+
+[cache]
+ttl_hours = 6
+order_by = ["event_time", "barcode"]
+
+[overrides]
+key_columns = ["barcode", "event_time"]
+allowed = ["status"]

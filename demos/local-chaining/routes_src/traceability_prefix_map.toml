@@ -1,0 +1,19 @@
+id = "traceability_prefix_map"
+path = "/demos/traceability/prefix-map"
+title = "Barcode prefix target routes"
+description = "Map barcode prefixes to the traceability routes that should be queried."
+methods = ["GET"]
+
+[params]
+[params.prefix]
+type = "str"
+required = true
+description = "Uppercase barcode prefix (first segment before '-')"
+
+[cache]
+ttl_hours = 24
+order_by = ["table_route"]
+
+[overrides]
+key_columns = ["prefix", "table_route"]
+allowed = []
