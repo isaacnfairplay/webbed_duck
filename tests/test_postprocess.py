@@ -57,6 +57,7 @@ def test_render_table_html_renders_controls_and_rpc() -> None:
     assert "Errors follow the webbed_duck taxonomy" in html
     assert "/assets/wd/layout.css" in html
     assert "/assets/wd/table.css" in html
+    assert "/assets/wd/progress.js" in html
     assert "/assets/wd/header.js" in html
     assert "/assets/wd/multi_select.js" in html
     assert "/assets/wd/table_header.js" in html

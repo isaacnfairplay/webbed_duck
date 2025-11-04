@@ -169,7 +169,7 @@ The HTML layer now follows a strict separation between server-rendered structure
 Static assets live in `webbed_duck/static/assets/wd/` and mirror those widgets:
 
 - `layout.css`, `params.css`, `multi_select.css`, `table.css`, `cards.css`, `feed.css`, and `charts.css` style the layout, filters, and data surfaces.
-- `header.js`, `params_form.js`, `multi_select.js`, and `chart_boot.js` attach behavior to `[data-wd-*]` attributes without altering the server-rendered markup. For example, `header.js` manages sticky-header offsets, `multi_select.js` enhances `<select multiple>` controls, and `chart_boot.js` reads `<canvas data-wd-chart>` elements and their JSON config blocks. `table_header.js` keeps the mini header in sync with the real `<thead>` when it scrolls out of view.
+- `progress.js`, `header.js`, `params_form.js`, `multi_select.js`, and `chart_boot.js` attach behavior to `[data-wd-*]` attributes without altering the server-rendered markup. For example, `progress.js` animates the inline progress bar during the initial page load and whenever filters submit; `header.js` manages sticky-header offsets; `multi_select.js` enhances `<select multiple>` controls; and `chart_boot.js` reads `<canvas data-wd-chart>` elements and their JSON config blocks. `table_header.js` keeps the mini header in sync with the real `<thead>` when it scrolls out of view.
 
 Compiled routes declare the assets they require via a `[ui]` section. The metadata supports `widgets`, `styles`, and `scripts` arrays, which the server merges with renderer defaults and resolves through `resolve_assets`:
 

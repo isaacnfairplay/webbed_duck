@@ -18,6 +18,7 @@ _STYLE_PATHS: Mapping[str, str] = {
     "charts": "charts.css",
 }
 _SCRIPT_PATHS: Mapping[str, str] = {
+    "progress": "progress.js",
     "header": "header.js",
     "multi_select": "multi_select.js",
     "params": "params_form.js",
@@ -27,7 +28,7 @@ _SCRIPT_PATHS: Mapping[str, str] = {
 
 _WIDGET_ORDER: tuple[str, ...] = ("header", "params", "multi_select")
 _STYLE_ORDER: tuple[str, ...] = ("layout", "params", "multi_select", "table", "cards", "feed", "charts")
-_SCRIPT_ORDER: tuple[str, ...] = ("header", "params", "multi_select", "table_header", "chart_boot")
+_SCRIPT_ORDER: tuple[str, ...] = ("progress", "header", "params", "multi_select", "table_header", "chart_boot")
 
 
 @dataclass(frozen=True)
@@ -176,6 +177,11 @@ def render_layout(
     document.append("<html" + html_attr_text + "><head>")
     document.extend(head_parts)
     document.append("</head><body" + body_attr_text + ">")
+    document.append(
+        "<div class='wd-progress' data-wd-progress hidden aria-hidden='true'>"
+        "<div class='wd-progress-bar' data-wd-progress-bar></div>"
+        "</div>"
+    )
     if watermark_html:
         document.append(watermark_html)
     document.append("<div class='wd-shell'>")
