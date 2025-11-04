@@ -5,6 +5,9 @@
 - Reworked every demo TODO/placeholder so contributors must ship runnable
   generators that execute the real flows and rebuild `demo.md` artifacts from
   captured outputs, preventing hand-written walkthrough drift.
+- Updated the route authoring demo generator to emit sanitised HTML previews
+  alongside fenced source blocks and documented the GitHub Markdown HTML
+  embedding workflow so transcripts remain readable directly on GitHub.
 - Added negative-path HTTP tests for override, append, share, and local routes that assert responses honour the shared `_ERROR_TAXONOMY`, alongside new pytest fixtures for pseudo-auth sessions, email adapter failures, and analytics toggling; no flaky or expected-fail cases were observed during the focused `tests/http` run.
 - Removed the placeholder demo notebooks and accompanying plugin helper module that did not exercise the `webbed_duck` runtime so contributors are not pointed at misleading examples.
 - Added a persistent light/dark theme toggle to the sticky header, refreshed the
