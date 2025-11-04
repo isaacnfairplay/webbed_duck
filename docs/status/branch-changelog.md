@@ -1,5 +1,11 @@
 # Branch-level Changelog
 
+## Demo HTML embedding refresh (current branch)
+
+- Documented GitHub Markdown HTML support and our demo pattern in `docs/html-embedding.md`, including sanitisation rules and the screenshot fallback.
+- Taught `demos/route-authoring/generate_demo.py` to detect HTML responses, wrap the raw source in a `<details>` block, and emit a sanitised `<div class="demo-preview">` embed alongside it.
+- Regenerated `demos/route-authoring/demo.md` so the `html_t` walkthrough now shows both the fenced source and the inline preview directly in GitHub.
+
 ## HTTP error taxonomy hardening (work branch)
 
 - Added FastAPI regression tests under `tests/http/` that exercise override,

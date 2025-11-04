@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import dataclasses
+import html
 import os
+import re
 import signal
 import shutil
 import subprocess
@@ -297,6 +299,53 @@ def _arrow_table_markdown(table: pa.Table) -> str:
     return "\n".join([header, separator, *rows])
 
 
+_SCRIPT_RE = re.compile(r"(?is)<script[^>]*?>.*?</script>")
+_STYLE_RE = re.compile(r"(?is)<style[^>]*?>.*?</style>")
+
+
+def _is_html_response(content_type: str, text: str | None) -> bool:
+    if text is None:
+        return False
+    lowered = content_type.lower()
+    if "html" in lowered:
+        return True
+    stripped = text.lstrip()
+    return stripped.startswith("<!doctype html") or stripped.startswith("<html")
+
+
+def _extract_body_html(raw_html: str) -> str | None:
+    match = re.search(r"(?is)<body[^>]*>(.*)</body>", raw_html)
+    fragment = match.group(1) if match else raw_html
+    fragment = _SCRIPT_RE.sub("", fragment)
+    fragment = _STYLE_RE.sub("", fragment)
+    fragment = fragment.strip()
+    return fragment or None
+
+
+def _html_source_and_preview_blocks(raw_html: str, preview_label: str) -> list[str]:
+    preview_html = _extract_body_html(raw_html)
+    lines = [
+        "<details>",
+        "<summary>View HTML source</summary>",
+        "",
+        "```html",
+        raw_html.rstrip(),
+        "```",
+        "",
+        "</details>",
+        "",
+    ]
+    if preview_html is not None:
+        attr = html.escape(preview_label, quote=True)
+        lines.append(f"<div class=\"demo-preview\" data-source=\"{attr}\">")
+        lines.append(preview_html)
+        lines.append("</div>")
+    else:
+        lines.append("_Rendered preview unavailable (response body missing)._")
+    lines.append("")
+    return lines
+
+
 def generate_markdown(
     *,
     timestamp: datetime,
@@ -366,13 +415,20 @@ def generate_markdown(
         content_type = capture.headers.get("content-type", "")
         lines.append(f"Content-Type: {content_type}")
         lines.append("")
-        if capture.text is not None:
-            lines.append("```\n" + capture.text.rstrip() + "\n```")
+        request_line = f"{capture.method} {capture.url}?{query}" if query else f"{capture.method} {capture.url}"
+        if _is_html_response(content_type, capture.text):
+            lines.extend(_html_source_and_preview_blocks(capture.text or "", request_line))
+        elif capture.text is not None:
+            lines.append("```")
+            lines.append(capture.text.rstrip())
+            lines.append("```")
+            lines.append("")
         elif capture.arrow_table is not None:
             lines.append(_arrow_table_markdown(capture.arrow_table))
+            lines.append("")
         else:
             lines.append(f"(binary body, {len(capture.body)} bytes)")
-        lines.append("")
+            lines.append("")
     lines.append("## Build artifacts")
     lines.append("")
     lines.append(format_listing(build_listing))
