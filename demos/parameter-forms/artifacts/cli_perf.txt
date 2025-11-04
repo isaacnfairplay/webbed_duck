@@ -1,0 +1,5 @@
+Route: hello_world
+Iterations: 1
+Rows (last run): 1
+Average latency: <MS> ms
+95th percentile latency: <MS> ms

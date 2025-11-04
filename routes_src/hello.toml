@@ -18,14 +18,17 @@ ui_help = "Type a name and press Apply to refresh the greeting"
 [cache]
 ttl_hours = 12
 order_by = ["created_at"]
+invariant_filters = [
+  { param = "greeting_length", column = "greeting_length", type = "int", ui_label = "Greeting length" }
+]
 
 [html_t]
-show_params = ["name"]
+show_params = ["name", "greeting_length"]
 
 [html_c]
 title_col = "greeting"
 meta_cols = ["note", "created_at"]
-show_params = ["name"]
+show_params = ["name", "greeting_length"]
 
 [feed]
 timestamp_col = "created_at"

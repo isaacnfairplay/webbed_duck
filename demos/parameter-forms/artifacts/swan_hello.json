@@ -1,0 +1,30 @@
+{
+  "charts": [
+    {
+      "html": "<svg viewBox='0 0 400 160' role='img' aria-label='Line chart'><polyline fill='none' stroke='#3b82f6' stroke-width='2' points='12.0,80.0'/></svg>",
+      "id": "greeting_length"
+    }
+  ],
+  "columns": [
+    "greeting",
+    "note",
+    "greeting_length",
+    "created_at"
+  ],
+  "description": "Return a greeting using DuckDB",
+  "elapsed_ms": "<MS>",
+  "limit": null,
+  "offset": 0,
+  "route_id": "hello_world",
+  "row_count": 1,
+  "rows": [
+    {
+      "created_at": "<TIMESTAMP>",
+      "greeting": "Hello, Swan!",
+      "greeting_length": 12,
+      "note": "Personalized greeting rendered by DuckDB"
+    }
+  ],
+  "title": "Hello world",
+  "total_rows": 1
+}
