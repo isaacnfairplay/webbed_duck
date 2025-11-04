@@ -1,6 +1,13 @@
 # Branch-level Changelog
 
-## Demo HTML embedding refresh (current branch)
+## Fix-and-forward demo (current branch)
+
+- Added the `demos/fix-and-forward/generate_demo.py` automation to orchestrate overrides, append logging,
+  `/local/resolve`, and share flows in a single run so analysts can see the "fix then forward" workflow in action.
+- Generated `demos/fix-and-forward/demo.md` from a real run that captures every HTTP call, the append artifact, the
+  sanitized local reference payload, and the share fetch that teams can reuse as a playbook.
+
+## Demo HTML embedding refresh (previous branch)
 
 - Documented GitHub Markdown HTML support and our demo pattern in `docs/html-embedding.md`, including sanitisation rules and the screenshot fallback.
 - Taught `demos/route-authoring/generate_demo.py` to detect HTML responses, wrap the raw source in a `<details>` block, and emit a sanitised `<div class="demo-preview">` embed alongside it.
