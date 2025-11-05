@@ -21,6 +21,12 @@ import pyarrow.compute as pc
 
 from ..config import CacheConfig
 from ..core.routes import RouteDefinition
+from ..utils.datetime import isoformat_datetime, parse_iso_date, parse_iso_datetime
+
+try:  # pragma: no cover - Python < 3.9 fallback
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover - Python < 3.9
+    ZoneInfo = None  # type: ignore[assignment]
 
 
 RecordBatchFactory = Callable[[], tuple[pa.RecordBatchReader, Callable[[], None]]]
@@ -775,6 +781,10 @@ def _coerce_invariant_value_for_column(
             return _coerce_float_like(value)
         if pa.types.is_decimal(column_type):
             return _coerce_decimal_like(value)
+        if pa.types.is_date(column_type):
+            return _coerce_date_like(value)
+        if pa.types.is_timestamp(column_type):
+            return _coerce_timestamp_like(value, column_type)
     except (TypeError, ValueError, decimal.InvalidOperation):
         return _INVALID_INVARIANT_VALUE
     return value
@@ -852,6 +862,44 @@ def _coerce_decimal_like(value: object) -> decimal.Decimal:
     return decimal_value
 
 
+def _coerce_date_like(value: object) -> _dt.date:
+    if isinstance(value, _dt.datetime):
+        return value.date()
+    if isinstance(value, _dt.date):
+        return value
+    if isinstance(value, (bytes, bytearray)):
+        text = bytes(value).decode("utf-8")
+    else:
+        text = str(value)
+    return parse_iso_date(text)
+
+
+def _coerce_timestamp_like(value: object, column_type: pa.DataType) -> _dt.datetime:
+    if isinstance(value, _dt.datetime):
+        dt_value = value
+    elif isinstance(value, _dt.date):
+        dt_value = _dt.datetime.combine(value, _dt.time())
+    elif isinstance(value, (bytes, bytearray)):
+        dt_value = parse_iso_datetime(bytes(value).decode("utf-8"))
+    else:
+        dt_value = parse_iso_datetime(str(value))
+
+    timezone_name = getattr(column_type, "tz", None)
+    if timezone_name and ZoneInfo is not None:
+        try:
+            zone = ZoneInfo(timezone_name)
+        except Exception:  # pragma: no cover - invalid/unknown zone
+            zone = None
+        if zone is not None:
+            if dt_value.tzinfo is None:
+                dt_value = dt_value.replace(tzinfo=zone)
+            else:
+                dt_value = dt_value.astimezone(zone)
+    elif not timezone_name and dt_value.tzinfo is not None:
+        dt_value = dt_value.astimezone(_dt.timezone.utc).replace(tzinfo=None)
+    return dt_value
+
+
 def _prepare_invariant_filter_values(
     values: Sequence[object],
     column: pa.ChunkedArray,
@@ -897,6 +945,10 @@ def canonicalize_invariant_value(value: object, setting: InvariantFilterSetting)
         token = _canonicalize_numeric_token(value)
     elif isinstance(value, (bytes, bytearray)):
         token = "bytes:" + base64.b64encode(bytes(value)).decode("ascii")
+    elif isinstance(value, _dt.datetime):
+        token = "datetime:" + isoformat_datetime(value)
+    elif isinstance(value, _dt.date):
+        token = "date:" + value.isoformat()
     elif hasattr(value, "isoformat"):
         try:
             token = "datetime:" + value.isoformat()
@@ -1574,6 +1626,10 @@ def _normalize_mapping(values: Mapping[str, object]) -> dict[str, object]:
 
 
 def _json_default(value: object) -> object:
+    if isinstance(value, _dt.datetime):
+        return isoformat_datetime(value)
+    if isinstance(value, _dt.date):
+        return value.isoformat()
     if hasattr(value, "isoformat"):
         try:
             return value.isoformat()

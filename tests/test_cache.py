@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from decimal import Decimal
 from pathlib import Path
+import datetime as dt
 
 import duckdb
 import pytest
@@ -1032,6 +1034,87 @@ def test_canonicalize_invariant_value_normalizes_negative_zero() -> None:
     )
 
 
+def test_canonicalize_invariant_value_handles_temporal_types() -> None:
+    setting = cache_mod.InvariantFilterSetting(param="when", column="when")
+
+    date_value = dt.date(2024, 1, 2)
+    naive_dt = dt.datetime(2024, 1, 2, 3, 4, 5)
+    aware_dt = dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=dt.timezone.utc)
+
+    assert cache_mod.canonicalize_invariant_value(date_value, setting) == "date:2024-01-02"
+    assert cache_mod.canonicalize_invariant_value(naive_dt, setting) == "datetime:2024-01-02T03:04:05"
+    assert (
+        cache_mod.canonicalize_invariant_value(aware_dt, setting)
+        == "datetime:2024-01-02T03:04:05Z"
+    )
+
+
+def test_prepare_invariant_filter_values_parses_temporal_strings() -> None:
+    date_setting = cache_mod.InvariantFilterSetting(param="day", column="day")
+    date_column = pa.chunked_array(
+        [[dt.date(2024, 1, 1), dt.date(2024, 1, 2)]],
+        type=pa.date32(),
+    )
+
+    values, include_null, use_casefold = cache_mod._prepare_invariant_filter_values(
+        ["2024-01-02", dt.datetime(2024, 1, 3, 9, 15, tzinfo=dt.timezone.utc)],
+        date_column,
+        date_setting,
+    )
+
+    assert values == [dt.date(2024, 1, 2), dt.date(2024, 1, 3)]
+    assert include_null is False
+    assert use_casefold is False
+
+    ts_setting = cache_mod.InvariantFilterSetting(param="event", column="event")
+    ts_column = pa.chunked_array(
+        [[dt.datetime(2024, 1, 1, 8, 0, tzinfo=dt.timezone.utc)]],
+        type=pa.timestamp("us", tz="UTC"),
+    )
+
+    ts_values, ts_include_null, ts_use_casefold = cache_mod._prepare_invariant_filter_values(
+        ["2024-01-02T03:04:05Z", dt.date(2024, 1, 2)],
+        ts_column,
+        ts_setting,
+    )
+
+    assert len(ts_values) == 2
+    assert isinstance(ts_values[0], dt.datetime)
+    assert ts_values[0].tzinfo is not None
+    assert ts_values[0] == dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=dt.timezone.utc)
+    assert isinstance(ts_values[1], dt.datetime)
+    assert ts_values[1].tzinfo is not None
+    assert ts_values[1].replace(tzinfo=None) == dt.datetime(2024, 1, 2, 0, 0)
+    assert ts_include_null is False
+    assert ts_use_casefold is False
+
+
+def test_prepare_invariant_filter_values_handles_tz_inputs_for_naive_timestamp_columns() -> None:
+    setting = cache_mod.InvariantFilterSetting(param="event", column="event")
+    column = pa.chunked_array(
+        [[dt.datetime(2024, 1, 2, 3, 4, 5)]],
+        type=pa.timestamp("us"),
+    )
+
+    values, include_null, use_casefold = cache_mod._prepare_invariant_filter_values(
+        ["2024-01-02T03:04:05Z", dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=dt.timezone.utc)],
+        column,
+        setting,
+    )
+
+    assert all(isinstance(item, dt.datetime) for item in values)
+    assert all(item.tzinfo is None for item in values)
+    assert values[0] == dt.datetime(2024, 1, 2, 3, 4, 5)
+    assert values[1] == dt.datetime(2024, 1, 2, 3, 4, 5)
+    assert include_null is False
+    assert use_casefold is False
+
+    # Ensure the coerced values can be materialized as an Arrow array that
+    # matches the naive timestamp column type.
+    pa_values = pa.array(values, type=column.type)
+    assert pa_values.type == column.type
+
+
 def test_canonicalize_invariant_mapping_collapses_decimal_variants() -> None:
     setting = cache_mod.InvariantFilterSetting(param="amount", column="amount")
     mapping = cache_mod.canonicalize_invariant_mapping(
@@ -1147,4 +1230,3 @@ def test_invariant_unique_values_merge_with_static_options(tmp_path: Path) -> No
     assert "<option value='Engineering'>Engineering</option>" in text
     assert "<option value='Finance'>Finance</option>" in text
     assert "<option value='Other'>Custom</option>" in text
-from decimal import Decimal

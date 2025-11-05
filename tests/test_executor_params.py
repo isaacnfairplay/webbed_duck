@@ -1,4 +1,5 @@
 from pathlib import Path
+import datetime as dt
 
 import duckdb
 import pyarrow as pa
@@ -31,6 +32,27 @@ def test_parameter_spec_boolean_rejects_unknown_literal() -> None:
 
     with pytest.raises(ValueError):
         spec.convert("definitely")
+
+
+def test_parameter_spec_temporal_conversions() -> None:
+    date_spec = ParameterSpec(name="start", type=ParameterType.DATE)
+    datetime_spec = ParameterSpec(name="event", type=ParameterType.DATETIME)
+
+    assert date_spec.convert("2024-01-02") == dt.date(2024, 1, 2)
+    assert datetime_spec.convert("2024-01-02T03:04:05Z") == dt.datetime(
+        2024,
+        1,
+        2,
+        3,
+        4,
+        5,
+        tzinfo=dt.timezone.utc,
+    )
+
+    with pytest.raises(ValueError):
+        date_spec.convert("not-a-date")
+    with pytest.raises(ValueError):
+        datetime_spec.convert("not-a-datetime")
 
 
 def _write_pair(base: Path, stem: str, toml: str, sql: str) -> None:
@@ -177,6 +199,82 @@ WHERE ($enabled = enabled_again)
     assert data["ratio_again"][0] == pytest.approx(2.5)
     assert data["text_again"] == ["Alpha"]
 
+
+def test_executor_handles_temporal_params(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = tmp_path / "src"
+    build = tmp_path / "build"
+    source.mkdir()
+
+    _write_pair(
+        source,
+        "temporal_params",
+        """id = "temporal_params"
+path = "/temporal_params"
+cache_mode = "passthrough"
+
+[params.start_date]
+type = "date"
+required = true
+
+[params.event_at]
+type = "datetime"
+required = true
+""".strip(),
+        """SELECT
+    $start_date AS start_value,
+    $event_at AS event_value,
+    CAST($start_date AS DATE) AS cast_start,
+    CAST($event_at AS TIMESTAMP) AS cast_event
+""".strip(),
+    )
+
+    compile_routes(source, build)
+    routes = load_compiled_routes(build)
+    route = next(item for item in routes if item.id == "temporal_params")
+
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+
+    executor = RouteExecutor({item.id: item for item in routes}, cache_store=None, config=config)
+
+    captured: dict[str, object] = {}
+
+    def _capture(
+        steps,
+        params,
+        *,
+        route,
+        request,
+    ):
+        captured["params"] = dict(params)
+        return dict(params)
+
+    monkeypatch.setattr(execution_module, "run_preprocessors", _capture)
+
+    incoming = {
+        "start_date": "2024-05-06",
+        "event_at": "2024-05-06T15:30:45Z",
+    }
+
+    prepared = executor._prepare(route, incoming, ordered=None, preprocessed=False)
+
+    assert isinstance(prepared.params["start_date"], dt.date)
+    assert isinstance(prepared.params["event_at"], dt.datetime)
+    assert prepared.params["event_at"].tzinfo is not None
+
+    captured_params = captured.get("params")
+    assert isinstance(captured_params, dict)
+    assert isinstance(captured_params["start_date"], dt.date)
+    assert isinstance(captured_params["event_at"], dt.datetime)
+
+    result = executor.execute_relation(route, incoming, offset=0, limit=None)
+    table = result.table
+    assert table.num_rows == 1
+    data = table.to_pydict()
+    assert data["cast_start"] == [dt.date(2024, 5, 6)]
+    event_value = data["cast_event"][0]
+    assert isinstance(event_value, dt.datetime)
+    assert event_value.replace(tzinfo=None) == dt.datetime(2024, 5, 6, 15, 30, 45)
 
 def test_constant_binding_handles_quotes(tmp_path: Path) -> None:
     source = tmp_path / "src"
