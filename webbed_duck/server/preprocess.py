@@ -84,7 +84,12 @@ def _load_callable(path: str) -> Callable[..., Mapping[str, Any] | None]:
         return _CACHE[path]
     module_name, attr = _split_target(path)
     module = _import_callable_module(module_name)
-    target = getattr(module, attr)
+    try:
+        target = getattr(module, attr)
+    except AttributeError as error:
+        target = _load_attribute_from_package(module, attr)
+        if target is None:
+            raise error
     if not callable(target):
         raise TypeError(f"Preprocessor '{path}' is not callable")
     _CACHE[path] = target
@@ -110,7 +115,11 @@ def _split_target(path: str) -> tuple[str, str]:
 
 def _import_callable_module(module_reference: str) -> ModuleType:
     module_path = Path(module_reference)
-    if module_path.suffix == ".py" or module_path.is_absolute() or any(sep in module_reference for sep in ("/", "\\")):
+    if (
+        module_path.suffix == ".py"
+        or module_path.is_absolute()
+        or any(sep in module_reference for sep in ("/", "\\"))
+    ):
         return _load_module_from_path(module_reference)
     return import_module(module_reference)
 
@@ -121,18 +130,33 @@ def _load_module_from_path(module_reference: str) -> ModuleType:
         file_path = (Path.cwd() / file_path).resolve()
     if not file_path.exists():
         raise ModuleNotFoundError(f"Preprocessor module '{module_reference}' was not found")
-    if file_path.is_dir():
-        raise ModuleNotFoundError(
-            f"Preprocessor module reference '{module_reference}' points to a directory, expected a file"
-        )
-    if file_path.suffix != ".py":
+
+    is_directory = file_path.is_dir()
+    if is_directory:
+        init_file = file_path / "__init__.py"
+        if not init_file.exists():
+            raise ModuleNotFoundError(
+                f"Preprocessor module reference '{module_reference}' points to a directory without an __init__.py"
+            )
+        load_target = init_file
+    else:
+        load_target = file_path
+
+    if load_target.suffix != ".py":
         raise ModuleNotFoundError(
             f"Preprocessor module reference '{module_reference}' must point to a Python file"
         )
-    cache_key = f"webbed_duck.preprocess.file::{file_path}"
+
+    cache_key = f"webbed_duck.preprocess.path::{file_path}"
     if cache_key in sys.modules:
         return sys.modules[cache_key]
-    spec = spec_from_file_location(cache_key, str(file_path))
+
+    search_locations = [str(file_path)] if is_directory else None
+    spec = spec_from_file_location(
+        cache_key,
+        str(load_target),
+        submodule_search_locations=search_locations,
+    )
     if spec is None or spec.loader is None:
         raise ModuleNotFoundError(
             f"Could not load preprocessor module from '{module_reference}'"
@@ -141,6 +165,37 @@ def _load_module_from_path(module_reference: str) -> ModuleType:
     sys.modules[cache_key] = module
     spec.loader.exec_module(module)  # type: ignore[union-attr]
     return module
+
+
+def _load_attribute_from_package(
+    module: ModuleType, attr: str
+) -> Callable[..., Mapping[str, Any] | None] | None:
+    """Attempt to load ``attr`` from a sibling module within ``module``'s package."""
+
+    spec = getattr(module, "__spec__", None)
+    search_locations: list[str] = []
+    if spec is not None and spec.submodule_search_locations:
+        search_locations.extend(spec.submodule_search_locations)
+    else:
+        module_file = getattr(module, "__file__", None)
+        if module_file:
+            search_locations.append(str(Path(module_file).parent))
+
+    for location in search_locations:
+        candidate = Path(location) / f"{attr}.py"
+        if not candidate.exists():
+            continue
+        try:
+            submodule = _load_module_from_path(str(candidate))
+        except ModuleNotFoundError:
+            continue
+        try:
+            target = getattr(submodule, attr)
+        except AttributeError:
+            continue
+        if callable(target):
+            return target
+    return None
 
 
 __all__ = ["PreprocessContext", "run_preprocessors"]
