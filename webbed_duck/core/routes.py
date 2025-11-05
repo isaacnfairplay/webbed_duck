@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import datetime as _dt
+import decimal as _decimal
 from enum import Enum
 from importlib import util
 from pathlib import Path
@@ -88,6 +90,8 @@ class RouteDefinition:
     cache_mode: str = "materialize"
     returns: str = "relation"
     uses: Sequence[RouteUse] = ()
+    constants: Mapping[str, RouteConstant] = field(default_factory=dict)
+    binding_order: Sequence[str] = ()
 
     def find_param(self, name: str) -> ParameterSpec | None:
         for param in self.params:
@@ -189,6 +193,23 @@ def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
             args = {}
         uses.append(RouteUse(alias=str(alias), call=str(call), mode=mode, args=args))
 
+    constants_data = route.get("constants")
+    constants: dict[str, RouteConstant]
+    if isinstance(constants_data, Mapping):
+        constants = {
+            str(key): _constant_from_payload(str(key), value)
+            for key, value in constants_data.items()
+            if isinstance(key, str)
+        }
+    else:
+        constants = {}
+
+    binding_raw = route.get("binding_order", [])
+    if isinstance(binding_raw, Sequence):
+        binding_order = [str(item) for item in binding_raw]
+    else:
+        binding_order = []
+
     return RouteDefinition(
         id=str(route["id"]),
         path=str(route["path"]),
@@ -211,7 +232,39 @@ def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
         cache_mode=str(route.get("cache_mode", "materialize")).lower(),
         returns=str(route.get("returns", "relation")).lower(),
         uses=uses,
+        constants=constants,
+        binding_order=binding_order,
     )
+
+
+def _constant_from_payload(name: str, payload: object) -> RouteConstant:
+    if not isinstance(payload, Mapping):
+        raise TypeError(f"Constant '{name}' payload must be a mapping")
+    duckdb_type = str(payload.get("duckdb_type", "VARCHAR")).upper()
+    if "value" not in payload:
+        raise KeyError(f"Constant '{name}' payload must define 'value'")
+    raw_value = payload["value"]
+    if duckdb_type == "DATE":
+        if isinstance(raw_value, _dt.date) and not isinstance(raw_value, _dt.datetime):
+            value = raw_value
+        else:
+            value = _dt.date.fromisoformat(str(raw_value))
+        return RouteConstant(value=value, duckdb_type="DATE")
+    if duckdb_type == "BOOLEAN":
+        return RouteConstant(value=bool(raw_value), duckdb_type="BOOLEAN")
+    if duckdb_type == "DECIMAL":
+        if isinstance(raw_value, _decimal.Decimal):
+            value = raw_value
+        else:
+            value = _decimal.Decimal(str(raw_value))
+        return RouteConstant(value=value, duckdb_type="DECIMAL")
+    if duckdb_type == "TIMESTAMP":
+        if isinstance(raw_value, _dt.datetime):
+            value = raw_value
+        else:
+            value = _dt.datetime.fromisoformat(str(raw_value))
+        return RouteConstant(value=value, duckdb_type="TIMESTAMP")
+    return RouteConstant(value=str(raw_value), duckdb_type="VARCHAR")
 
 
 __all__ = [
@@ -220,5 +273,15 @@ __all__ = [
     "RouteDefinition",
     "RouteDirective",
     "RouteUse",
+    "RouteConstant",
+    "CONSTANT_TOKEN_PREFIX",
     "load_compiled_routes",
 ]
+CONSTANT_TOKEN_PREFIX = "const:"
+
+
+@dataclass(slots=True)
+class RouteConstant:
+    value: object
+    duckdb_type: str
+

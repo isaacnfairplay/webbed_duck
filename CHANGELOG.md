@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Bind `{{const.NAME}}` markers as typed constants sourced from route
+  frontmatter, server-level configuration, or keyring-backed secrets. The
+  compiler now infers DuckDB types (BOOLEAN/DATE/DECIMAL/VARCHAR), records the
+  binding order for prepared statements, rejects conflicting names, and
+  redacts missing-secret errors while keeping cache fingerprints sensitive to
+  constant changes.
+
 - Auto-generated documentation index now surfaces a GitHub-linked inventory of
   Python, SQL, and JavaScript source files so reviewers can jump straight to
   the repository snapshot behind each document.

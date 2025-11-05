@@ -1,12 +1,21 @@
 from __future__ import annotations
 
+import datetime as dt
+import decimal
 from pathlib import Path
 
 import pytest
 
-from webbed_duck.core.compiler import RouteCompilationError, compile_route_file, compile_routes
+from webbed_duck.core import compiler
+from webbed_duck.core.compiler import (
+    RouteCompilationError,
+    compile_route_file,
+    compile_route_text,
+    compile_routes,
+)
 from webbed_duck.core.routes import load_compiled_routes
 from webbed_duck.server.app import create_app
+from webbed_duck.server.cache import CacheSettings, CacheStore
 from webbed_duck.config import load_config
 
 from tests.conftest import write_sidecar_route
@@ -107,6 +116,200 @@ def test_compile_route(tmp_path: Path) -> None:
 
     loaded = load_compiled_routes(build_dir)
     assert loaded[0].id == "sample"
+
+
+def test_compile_route_applies_constants(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"const_route\"\n"
+        "path = \"/const\"\n"
+        "[params.user_id]\n"
+        "type = \"int\"\n"
+        "required = true\n"
+        "[constants]\n"
+        "region_code = \"US01\"\n"
+        "+++\n\n"
+        "```sql\nSELECT * FROM mart.customers WHERE region = {{const.region_code}} AND id = {{user_id}}\n```\n"
+    )
+    route_path = write_route(tmp_path, route_text)
+    definition = compile_route_file(route_path)
+    const = definition.constants.get("region_code")
+    assert const is not None
+    assert const.value == "US01"
+    assert const.duckdb_type == "VARCHAR"
+    assert definition.prepared_sql == "SELECT * FROM mart.customers WHERE region = ? AND id = ?"
+    assert definition.param_order == ["user_id"]
+    assert definition.binding_order == ["const:region_code", "param:user_id"]
+
+
+def test_compile_route_resolves_keyring_secret(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"secret_route\"\n"
+        "path = \"/secret\"\n"
+        "[secrets.api_password]\n"
+        "service = \"app\"\n"
+        "username = \"robot\"\n"
+        "+++\n\n"
+        "```sql\nSELECT {{const.api_password}} AS secret_value\n```\n"
+    )
+    route_path = write_route(tmp_path, route_text)
+
+    class DummyKeyring:
+        @staticmethod
+        def get_password(service: str, username: str) -> str | None:
+            if service == "app" and username == "robot":
+                return "s3cret"
+            return None
+
+    monkeypatch.setattr(compiler, "keyring", DummyKeyring())
+
+    definition = compile_route_file(route_path)
+    const = definition.constants.get("api_password")
+    assert const is not None
+    assert const.value == "s3cret"
+    assert const.duckdb_type == "VARCHAR"
+    assert definition.prepared_sql == "SELECT ? AS secret_value"
+    assert definition.binding_order == ["const:api_password"]
+
+
+def test_missing_secret_is_redacted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"secret_route\"\n"
+        "path = \"/secret\"\n"
+        "[secrets.api_password]\n"
+        "service = \"app\"\n"
+        "username = \"robot\"\n"
+        "+++\n\n"
+        "```sql\nSELECT {{const.api_password}}\n```\n"
+    )
+    route_path = write_route(tmp_path, route_text)
+
+    class DummyKeyring:
+        @staticmethod
+        def get_password(service: str, username: str) -> str | None:
+            return None
+
+    monkeypatch.setattr(compiler, "keyring", DummyKeyring())
+
+    with pytest.raises(RouteCompilationError) as excinfo:
+        compile_route_file(route_path)
+    message = str(excinfo.value)
+    assert "service" not in message
+    assert "robot" not in message
+    assert "could not be resolved" in message
+
+
+def test_compile_route_detects_constant_conflicts(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"conflict\"\n"
+        "path = \"/conflict\"\n"
+        "[constants]\n"
+        "shared = \"route\"\n"
+        "+++\n\n"
+        "```sql\nSELECT '{{const.shared}}'\n```\n"
+    )
+    route_path = write_route(tmp_path, route_text)
+
+    with pytest.raises(RouteCompilationError):
+        compile_route_file(
+            route_path,
+            server_constants={"shared": "server"},
+        )
+
+
+def test_compile_route_infers_constant_types(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"typed\"\n"
+        "path = \"/typed\"\n"
+        "[constants]\n"
+        "flag = true\n"
+        "threshold = 12.34\n"
+        "cutoff = 2024-01-15\n"
+        "+++\n\n"
+        "```sql\n"
+        "SELECT {{const.flag}}::BOOLEAN AS flag,\n"
+        "       {{const.threshold}}::DECIMAL AS threshold,\n"
+        "       {{const.cutoff}}::DATE AS cutoff\n"
+        "```\n"
+    )
+    route_path = write_route(tmp_path, route_text)
+    definition = compile_route_file(route_path)
+    assert definition.param_order == []
+    assert definition.binding_order == [
+        "const:flag",
+        "const:threshold",
+        "const:cutoff",
+    ]
+    consts = definition.constants
+    assert consts["flag"].duckdb_type == "BOOLEAN"
+    assert consts["flag"].value is True
+    assert consts["threshold"].duckdb_type == "DECIMAL"
+    assert isinstance(consts["threshold"].value, decimal.Decimal)
+    assert consts["threshold"].value == decimal.Decimal("12.34")
+    assert consts["cutoff"].duckdb_type == "DATE"
+    assert consts["cutoff"].value == dt.date(2024, 1, 15)
+    assert definition.prepared_sql.count("?") == 3
+
+
+def test_constant_injection_escapes_quotes(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"quotes\"\n"
+        "path = \"/quotes\"\n"
+        "[constants]\n"
+        "danger = \"Robert'); DROP TABLE users;--\"\n"
+        "+++\n\n"
+        "```sql\nSELECT {{const.danger}} AS payload\n```\n"
+    )
+    route_path = write_route(tmp_path, route_text)
+    definition = compile_route_file(route_path)
+    const = definition.constants["danger"]
+    assert const.value == "Robert'); DROP TABLE users;--"
+    assert definition.prepared_sql == "SELECT ? AS payload"
+    assert "DROP TABLE" in definition.raw_sql
+    assert "''" in definition.raw_sql  # escaped quotes
+
+
+def test_cache_plan_hash_includes_constants(tmp_path: Path) -> None:
+    template = (
+        "+++\n"
+        "id = \"plan\"\n"
+        "path = \"/plan\"\n"
+        "[constants]\n"
+        "threshold = {value}\n"
+        "+++\n\n"
+        "```sql\nSELECT {{const.threshold}} AS threshold\n```\n"
+    )
+    first_text = template.replace("{value}", "10")
+    second_text = template.replace("{value}", "12")
+    first = compile_route_text(
+        first_text,
+        source_path=tmp_path / "plan_one.toml",
+    )
+    second = compile_route_text(
+        second_text,
+        source_path=tmp_path / "plan_two.toml",
+    )
+    first_const = first.constants.get("threshold")
+    second_const = second.constants.get("threshold")
+    assert first_const is not None
+    assert second_const is not None
+    assert first_const.value != second_const.value
+    store = CacheStore(tmp_path / "cache")
+    settings = CacheSettings(enabled=True, ttl_seconds=60, rows_per_page=100, enforce_page_size=False)
+    params_one = {f"const:{name}": binding.value for name, binding in first.constants.items()}
+    params_two = {f"const:{name}": binding.value for name, binding in second.constants.items()}
+    key_one = store.compute_key(first, params_one, settings)
+    key_two = store.compute_key(second, params_two, settings)
+    assert key_one.digest != key_two.digest
 
 
 def test_compile_from_toml_sql_pair(tmp_path: Path) -> None:

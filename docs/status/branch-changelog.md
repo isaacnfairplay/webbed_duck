@@ -1,5 +1,16 @@
 # Branch-level Changelog
 
+## Route constants and keyring secrets (current branch)
+
+- Extend the compiler to expand `{{const.NAME}}` markers from route `[constants]`,
+  server-level constants, and keyring-backed `[secrets]`, resolving only the
+  constants referenced by each SQL file.
+- Reject conflicting constant names across server and route scopes during
+  compilation so generated modules never carry ambiguous values.
+- Add CLI support for loading shared constants from `config.toml`, propagate the
+  configuration into watch-mode recompiles, and document the feature in the
+  README alongside sample config entries.
+
 ## Demo HTML embedding refresh (current branch)
 
 - Documented GitHub Markdown HTML support and our demo pattern in `docs/html-embedding.md`, including sanitisation rules and the screenshot fallback.
@@ -435,3 +446,16 @@
   inside nested queries.
 - Cover multi-value inputs by binding repeated parameters as Python lists so
   the executor preserves sequence values for `IN $param` filters.
+
+## Compiler constant binding + cache fingerprints (work branch)
+
+- Bind `{{const.NAME}}` markers as typed parameters (BOOLEAN/DATE/DECIMAL/
+  VARCHAR) sourced from route frontmatter, server configuration, or keyring
+  secrets. The compiler now records binding order metadata, redacts missing
+  secret failures, and rejects constant name collisions before runtime.
+- Thread the new bindings through the executor, FastAPI schema endpoint, and
+  cache key generation so constants populate prepared statements, hot reloads
+  when frontmatter changes, and participate in cache digests.
+- Extend regression coverage with typed-constant snapshots, injection tests for
+  quoted strings, plan-hash assertions, missing secret redaction, and a watcher
+  test that rewrites a TOML constant and observes the reload counter.

@@ -1571,6 +1571,8 @@ def _normalize_mapping(values: Mapping[str, object]) -> dict[str, object]:
 
 
 def _json_default(value: object) -> object:
+    if isinstance(value, decimal.Decimal):
+        return str(value)
     if hasattr(value, "isoformat"):
         try:
             return value.isoformat()

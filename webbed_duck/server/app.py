@@ -20,7 +20,12 @@ from .. import __version__ as PACKAGE_VERSION
 from ..config import Config
 from ..runtime.paths import get_storage
 from ..static.chartjs import CHARTJS_VERSION
-from ..core.routes import ParameterSpec, ParameterType, RouteDefinition
+from ..core.routes import (
+    CONSTANT_TOKEN_PREFIX,
+    ParameterSpec,
+    ParameterType,
+    RouteDefinition,
+)
 from ..plugins.charts import render_route_charts
 from .analytics import AnalyticsStore, ExecutionMetrics
 from .auth import resolve_auth_adapter
@@ -252,7 +257,7 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
     async def describe_route(route_id: str, request: Request) -> Mapping[str, object]:
         route = _get_route(app.state.routes, route_id)
         params = _collect_params(route, request)
-        ordered = [_value_for_name(params, name, route) for name in route.param_order]
+        ordered = _ordered_values(params, route)
         table = _execute_sql(_limit_zero(route.prepared_sql), ordered)
         schema = [
             {"name": field.name, "type": str(field.type)}
@@ -719,7 +724,7 @@ def _execute_route(
     limit: int | None,
 ) -> RouteExecutionResult:
     processed = run_preprocessors(route.preprocess, params, route=route, request=request)
-    ordered = [_value_for_name(processed, name, route) for name in route.param_order]
+    ordered = _ordered_values(processed, route)
     sanitized_offset = max(0, offset or 0)
     sanitized_limit = None if limit is None else max(0, int(limit))
     cache_store: CacheStore | None = getattr(request.app.state, "cache_store", None)
@@ -1308,6 +1313,29 @@ def _value_for_name(values: Mapping[str, object], name: str, route: RouteDefinit
             raise _http_error("missing_parameter", f"Missing required parameter '{name}'")
         return None
     return values[name]
+
+
+def _ordered_values(values: Mapping[str, object], route: RouteDefinition) -> list[object]:
+    binding_order = getattr(route, "binding_order", ())
+    if binding_order:
+        ordered: list[object] = []
+        for token in binding_order:
+            if token.startswith(CONSTANT_TOKEN_PREFIX):
+                name = token[len(CONSTANT_TOKEN_PREFIX):]
+                binding = route.constants.get(name)
+                if binding is None:
+                    raise _http_error(
+                        "invalid_constant",
+                        f"Route '{route.id}' references unknown constant '{name}'",
+                    )
+                ordered.append(binding.value)
+            elif token.startswith("param:"):
+                name = token.split(":", 1)[1]
+                ordered.append(_value_for_name(values, name, route))
+            else:
+                ordered.append(_value_for_name(values, token, route))
+        return ordered
+    return [_value_for_name(values, name, route) for name in route.param_order]
 
 
 def _parse_local_reference(reference: str) -> ParsedLocalReference:

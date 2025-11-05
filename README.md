@@ -239,13 +239,40 @@ con.sql(
 
 - Bind everything that comes from the request context. Bound parameters eliminate SQL injection risk and ensure cache keys include the values that change the result set.
 
-### Rule B — Use literal interpolation only for compile-time constants
+### Rule B — Use compile-time constants for shared literals
 
 If a value is fixed in TOML (for example `plant = "US01"` in `[uses.args]`), keep it literal in SQL:
 
 ```sql
 WHERE plant = 'US01'
 ```
+
+For values that multiple queries share, define them once in `[constants]` and reference them with `{{const.NAME}}`. The
+compiler resolves each marker during the build, infers the DuckDB type (BOOLEAN, DECIMAL, DATE, or VARCHAR), and binds the value
+as a parameter — no manual quoting required:
+
+```toml
+[constants]
+region = "US01"
+
+[secrets.reporting_password]
+service = "duckdb"
+username = "etl"
+```
+
+```sql
+SELECT *
+FROM mart.customers
+WHERE region = {{const.region}} AND password = {{const.reporting_password}}
+```
+
+Server-wide values can live in `config.toml` under `[server.constants]` or `[server.secrets]` and are merged with the route
+frontmatter. If two sources define the same constant name, compilation fails so collisions never reach runtime. Secrets are
+resolved through the system keyring via `keyring.get_password`; missing credentials raise a compiler error without exposing the
+service or username.
+
+> ⚠️ Constants are only available for literal values. Keep identifiers (tables, columns) explicit in SQL or model them with
+> views when you need to share names across routes.
 
 ### Binding DuckDB file paths safely
 

@@ -13,7 +13,12 @@ import duckdb
 import pyarrow as pa
 
 from ..config import Config
-from ..core.routes import ParameterSpec, RouteDefinition, RouteUse
+from ..core.routes import (
+    CONSTANT_TOKEN_PREFIX,
+    ParameterSpec,
+    RouteDefinition,
+    RouteUse,
+)
 from .cache import (
     CacheQueryResult,
     CacheStore,
@@ -110,13 +115,19 @@ class RouteExecutor:
     ) -> _PreparedRoute:
         if preprocessed:
             processed = dict(params)
-            ordered_params = list(ordered) if ordered is not None else self._ordered_from_processed(route, processed)
-            return _PreparedRoute(params=processed, ordered=ordered_params)
+            merged = self._merge_constants(route, processed)
+            ordered_params = (
+                list(ordered)
+                if ordered is not None
+                else self._ordered_from_processed(route, merged)
+            )
+            return _PreparedRoute(params=merged, ordered=ordered_params)
 
         coerced = self._coerce_params(route, params)
         processed = run_preprocessors(route.preprocess, coerced, route=route, request=request)
-        ordered_params = self._ordered_from_processed(route, processed)
-        return _PreparedRoute(params=processed, ordered=ordered_params)
+        merged = self._merge_constants(route, processed)
+        ordered_params = self._ordered_from_processed(route, merged)
+        return _PreparedRoute(params=merged, ordered=ordered_params)
 
     def _coerce_params(
         self, route: RouteDefinition, provided: Mapping[str, object]
@@ -155,6 +166,8 @@ class RouteExecutor:
     def _ordered_from_processed(
         self, route: RouteDefinition, processed: Mapping[str, object]
     ) -> list[object | None]:
+        if getattr(route, "binding_order", None):
+            return self._ordered_from_bindings(route, processed)
         ordered: list[object | None] = []
         for name in route.param_order:
             if name in processed:
@@ -173,6 +186,50 @@ class RouteExecutor:
             else:
                 ordered.append(None)
         return ordered
+
+    def _ordered_from_bindings(
+        self, route: RouteDefinition, processed: Mapping[str, object]
+    ) -> list[object | None]:
+        ordered: list[object | None] = []
+        for token in route.binding_order:
+            if token.startswith(CONSTANT_TOKEN_PREFIX):
+                name = token[len(CONSTANT_TOKEN_PREFIX):]
+                binding = route.constants.get(name)
+                if binding is None:
+                    raise RouteExecutionError(
+                        f"Route '{route.id}' references unknown constant '{name}'"
+                    )
+                ordered.append(binding.value)
+                continue
+            if token.startswith("param:"):
+                name = token.split(":", 1)[1]
+            else:
+                name = token
+            if name in processed:
+                ordered.append(processed[name])
+                continue
+            spec = route.find_param(name)
+            if spec is None:
+                ordered.append(processed.get(name))
+                continue
+            if spec.default is not None:
+                ordered.append(spec.default)
+            elif spec.required:
+                raise RouteExecutionError(
+                    f"Missing required parameter '{name}' after preprocessing for route '{route.id}'"
+                )
+            else:
+                ordered.append(None)
+        return ordered
+
+    def _merge_constants(
+        self, route: RouteDefinition, values: Mapping[str, object]
+    ) -> MutableMapping[str, object]:
+        merged: MutableMapping[str, object] = dict(values)
+        for name, binding in route.constants.items():
+            token = f"{CONSTANT_TOKEN_PREFIX}{name}"
+            merged[token] = binding.value
+        return merged
 
     def _make_reader_factory(
         self,
