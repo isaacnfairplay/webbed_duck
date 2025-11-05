@@ -21,6 +21,7 @@ import pytest
 
 from webbed_duck.config import (
     Config,
+    ConfigError,
     _as_path,
     _hours_to_seconds,
     _non_negative_int,
@@ -50,8 +51,24 @@ def _toml_literal(value: Any) -> str:
     raise TypeError(f"Unsupported TOML literal: {value!r}")
 
 
+def _config_text(
+    tmp_path: Path,
+    body: str,
+    *,
+    include_runtime: bool = True,
+    runtime_path: Path | None = None,
+) -> str:
+    sections: list[str] = []
+    if include_runtime:
+        storage_root = (runtime_path or (tmp_path / "storage")).resolve()
+        sections.append(f"[runtime]\nstorage = \"{storage_root.as_posix()}\"")
+    content = body.strip()
+    if content:
+        sections.append(content)
+    return "\n\n".join(sections) + "\n"
+
 SERVER_DEFAULTS = [
-    ("storage_root", Path("storage")),
+    ("storage_root", Path("storage").resolve(strict=False)),
     ("host", "127.0.0.1"),
     ("port", 8000),
     ("source_dir", Path("routes_src")),
@@ -223,7 +240,6 @@ CONFIG_OVERRIDE_CASES = [
     ("server", "watch", False, "watch", False),
     ("server", "watch_interval", 2.5, "watch_interval", 2.5),
     ("server", "watch_interval", 0.75, "watch_interval", 0.75),
-    ("server", "storage_root", "data/storage", "storage_root", Path("data/storage")),
     ("server", "build_dir", "compiled_routes", "build_dir", Path("compiled_routes")),
     ("server", "source_dir", "source_routes", "source_dir", Path("source_routes")),
     ("ui", "show_http_warning", False, "show_http_warning", False),
@@ -295,7 +311,10 @@ def test_load_config_bulk_overrides(
 ) -> None:
     """Validate that declarative overrides persist correctly across sections."""
 
-    config_text = f"[{section}]\n{toml_key} = {_toml_literal(raw_value)}\n"
+    config_text = _config_text(
+        tmp_path,
+        f"[{section}]\n{toml_key} = {_toml_literal(raw_value)}",
+    )
     path = tmp_path / "config.toml"
     path.write_text(config_text, encoding="utf-8")
 
@@ -443,43 +462,79 @@ def test_parse_email_allows_none_adapter() -> None:
 
 
 INVALID_CONFIG_CASES = [
-    """
-    [storage]
-    root = "storage"
-    extra = "boom"
-    """,
-    """
-    [storage]
-    root = "one"
+    (
+        """
+        [storage]
+        root = "storage"
+        extra = "boom"
+        """,
+        ConfigError,
+        True,
+    ),
+    (
+        """
+        [storage]
+        root = "one"
 
-    [server]
-    storage_root = "two"
-    """,
-    """
-    [auth]
-    allowed_domains = "not-a-list"
-    """,
-    """
-    [server]
-    port = 70000
-    """,
-    """
-    [server]
-    watch_interval = 0
-    """,
+        [server]
+        storage_root = "two"
+        """,
+        ConfigError,
+        True,
+    ),
+    (
+        """
+        [server]
+        storage_root = "two"
+        """,
+        ConfigError,
+        True,
+    ),
+    (
+        """
+        [auth]
+        allowed_domains = "not-a-list"
+        """,
+        ValueError,
+        True,
+    ),
+    (
+        """
+        [server]
+        port = 70000
+        """,
+        ValueError,
+        True,
+    ),
+    (
+        """
+        [server]
+        watch_interval = 0
+        """,
+        ValueError,
+        True,
+    ),
+    ("", ConfigError, False),
 ]
 
 
 @pytest.mark.parametrize(
-    "config_snippet",
+    ("config_snippet", "expected_exception", "include_runtime"),
     INVALID_CONFIG_CASES,
     ids=[f"invalid-{index}" for index, _ in enumerate(INVALID_CONFIG_CASES, start=1)],
 )
-def test_invalid_config_inputs_raise(tmp_path: Path, config_snippet: str) -> None:
+def test_invalid_config_inputs_raise(
+    tmp_path: Path, config_snippet: str, expected_exception: type[Exception], include_runtime: bool
+) -> None:
     """Exercise defensive branches that reject unsupported configuration."""
 
     path = tmp_path / "config.toml"
-    path.write_text(config_snippet.strip() + "\n", encoding="utf-8")
+    config_text = _config_text(
+        tmp_path,
+        config_snippet,
+        include_runtime=include_runtime,
+    )
+    path.write_text(config_text, encoding="utf-8")
 
-    with pytest.raises(ValueError):
+    with pytest.raises(expected_exception):
         load_config(path)

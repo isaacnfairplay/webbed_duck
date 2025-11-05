@@ -295,7 +295,12 @@ def test_cmd_serve_auto_compile_and_watch(
         host="127.0.0.1",
         port=8000,
     )
-    config_obj = types.SimpleNamespace(server=server_config)
+    storage_root = tmp_path / "storage"
+    storage_root.mkdir()
+    config_obj = types.SimpleNamespace(
+        server=server_config,
+        runtime=types.SimpleNamespace(storage=storage_root),
+    )
 
     monkeypatch.setattr(cli, "load_config", lambda path: config_obj)
 
@@ -399,7 +404,12 @@ def test_cmd_serve_watch_interval_clamp(
         host="127.0.0.1",
         port=8000,
     )
-    config_obj = types.SimpleNamespace(server=server_config)
+    storage_root = tmp_path / "storage"
+    storage_root.mkdir()
+    config_obj = types.SimpleNamespace(
+        server=server_config,
+        runtime=types.SimpleNamespace(storage=storage_root),
+    )
 
     monkeypatch.setattr(cli, "load_config", lambda path: config_obj)
     monkeypatch.setattr(cli, "compile_routes", lambda *_args, **_kwargs: [])
@@ -480,7 +490,12 @@ def test_cmd_serve_config_watch_interval_clamped(
         host="127.0.0.1",
         port=8000,
     )
-    config_obj = types.SimpleNamespace(server=server_config)
+    storage_root = tmp_path / "storage"
+    storage_root.mkdir()
+    config_obj = types.SimpleNamespace(
+        server=server_config,
+        runtime=types.SimpleNamespace(storage=storage_root),
+    )
 
     monkeypatch.setattr(cli, "load_config", lambda path: config_obj)
     monkeypatch.setattr(cli, "compile_routes", lambda *_args, **_kwargs: [])
@@ -560,7 +575,12 @@ def test_cmd_serve_auto_compile_failure_reports_error(
         host="127.0.0.1",
         port=8000,
     )
-    config_obj = types.SimpleNamespace(server=server_config)
+    storage_root = tmp_path / "storage"
+    storage_root.mkdir()
+    config_obj = types.SimpleNamespace(
+        server=server_config,
+        runtime=types.SimpleNamespace(storage=storage_root),
+    )
 
     monkeypatch.setattr(cli, "load_config", lambda path: config_obj)
 
