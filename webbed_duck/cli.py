@@ -221,10 +221,17 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     host = args.host or config.server.host
     port = args.port or config.server.port
 
+    from webbed_duck.server import preferred_uvicorn_http_implementation
+
     import uvicorn
 
     try:
-        uvicorn.run(app, host=host, port=port)
+        uvicorn.run(
+            app,
+            host=host,
+            port=port,
+            http=preferred_uvicorn_http_implementation(),
+        )
     finally:
         if stop_event is not None:
             stop_event.set()

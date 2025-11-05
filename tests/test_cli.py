@@ -367,15 +367,20 @@ def test_cmd_serve_auto_compile_and_watch(
 
     app_obj = types.SimpleNamespace()
     monkeypatch.setattr("webbed_duck.server.app.create_app", lambda routes, config: app_obj)
+    monkeypatch.setattr(
+        "webbed_duck.server.preferred_uvicorn_http_implementation",
+        lambda: "auto",
+    )
 
     run_calls: dict[str, object] = {}
 
     class _FakeUvicorn:
         @staticmethod
-        def run(app, host: str, port: int) -> None:  # type: ignore[no-untyped-def]
+        def run(app, host: str, port: int, **kwargs) -> None:  # type: ignore[no-untyped-def]
             run_calls["app"] = app
             run_calls["host"] = host
             run_calls["port"] = port
+            run_calls.update(kwargs)
 
     monkeypatch.setitem(sys.modules, "uvicorn", _FakeUvicorn)
 
@@ -399,7 +404,12 @@ def test_cmd_serve_auto_compile_and_watch(
     assert watcher_calls["interval"] == 1.5
     assert watcher_calls["stop"].set_called is True
     assert watcher_calls["thread"].join_timeout == 2
-    assert run_calls == {"app": app_obj, "host": "127.0.0.1", "port": 8000}
+    assert run_calls == {
+        "app": app_obj,
+        "host": "127.0.0.1",
+        "port": 8000,
+        "http": "auto",
+    }
     err = capsys.readouterr().err
     assert "Auto-compile" not in err
 
@@ -472,12 +482,17 @@ def test_cmd_serve_watch_interval_clamp(
 
     app_obj = types.SimpleNamespace()
     monkeypatch.setattr("webbed_duck.server.app.create_app", lambda routes, config: app_obj)
+    monkeypatch.setattr(
+        "webbed_duck.server.preferred_uvicorn_http_implementation",
+        lambda: "auto",
+    )
 
     class _FakeUvicorn:
         @staticmethod
-        def run(app, host: str, port: int) -> None:  # type: ignore[no-untyped-def]
+        def run(app, host: str, port: int, **kwargs) -> None:  # type: ignore[no-untyped-def]
             recorded["host"] = host
             recorded["port"] = port
+            recorded.update(kwargs)
 
     monkeypatch.setitem(sys.modules, "uvicorn", _FakeUvicorn)
 
@@ -498,6 +513,81 @@ def test_cmd_serve_watch_interval_clamp(
     assert recorded["interval"] == pytest.approx(cli.WATCH_INTERVAL_MIN)
     assert recorded["stop"].called is True
     assert recorded["thread"].join_timeout == 2
+
+
+def test_cmd_serve_forces_h11_on_windows_py313(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    source_dir = tmp_path / "src"
+    source_dir.mkdir()
+    build_dir = tmp_path / "build"
+    build_dir.mkdir()
+
+    server_config = types.SimpleNamespace(
+        build_dir=build_dir,
+        source_dir=source_dir,
+        auto_compile=False,
+        watch=False,
+        watch_interval=1.0,
+        host="127.0.0.1",
+        port=8000,
+        constants={},
+        secrets={},
+    )
+    storage_root = tmp_path / "storage"
+    storage_root.mkdir()
+    config_obj = types.SimpleNamespace(
+        server=server_config,
+        runtime=types.SimpleNamespace(storage=storage_root),
+    )
+
+    monkeypatch.setattr(cli, "load_config", lambda path: config_obj)
+    monkeypatch.setattr(cli, "compile_routes", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        "webbed_duck.core.routes.load_compiled_routes", lambda build: ["route"]
+    )
+    monkeypatch.setattr(
+        "webbed_duck.server.preferred_uvicorn_http_implementation",
+        lambda: "h11",
+    )
+
+    app_obj = types.SimpleNamespace()
+    monkeypatch.setattr(
+        "webbed_duck.server.app.create_app", lambda routes, config: app_obj
+    )
+
+    recorded: dict[str, object] = {}
+
+    class _FakeUvicorn:
+        @staticmethod
+        def run(app, host: str, port: int, **kwargs) -> None:  # type: ignore[no-untyped-def]
+            recorded["app"] = app
+            recorded["host"] = host
+            recorded["port"] = port
+            recorded.update(kwargs)
+
+    monkeypatch.setitem(sys.modules, "uvicorn", _FakeUvicorn)
+
+    args = types.SimpleNamespace(
+        build=None,
+        source=None,
+        config="config.toml",
+        host=None,
+        port=None,
+        no_auto_compile=False,
+        watch=False,
+        no_watch=False,
+        watch_interval=None,
+    )
+
+    code = cli._cmd_serve(args)
+    assert code == 0
+    assert recorded == {
+        "app": app_obj,
+        "host": "127.0.0.1",
+        "port": 8000,
+        "http": "h11",
+    }
 
 
 def test_cmd_serve_config_watch_interval_clamped(
@@ -568,12 +658,17 @@ def test_cmd_serve_config_watch_interval_clamped(
 
     app_obj = types.SimpleNamespace()
     monkeypatch.setattr("webbed_duck.server.app.create_app", lambda routes, config: app_obj)
+    monkeypatch.setattr(
+        "webbed_duck.server.preferred_uvicorn_http_implementation",
+        lambda: "auto",
+    )
 
     class _FakeUvicorn:
         @staticmethod
-        def run(app, host: str, port: int) -> None:  # type: ignore[no-untyped-def]
+        def run(app, host: str, port: int, **kwargs) -> None:  # type: ignore[no-untyped-def]
             recorded["host"] = host
             recorded["port"] = port
+            recorded.update(kwargs)
 
     monkeypatch.setitem(sys.modules, "uvicorn", _FakeUvicorn)
 

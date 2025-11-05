@@ -1,5 +1,14 @@
 # Branch-level Changelog
 
+## Windows Python 3.13 Uvicorn fallback (current branch)
+
+- Detect the CPython 3.13 on Windows runtime and force Uvicorn to use the pure
+  Python ``h11`` HTTP implementation while upstream ``httptools`` wheels catch
+  up, preventing runtime crashes when ``HttpRequestParser`` is missing.
+- Thread the fallback through the CLI and demo generators so every entry point
+  shares the same server behaviour and regression coverage verifies the Windows
+  safeguard.
+
 ## Route constants and keyring secrets (current branch)
 
 - Extend the compiler to expand `{{const.NAME}}` markers from route `[constants]`,

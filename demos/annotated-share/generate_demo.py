@@ -26,6 +26,7 @@ from webbed_duck.config import Config, load_config
 from webbed_duck.core.compiler import compile_routes
 from webbed_duck.core.local import LocalRouteRunner
 from webbed_duck.core.routes import load_compiled_routes
+from webbed_duck.server import preferred_uvicorn_http_implementation
 from webbed_duck.server.app import create_app
 from webbed_duck.server.overlay import compute_row_key
 
@@ -328,7 +329,13 @@ def main() -> None:
     )
 
     app = create_app(routes, config)
-    uvicorn_config = uvicorn.Config(app, host=host, port=port, log_level="warning")
+    uvicorn_config = uvicorn.Config(
+        app,
+        host=host,
+        port=port,
+        log_level="warning",
+        http=preferred_uvicorn_http_implementation(),
+    )
     server = uvicorn.Server(uvicorn_config)
     thread = threading.Thread(target=server.run, daemon=True)
     thread.start()
