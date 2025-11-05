@@ -1,6 +1,8 @@
 """Compiler for Markdown + SQL routes."""
 from __future__ import annotations
 
+import datetime as _dt
+import decimal
 import json
 import pprint
 import re
@@ -8,7 +10,22 @@ import shlex
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Sequence
+from typing import (
+    Any,
+    Callable,
+    Dict,
+    Iterable,
+    List,
+    Mapping,
+    MutableMapping,
+    Sequence,
+    Tuple,
+)
+
+try:  # pragma: no cover - module import guard
+    import keyring
+except ModuleNotFoundError:  # pragma: no cover - handled at runtime when secrets are used
+    keyring = None  # type: ignore[assignment]
 
 from .routes import (
     ParameterSpec,
@@ -24,11 +41,17 @@ PLACEHOLDER_PATTERN = re.compile(
     r"\{\{\s*(?P<brace>[a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}|\$(?P<dollar>[a-zA-Z_][a-zA-Z0-9_]*)"
 )
 DIRECTIVE_PATTERN = re.compile(r"<!--\s*@(?P<name>[a-zA-Z0-9_.:-]+)(?P<body>.*?)-->", re.DOTALL)
+CONSTANT_PATTERN = re.compile(
+    r"\{\{\s*const(?:ant)?\.(?P<constant>[a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}",
+    re.IGNORECASE,
+)
+
+_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
 
 _KNOWN_FRONTMATTER_KEYS = {
     "append",
     "assets",
-    "cache",
+    "cache", 
     "charts",
     "cache-mode",
     "cache_mode",
@@ -55,6 +78,8 @@ _KNOWN_FRONTMATTER_KEYS = {
     "allowed_formats",
     "allowed-formats",
     "uses",
+    "constants",
+    "secrets",
 }
 
 
@@ -93,7 +118,13 @@ class _RouteSource:
     doc_path: Path | None
 
 
-def compile_routes(source_dir: str | Path, build_dir: str | Path) -> List[RouteDefinition]:
+def compile_routes(
+    source_dir: str | Path,
+    build_dir: str | Path,
+    *,
+    server_constants: Mapping[str, object] | None = None,
+    server_secrets: Mapping[str, Mapping[str, str]] | None = None,
+) -> List[RouteDefinition]:
     """Compile all route source files from ``source_dir`` into ``build_dir``."""
 
     src = Path(source_dir)
@@ -105,13 +136,23 @@ def compile_routes(source_dir: str | Path, build_dir: str | Path) -> List[RouteD
     compiled: List[RouteDefinition] = []
     for source in _iter_route_sources(src):
         text = _compose_route_text(source)
-        definition = compile_route_text(text, source_path=source.toml_path)
+        definition = compile_route_text(
+            text,
+            source_path=source.toml_path,
+            server_constants=server_constants,
+            server_secrets=server_secrets,
+        )
         compiled.append(definition)
         _write_route_module(definition, source.toml_path, src, dest)
     return compiled
 
 
-def compile_route_file(path: str | Path) -> RouteDefinition:
+def compile_route_file(
+    path: str | Path,
+    *,
+    server_constants: Mapping[str, object] | None = None,
+    server_secrets: Mapping[str, Mapping[str, str]] | None = None,
+) -> RouteDefinition:
     """Compile a single TOML/SQL sidecar into a :class:`RouteDefinition`."""
 
     toml_path = Path(path)
@@ -134,10 +175,21 @@ def compile_route_file(path: str | Path) -> RouteDefinition:
     parts.append(f"```sql\n{sql_text}\n```")
     body = "\n\n".join(parts)
     text = f"{FRONTMATTER_DELIMITER}\n{toml_text}\n{FRONTMATTER_DELIMITER}\n\n{body}\n"
-    return compile_route_text(text, source_path=toml_path)
+    return compile_route_text(
+        text,
+        source_path=toml_path,
+        server_constants=server_constants,
+        server_secrets=server_secrets,
+    )
 
 
-def compile_route_text(text: str, *, source_path: Path) -> RouteDefinition:
+def compile_route_text(
+    text: str,
+    *,
+    source_path: Path,
+    server_constants: Mapping[str, object] | None = None,
+    server_secrets: Mapping[str, Mapping[str, str]] | None = None,
+) -> RouteDefinition:
     """Compile ``text`` into a :class:`RouteDefinition`."""
 
     frontmatter, body = _split_frontmatter(text)
@@ -152,8 +204,36 @@ def compile_route_text(text: str, *, source_path: Path) -> RouteDefinition:
     sections = _interpret_sections(metadata_raw, directives, metadata)
 
     sql = _extract_sql(body)
+    requested_constants = {
+        match.group("constant")
+        for match in CONSTANT_PATTERN.finditer(sql)
+        if match.group("constant")
+    }
+
+    constant_bindings = _resolve_constants(
+        metadata_raw,
+        source_path=source_path,
+        server_constants=server_constants,
+        server_secrets=server_secrets,
+        requested=requested_constants,
+    )
+    sql, constant_param_map = _inject_constant_placeholders(sql, constant_bindings, source_path)
     params = _parse_params(sections.params)
-    param_order, prepared_sql = _prepare_sql(sql, params)
+    param_order, prepared_sql, used_constant_params = _prepare_sql(
+        sql,
+        params,
+        constant_param_map,
+        source_path=source_path,
+    )
+
+    constant_param_bindings: Dict[str, _ConstantBinding] = {}
+    for placeholder, name in constant_param_map.items():
+        if placeholder not in used_constant_params:
+            continue
+        binding = constant_bindings.get(name)
+        if binding is None:
+            continue
+        constant_param_bindings[placeholder] = binding
 
     methods = metadata_raw.get("methods") or ["GET"]
     if not isinstance(methods, Iterable) or isinstance(methods, (str, bytes)):
@@ -168,6 +248,16 @@ def compile_route_text(text: str, *, source_path: Path) -> RouteDefinition:
         metadata["assets"] = sections.assets
     if sections.cache:
         metadata["cache"] = sections.cache
+
+    resolved_constants = {name: binding.value for name, binding in constant_bindings.items()}
+    constant_param_values = {
+        placeholder: binding.value for placeholder, binding in constant_param_bindings.items()
+    }
+    constant_types = {name: binding.duckdb_type for name, binding in constant_bindings.items()}
+    constant_param_types = {
+        placeholder: binding.duckdb_type
+        for placeholder, binding in constant_param_bindings.items()
+    }
 
     return RouteDefinition(
         id=sections.route_id,
@@ -191,6 +281,10 @@ def compile_route_text(text: str, *, source_path: Path) -> RouteDefinition:
         cache_mode=sections.cache_mode,
         returns=sections.returns,
         uses=sections.uses,
+        constants=resolved_constants,
+        constant_params=constant_param_values,
+        constant_types=constant_types,
+        constant_param_types=constant_param_types,
     )
 
 
@@ -237,6 +331,235 @@ def _extract_sql(body: str) -> str:
     return match.group("sql").strip()
 
 
+def _resolve_constants(
+    metadata_raw: Mapping[str, object],
+    *,
+    source_path: Path,
+    server_constants: Mapping[str, object] | None,
+    server_secrets: Mapping[str, Mapping[str, str]] | None,
+    requested: set[str] | None,
+) -> Dict[str, _ConstantBinding]:
+    definitions: dict[str, tuple[str, Callable[[], _ConstantBinding]]] = {}
+
+    def register(name: str, origin: str, resolver: Callable[[], _ConstantBinding]) -> None:
+        key = str(name)
+        if key in definitions:
+            existing, _ = definitions[key]
+            raise RouteCompilationError(
+                f"Constant '{key}' defined multiple times ({existing} vs {origin}) in {source_path}"
+            )
+        definitions[key] = (origin, resolver)
+
+    def register_value(name: str, origin: str, value: object) -> None:
+        def resolve(current: object = value) -> _ConstantBinding:
+            return _normalize_constant_binding(str(name), origin, current, source_path)
+
+        register(name, origin, resolve)
+
+    def register_secret(name: str, origin: str, spec: Mapping[str, object] | object) -> None:
+        def resolve(current: Mapping[str, object] | object = spec) -> _ConstantBinding:
+            secret = _resolve_secret_reference(current, origin, source_path)
+            return _ConstantBinding(name=str(name), value=secret, duckdb_type="VARCHAR")
+
+        register(name, origin, resolve)
+
+    if server_constants:
+        for name, value in server_constants.items():
+            register_value(name, f"server.constants.{name}", value)
+
+    if server_secrets:
+        for name, spec in server_secrets.items():
+            register_secret(name, f"server.secrets.{name}", spec)
+
+    route_constants = metadata_raw.get("constants")
+    if route_constants is not None:
+        if not isinstance(route_constants, Mapping):
+            raise RouteCompilationError(
+                f"[constants] must be a table of assignments in {source_path}"
+            )
+        for name, value in route_constants.items():
+            register_value(name, f"constants.{name}", value)
+
+    route_secrets = metadata_raw.get("secrets")
+    if route_secrets is not None:
+        if not isinstance(route_secrets, Mapping):
+            raise RouteCompilationError(
+                f"[secrets] must be a table of keyring references in {source_path}"
+            )
+        for name, spec in route_secrets.items():
+            register_secret(name, f"secrets.{name}", spec)
+
+    targets: Iterable[str]
+    if requested is not None:
+        targets = [name for name in requested if name in definitions]
+    else:
+        targets = definitions.keys()
+
+    resolved: dict[str, _ConstantBinding] = {}
+    for name in targets:
+        origin, resolver = definitions[name]
+        binding = resolver()
+        resolved[name] = binding
+    return resolved
+
+
+def _inject_constant_placeholders(
+    sql: str,
+    constants: Mapping[str, _ConstantBinding],
+    source_path: Path,
+) -> tuple[str, Dict[str, str]]:
+    placeholder_map: Dict[str, str] = {}
+
+    def replace(match: re.Match[str]) -> str:
+        name = match.group("constant")
+        if name is None:
+            return match.group(0)
+        if name not in constants:
+            raise RouteCompilationError(
+                f"Constant 'const.{name}' referenced in SQL but not defined in {source_path}"
+            )
+        binding = constants[name]
+        if binding.duckdb_type == "IDENTIFIER":
+            return _sanitize_identifier(binding, source_path)
+        placeholder = f"const_{name}"
+        placeholder_map.setdefault(placeholder, name)
+        return f"${placeholder}"
+
+    rewritten = CONSTANT_PATTERN.sub(replace, sql)
+    return rewritten, placeholder_map
+
+
+def _resolve_secret_reference(
+    spec: Mapping[str, object] | object,
+    origin: str,
+    source_path: Path,
+) -> str:
+    if not isinstance(spec, Mapping):
+        raise RouteCompilationError(
+            f"{origin} must be a table with 'service' and 'username' in {source_path}"
+        )
+    service = spec.get("service")
+    username = spec.get("username")
+    if not service or not username:
+        raise RouteCompilationError(
+            f"{origin} must define both 'service' and 'username' in {source_path}"
+        )
+    if keyring is None:  # pragma: no cover - optional dependency guard
+        raise RouteCompilationError(
+            f"Resolving {origin} requires the 'keyring' package to be installed"
+        )
+    secret = keyring.get_password(str(service), str(username))
+    if secret is None:
+        raise RouteCompilationError(
+            f"Secret {origin} (service={service!r}, username={username!r}) not found via keyring"
+        )
+    return secret
+
+
+def _normalize_constant_binding(
+    name: str,
+    origin: str,
+    value: object,
+    source_path: Path,
+) -> _ConstantBinding:
+    type_hint: str | None = None
+    raw_value = value
+    if isinstance(value, Mapping):
+        if "value" not in value:
+            raise RouteCompilationError(
+                f"{origin} must provide a 'value' entry in {source_path}"
+            )
+        raw_value = value["value"]
+        type_field = value.get("type")
+        if type_field is not None and not isinstance(type_field, (str, bytes)):
+            raise RouteCompilationError(
+                f"{origin} type hint must be a string in {source_path}"
+            )
+        type_hint = str(type_field) if type_field is not None else None
+    coerced, duckdb_type = _coerce_constant_value(name, origin, raw_value, type_hint, source_path)
+    return _ConstantBinding(name=name, value=coerced, duckdb_type=duckdb_type)
+
+
+def _coerce_constant_value(
+    name: str,
+    origin: str,
+    raw_value: object,
+    type_hint: str | None,
+    source_path: Path,
+) -> tuple[object, str]:
+    hint = type_hint.lower() if type_hint else None
+
+    def fail(message: str) -> RouteCompilationError:
+        return RouteCompilationError(f"{origin} for '{name}' {message} in {source_path}")
+
+    if hint:
+        if hint in {"varchar", "text", "string"}:
+            return str(raw_value), "VARCHAR"
+        if hint in {"bool", "boolean"}:
+            if isinstance(raw_value, bool):
+                return raw_value, "BOOLEAN"
+            if isinstance(raw_value, str):
+                lowered = raw_value.strip().lower()
+                if lowered in {"true", "t", "1", "yes", "y"}:
+                    return True, "BOOLEAN"
+                if lowered in {"false", "f", "0", "no", "n"}:
+                    return False, "BOOLEAN"
+            raise fail("must be a boolean value")
+        if hint in {"date"}:
+            if isinstance(raw_value, _dt.date) and not isinstance(raw_value, _dt.datetime):
+                return raw_value, "DATE"
+            if isinstance(raw_value, str):
+                try:
+                    return _dt.date.fromisoformat(raw_value), "DATE"
+                except ValueError as exc:  # pragma: no cover - defensive guard
+                    raise fail("must be an ISO date (YYYY-MM-DD)") from exc
+            raise fail("must be an ISO date (YYYY-MM-DD)")
+        if hint in {"timestamp", "datetime"}:
+            if isinstance(raw_value, _dt.datetime):
+                return raw_value, "TIMESTAMP"
+            if isinstance(raw_value, str):
+                try:
+                    return _dt.datetime.fromisoformat(raw_value), "TIMESTAMP"
+                except ValueError as exc:  # pragma: no cover - defensive guard
+                    raise fail("must be an ISO timestamp") from exc
+            raise fail("must be an ISO timestamp")
+        if hint in {"decimal", "number", "numeric"}:
+            try:
+                return decimal.Decimal(str(raw_value)), "DECIMAL"
+            except decimal.InvalidOperation as exc:
+                raise fail("must be coercible to DECIMAL") from exc
+        if hint in {"identifier", "ident"}:
+            text = str(raw_value)
+            if not _IDENTIFIER_PATTERN.match(text):
+                raise fail("must be an identifier using [A-Za-z0-9_.]")
+            return text, "IDENTIFIER"
+        if hint in {"int", "integer"}:
+            try:
+                return int(raw_value), "INTEGER"
+            except (TypeError, ValueError) as exc:
+                raise fail("must be coercible to INTEGER") from exc
+        if hint in {"float", "double"}:
+            try:
+                return float(raw_value), "DOUBLE"
+            except (TypeError, ValueError) as exc:
+                raise fail("must be coercible to DOUBLE") from exc
+        raise fail(f"uses unsupported type hint '{type_hint}'")
+
+    if isinstance(raw_value, bool):
+        return raw_value, "BOOLEAN"
+    if isinstance(raw_value, (int, decimal.Decimal)):
+        return decimal.Decimal(str(raw_value)), "DECIMAL"
+    if isinstance(raw_value, float):
+        return decimal.Decimal(str(raw_value)), "DECIMAL"
+    if isinstance(raw_value, _dt.datetime):
+        return raw_value, "TIMESTAMP"
+    if isinstance(raw_value, _dt.date):
+        return raw_value, "DATE"
+    if raw_value is None:
+        raise fail("cannot be null")
+    return str(raw_value), "VARCHAR"
+
+
 def _parse_params(raw: Mapping[str, object]) -> List[ParameterSpec]:
     params: List[ParameterSpec] = []
     for name, value in raw.items():
@@ -276,23 +599,46 @@ def _parse_params(raw: Mapping[str, object]) -> List[ParameterSpec]:
     return params
 
 
-def _prepare_sql(sql: str, params: Sequence[ParameterSpec]) -> tuple[List[str], str]:
+def _prepare_sql(
+    sql: str,
+    params: Sequence[ParameterSpec],
+    constant_params: Mapping[str, str],
+    *,
+    source_path: Path,
+) -> tuple[List[str], str, set[str]]:
     param_names = {p.name for p in params}
     order: List[str] = []
+    used_constants: set[str] = set()
 
     def replace(match: re.Match[str]) -> str:
         name = match.group("brace") or match.group("dollar")
-        if name not in param_names:
-            raise RouteCompilationError(f"Parameter '{{{name}}}' used in SQL but not declared in frontmatter")
-        order.append(name)
-        return "?"
+        if name is None:
+            return match.group(0)
+        if name in constant_params:
+            used_constants.add(name)
+            return f"${name}"
+        if name in param_names:
+            order.append(name)
+            return f"${name}"
+        raise RouteCompilationError(
+            f"Placeholder '{name}' used in SQL but not declared or defined in {source_path}"
+        )
 
     prepared_sql = PLACEHOLDER_PATTERN.sub(replace, sql)
-    return order, prepared_sql
+    return order, prepared_sql, used_constants
 
 
 def _extract_metadata(metadata: Mapping[str, object]) -> Mapping[str, object]:
-    reserved = {"id", "path", "methods", "params", "title", "description"}
+    reserved = {
+        "id",
+        "path",
+        "methods",
+        "params",
+        "title",
+        "description",
+        "constants",
+        "secrets",
+    }
     extras: Dict[str, object] = {}
     for key, value in metadata.items():
         if key in reserved:
@@ -774,10 +1120,67 @@ def _write_route_module(definition: RouteDefinition, source_path: Path, src_root
             }
             for use in definition.uses
         ],
+        "constants": _serialize_constant_table(definition.constants, definition.constant_types),
+        "constant_params": _serialize_constant_table(
+            definition.constant_params, definition.constant_param_types
+        ),
     }
 
     module_content = "# Generated by webbed_duck.core.compiler\nROUTE = " + pprint.pformat(route_dict, width=88) + "\n"
     target_path.write_text(module_content, encoding="utf-8")
+
+
+def _sanitize_identifier(binding: _ConstantBinding, source_path: Path) -> str:
+    text = str(binding.value)
+    if not _IDENTIFIER_PATTERN.match(text):
+        raise RouteCompilationError(
+            f"Constant 'const.{binding.name}' contains invalid identifier characters in {source_path}"
+        )
+    return text
+
+
+def _serialize_constant_table(values: Mapping[str, object], types: Mapping[str, str]) -> Dict[str, object]:
+    table: Dict[str, object] = {}
+    for name, value in values.items():
+        type_name = str(types.get(name) or _infer_serialization_type(value)).upper()
+        table[str(name)] = _serialize_constant_value(value, type_name)
+    return table
+
+
+def _serialize_constant_value(value: object, type_name: str) -> Dict[str, object]:
+    normalized = type_name.upper()
+    if normalized == "BOOLEAN":
+        stored = bool(value)
+    elif normalized == "DATE":
+        stored = value.isoformat() if isinstance(value, _dt.date) else str(value)
+    elif normalized == "TIMESTAMP":
+        stored = value.isoformat() if isinstance(value, _dt.datetime) else str(value)
+    elif normalized == "DECIMAL":
+        stored = str(value)
+    elif normalized == "INTEGER":
+        stored = int(value)
+    elif normalized == "DOUBLE":
+        stored = float(value)
+    elif normalized == "IDENTIFIER":
+        stored = str(value)
+    else:
+        stored = str(value)
+        normalized = "VARCHAR"
+    return {"value": stored, "duckdb_type": normalized}
+
+
+def _infer_serialization_type(value: object) -> str:
+    if isinstance(value, bool):
+        return "BOOLEAN"
+    if isinstance(value, decimal.Decimal):
+        return "DECIMAL"
+    if isinstance(value, (int, float)):
+        return "DECIMAL"
+    if isinstance(value, _dt.datetime):
+        return "TIMESTAMP"
+    if isinstance(value, _dt.date):
+        return "DATE"
+    return "VARCHAR"
 
 
 __all__ = [
@@ -786,3 +1189,9 @@ __all__ = [
     "compile_routes",
     "RouteCompilationError",
 ]
+@dataclass(slots=True)
+class _ConstantBinding:
+    name: str
+    value: object
+    duckdb_type: str
+

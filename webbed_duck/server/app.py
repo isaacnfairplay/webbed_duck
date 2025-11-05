@@ -253,7 +253,12 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
         route = _get_route(app.state.routes, route_id)
         params = _collect_params(route, request)
         ordered = [_value_for_name(params, name, route) for name in route.param_order]
-        table = _execute_sql(_limit_zero(route.prepared_sql), ordered)
+        bindings: dict[str, object] = {}
+        for name, value in zip(route.param_order, ordered):
+            bindings[name] = value
+        for name, value in route.constant_params.items():
+            bindings[name] = value
+        table = _execute_sql(_limit_zero(route.prepared_sql), bindings)
         schema = [
             {"name": field.name, "type": str(field.type)}
             for field in table.schema
@@ -1369,7 +1374,7 @@ def _coerce_int(value: object, label: str) -> int | None:
     raise _http_error("invalid_parameter", f"{label} must be an integer")
 
 
-def _execute_sql(sql: str, params: Iterable[object]) -> pa.Table:
+def _execute_sql(sql: str, params: Mapping[str, object]) -> pa.Table:
     con = duckdb.connect()
     try:
         cursor = con.execute(sql, params)

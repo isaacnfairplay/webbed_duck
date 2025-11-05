@@ -39,6 +39,8 @@ class ServerConfig:
     auto_compile: bool = True
     watch: bool = False
     watch_interval: float = 1.0
+    constants: Mapping[str, object] = field(default_factory=dict)
+    secrets: Mapping[str, Mapping[str, str]] = field(default_factory=dict)
     _on_storage_root_change: Callable[[Path], None] | None = field(
         default=None, repr=False, compare=False
     )
@@ -335,6 +337,34 @@ def _parse_server(
         if interval <= 0:
             raise ValueError("server.watch_interval must be greater than zero")
         overrides["watch_interval"] = interval
+    if "constants" in data:
+        raw_constants = data["constants"]
+        if not isinstance(raw_constants, Mapping):
+            raise ValueError("server.constants must be a table of constant assignments")
+        constants: dict[str, object] = {}
+        for key, value in raw_constants.items():
+            name = str(key)
+            if isinstance(value, Mapping):
+                constants[name] = {str(inner_key): inner_value for inner_key, inner_value in value.items()}
+            else:
+                constants[name] = value
+        overrides["constants"] = constants
+    if "secrets" in data:
+        raw_secrets = data["secrets"]
+        if not isinstance(raw_secrets, Mapping):
+            raise ValueError("server.secrets must be a table of secret references")
+        secrets: dict[str, Mapping[str, str]] = {}
+        for name, spec in raw_secrets.items():
+            if not isinstance(spec, Mapping):
+                raise ValueError(f"server.secrets.{name} must be a table with service and username")
+            service = spec.get("service")
+            username = spec.get("username")
+            if service is None or username is None:
+                raise ValueError(
+                    f"server.secrets.{name} must define both 'service' and 'username'"
+                )
+            secrets[str(name)] = {"service": str(service), "username": str(username)}
+        overrides["secrets"] = secrets
     if not overrides:
         return base
     return replace(base, **overrides)

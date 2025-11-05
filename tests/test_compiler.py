@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import datetime as _dt
+import decimal
 from pathlib import Path
 
 import pytest
 
+from webbed_duck.core import compiler
 from webbed_duck.core.compiler import RouteCompilationError, compile_route_file, compile_routes
 from webbed_duck.core.routes import load_compiled_routes
 from webbed_duck.server.app import create_app
@@ -99,7 +102,7 @@ def test_compile_route(tmp_path: Path) -> None:
     route_path = write_route(tmp_path, route_text)
     definition = compile_route_file(route_path)
     assert definition.param_order == ["name"]
-    assert definition.prepared_sql == "SELECT ? as value"
+    assert definition.prepared_sql == "SELECT $name as value"
 
     build_dir = tmp_path / "build"
     compiled = compile_routes(tmp_path, build_dir)
@@ -107,6 +110,128 @@ def test_compile_route(tmp_path: Path) -> None:
 
     loaded = load_compiled_routes(build_dir)
     assert loaded[0].id == "sample"
+
+
+def test_compile_route_applies_constants(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"const_route\"\n"
+        "path = \"/const\"\n"
+        "[params.user_id]\n"
+        "type = \"int\"\n"
+        "required = true\n"
+        "[constants.customer_table]\n"
+        "type = \"identifier\"\n"
+        "value = \"mart.customers\"\n"
+        "+++\n\n"
+        "```sql\nSELECT * FROM {{const.customer_table}} WHERE id = {{user_id}}\n```\n"
+    )
+    route_path = write_route(tmp_path, route_text)
+    definition = compile_route_file(route_path)
+    assert definition.constants == {"customer_table": "mart.customers"}
+    assert definition.constant_params == {}
+    assert definition.prepared_sql == "SELECT * FROM mart.customers WHERE id = $user_id"
+    assert definition.param_order == ["user_id"]
+
+    build_dir = tmp_path / "build"
+    compile_routes(tmp_path, build_dir)
+    loaded = load_compiled_routes(build_dir)
+    assert loaded[0].constant_params == {}
+    assert loaded[0].prepared_sql == "SELECT * FROM mart.customers WHERE id = $user_id"
+
+
+def test_compile_route_resolves_keyring_secret(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"secret_route\"\n"
+        "path = \"/secret\"\n"
+        "[secrets.api_password]\n"
+        "service = \"app\"\n"
+        "username = \"robot\"\n"
+        "+++\n\n"
+        "```sql\nSELECT {{const.api_password}} AS secret_value\n```\n"
+    )
+    route_path = write_route(tmp_path, route_text)
+
+    class DummyKeyring:
+        @staticmethod
+        def get_password(service: str, username: str) -> str | None:
+            if service == "app" and username == "robot":
+                return "s3cret"
+            return None
+
+    monkeypatch.setattr(compiler, "keyring", DummyKeyring())
+
+    definition = compile_route_file(route_path)
+    assert definition.constants == {"api_password": "s3cret"}
+    assert definition.constant_params == {"const_api_password": "s3cret"}
+    assert definition.prepared_sql == "SELECT $const_api_password AS secret_value"
+
+
+def test_compile_route_typed_constants(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"typed\"\n"
+        "path = \"/typed\"\n"
+        "[constants]\n"
+        "today = 2024-02-29\n"
+        "enabled = true\n"
+        "limit = { type = \"decimal\", value = \"12.34\" }\n"
+        "+++\n\n"
+        "```sql\nSELECT {{const.today}} AS today, {{const.enabled}} AS enabled, {{const.limit}} AS limit_value\n```\n"
+    )
+    route_path = write_route(tmp_path, route_text)
+    definition = compile_route_file(route_path)
+    assert isinstance(definition.constants["today"], _dt.date)
+    assert definition.constants["today"] == _dt.date(2024, 2, 29)
+    assert definition.constants["enabled"] is True
+    assert isinstance(definition.constants["limit"], decimal.Decimal)
+    assert definition.constants["limit"] == decimal.Decimal("12.34")
+    assert definition.prepared_sql == (
+        "SELECT $const_today AS today, $const_enabled AS enabled, $const_limit AS limit_value"
+    )
+    assert definition.constant_params == {
+        "const_today": _dt.date(2024, 2, 29),
+        "const_enabled": True,
+        "const_limit": decimal.Decimal("12.34"),
+    }
+
+def test_compile_route_detects_constant_conflicts(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"conflict\"\n"
+        "path = \"/conflict\"\n"
+        "[constants]\n"
+        "shared = \"route\"\n"
+        "+++\n\n"
+        "```sql\nSELECT '{{const.shared}}'\n```\n"
+    )
+    route_path = write_route(tmp_path, route_text)
+
+    with pytest.raises(RouteCompilationError):
+        compile_route_file(
+            route_path,
+            server_constants={"shared": "server"},
+        )
+
+
+def test_identifier_constant_rejects_invalid(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"invalid_ident\"\n"
+        "path = \"/invalid_ident\"\n"
+        "[constants.table]\n"
+        "type = \"identifier\"\n"
+        "value = \"mart.customers;DROP\"\n"
+        "+++\n\n"
+        "```sql\nSELECT * FROM {{const.table}}\n```\n"
+    )
+    route_path = write_route(tmp_path, route_text)
+    with pytest.raises(RouteCompilationError) as exc:
+        compile_route_file(route_path)
+    assert "must be an identifier" in str(exc.value)
 
 
 def test_compile_from_toml_sql_pair(tmp_path: Path) -> None:

@@ -6,6 +6,8 @@ from enum import Enum
 from importlib import util
 from pathlib import Path
 from types import ModuleType
+import datetime as _dt
+import decimal
 from typing import Any, List, Mapping, Sequence
 
 
@@ -88,6 +90,10 @@ class RouteDefinition:
     cache_mode: str = "materialize"
     returns: str = "relation"
     uses: Sequence[RouteUse] = ()
+    constants: Mapping[str, object] = field(default_factory=dict)
+    constant_params: Mapping[str, object] = field(default_factory=dict)
+    constant_types: Mapping[str, str] = field(default_factory=dict)
+    constant_param_types: Mapping[str, str] = field(default_factory=dict)
 
     def find_param(self, name: str) -> ParameterSpec | None:
         for param in self.params:
@@ -189,6 +195,21 @@ def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
             args = {}
         uses.append(RouteUse(alias=str(alias), call=str(call), mode=mode, args=args))
 
+    constants, constant_types = _deserialize_constant_table(route.get("constants"))
+
+    constant_params_data = route.get("constant_params")
+    if isinstance(constant_params_data, Mapping):
+        constant_params: dict[str, object] = {}
+        constant_param_types: dict[str, str] = {}
+        for key, value in constant_params_data.items():
+            placeholder = str(key)
+            val, type_name = _deserialize_constant_value(placeholder, value)
+            constant_params[placeholder] = val
+            constant_param_types[placeholder] = type_name
+    else:
+        constant_params = {}
+        constant_param_types = {}
+
     return RouteDefinition(
         id=str(route["id"]),
         path=str(route["path"]),
@@ -211,7 +232,61 @@ def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
         cache_mode=str(route.get("cache_mode", "materialize")).lower(),
         returns=str(route.get("returns", "relation")).lower(),
         uses=uses,
+        constants=constants,
+        constant_params=constant_params,
+        constant_types=constant_types,
+        constant_param_types=constant_param_types,
     )
+
+
+def _deserialize_constant_table(data: object) -> tuple[dict[str, object], dict[str, str]]:
+    values: dict[str, object] = {}
+    types: dict[str, str] = {}
+    if not isinstance(data, Mapping):
+        return values, types
+    for name, payload in data.items():
+        text_name = str(name)
+        value, type_name = _deserialize_constant_value(text_name, payload)
+        values[text_name] = value
+        types[text_name] = type_name
+    return values, types
+
+
+def _deserialize_constant_value(name: str, payload: object) -> tuple[object, str]:
+    if isinstance(payload, Mapping) and "value" in payload:
+        raw_value = payload.get("value")
+        type_name = str(payload.get("duckdb_type") or payload.get("type") or "VARCHAR").upper()
+    else:
+        raw_value = payload
+        type_name = "VARCHAR"
+
+    if type_name == "BOOLEAN":
+        if isinstance(raw_value, bool):
+            return raw_value, type_name
+        if isinstance(raw_value, str):
+            lowered = raw_value.strip().lower()
+            if lowered in {"true", "t", "1", "yes", "y"}:
+                return True, type_name
+            if lowered in {"false", "f", "0", "no", "n"}:
+                return False, type_name
+        raise ValueError(f"Constant '{name}' payload cannot be parsed as BOOLEAN")
+    if type_name == "DATE":
+        if isinstance(raw_value, _dt.date) and not isinstance(raw_value, _dt.datetime):
+            return raw_value, type_name
+        return _dt.date.fromisoformat(str(raw_value)), type_name
+    if type_name == "TIMESTAMP":
+        if isinstance(raw_value, _dt.datetime):
+            return raw_value, type_name
+        return _dt.datetime.fromisoformat(str(raw_value)), type_name
+    if type_name == "DECIMAL":
+        return decimal.Decimal(str(raw_value)), type_name
+    if type_name == "INTEGER":
+        return int(raw_value), type_name
+    if type_name == "DOUBLE":
+        return float(raw_value), type_name
+    if type_name == "IDENTIFIER":
+        return str(raw_value), type_name
+    return str(raw_value), type_name
 
 
 __all__ = [

@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import base64
+import datetime as _dt
+import decimal
 import hashlib
 import json
+import math
 import shutil
 import time
 from dataclasses import dataclass, field, replace
-import decimal
-import math
 from itertools import product
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
@@ -111,6 +112,7 @@ class CacheStore:
             "rows_per_page": settings.rows_per_page,
             "order_by": list(settings.order_by),
             "params": _normalize_mapping(params),
+            "constants": _constant_snapshot(route.constants, route.constant_types),
             "invariants": [
                 {
                     "param": setting.param,
@@ -1114,7 +1116,7 @@ def resolve_cache_settings(route: RouteDefinition, config: CacheConfig) -> Cache
 def fetch_cached_table(
     route: RouteDefinition,
     params: Mapping[str, object],
-    ordered_params: Sequence[object],
+    bound_params: Mapping[str, object],
     *,
     offset: int,
     limit: int | None,
@@ -1126,8 +1128,8 @@ def fetch_cached_table(
     settings = resolve_cache_settings(route, config)
     effective_offset, effective_limit = _effective_window(offset, limit, settings)
     invariant_requests = _collect_invariant_requests(settings.invariant_filters, params)
-    reader_factory_fn = reader_factory or (lambda: _record_batch_reader(route.prepared_sql, ordered_params))
-    execute_sql_fn = execute_sql or (lambda: _execute_sql(route.prepared_sql, ordered_params))
+    reader_factory_fn = reader_factory or (lambda: _record_batch_reader(route.prepared_sql, bound_params))
+    execute_sql_fn = execute_sql or (lambda: _execute_sql(route.prepared_sql, bound_params))
 
     if not store or not settings.enabled:
         table = execute_sql_fn()
@@ -1223,7 +1225,7 @@ def fetch_cached_table(
 def materialize_parquet_artifacts(
     route: RouteDefinition,
     params: Mapping[str, object],
-    ordered_params: Sequence[object],
+    bound_params: Mapping[str, object],
     *,
     store: CacheStore | None,
     config: CacheConfig,
@@ -1243,7 +1245,7 @@ def materialize_parquet_artifacts(
         raise RuntimeError(
             f"Route '{route.id}' received invariant-filter overrides incompatible with parquet_path mode"
         )
-    reader_factory_fn = reader_factory or (lambda: _record_batch_reader(route.prepared_sql, ordered_params))
+    reader_factory_fn = reader_factory or (lambda: _record_batch_reader(route.prepared_sql, bound_params))
     cache_params = _prepare_cache_params(params, settings.invariant_filters)
     key = store.compute_key(route, cache_params, settings)
     route_signature = _route_signature(route)
@@ -1513,7 +1515,7 @@ def _slice_table(
 
 def _record_batch_reader(
     sql: str,
-    params: Sequence[object],
+    params: Mapping[str, object],
 ) -> tuple[pa.RecordBatchReader, Callable[[], None]]:
     con = duckdb.connect()
     cursor = con.execute(sql, params)
@@ -1521,7 +1523,7 @@ def _record_batch_reader(
     return reader, con.close
 
 
-def _execute_sql(sql: str, params: Sequence[object]) -> pa.Table:
+def _execute_sql(sql: str, params: Mapping[str, object]) -> pa.Table:
     con = duckdb.connect()
     try:
         cursor = con.execute(sql, params)
@@ -1550,6 +1552,7 @@ def _route_signature(route: RouteDefinition) -> str:
         "version": route.version,
         "sql": route.prepared_sql,
         "order": list(route.param_order),
+        "constants": _constant_snapshot(route.constants, route.constant_types),
     }
     encoded = json.dumps(payload, sort_keys=True, default=_json_default).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
@@ -1579,6 +1582,52 @@ def _json_default(value: object) -> object:
     if isinstance(value, (set, frozenset)):
         return sorted(value)
     return value
+
+
+def _constant_snapshot(
+    values: Mapping[str, object], types: Mapping[str, str]
+) -> list[dict[str, object]]:
+    snapshot: list[dict[str, object]] = []
+    for name in sorted(values):
+        type_name = types.get(name)
+        snapshot.append(
+            {
+                "name": name,
+                "type": type_name,
+                "value": _constant_json_value(values[name], type_name),
+            }
+        )
+    return snapshot
+
+
+def _constant_json_value(value: object, type_name: str | None) -> object:
+    normalized = type_name.upper() if type_name else None
+    if normalized == "BOOLEAN":
+        return bool(value)
+    if normalized == "DATE":
+        if isinstance(value, _dt.date) and not isinstance(value, _dt.datetime):
+            return value.isoformat()
+        return str(value)
+    if normalized == "TIMESTAMP":
+        if isinstance(value, _dt.datetime):
+            return value.isoformat()
+        return str(value)
+    if normalized == "DECIMAL":
+        return str(value)
+    if normalized == "INTEGER":
+        return int(value)
+    if normalized == "DOUBLE":
+        return float(value)
+    if normalized == "IDENTIFIER":
+        return str(value)
+    if isinstance(value, (bool, int, float)):
+        return value
+    if hasattr(value, "isoformat"):
+        try:
+            return value.isoformat()
+        except Exception:  # pragma: no cover - defensive
+            return str(value)
+    return str(value)
 
 
 __all__ = [

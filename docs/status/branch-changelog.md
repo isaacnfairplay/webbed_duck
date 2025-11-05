@@ -1,5 +1,28 @@
 # Branch-level Changelog
 
+## Route constants and keyring secrets (current branch)
+
+- Extend the compiler to expand `{{const.NAME}}` markers from route `[constants]`,
+  server-level constants, and keyring-backed `[secrets]`, resolving only the
+  constants referenced by each SQL file.
+- Reject conflicting constant names across server and route scopes during
+  compilation so generated modules never carry ambiguous values.
+- Add CLI support for loading shared constants from `config.toml`, propagate the
+  configuration into watch-mode recompiles, and document the feature in the
+  README alongside sample config entries.
+- Upgrade constant expansion to emit DuckDB named parameters (for values) while
+  validating identifier constants via an `identifier` type hint, keeping table
+  names deterministic without sacrificing injection safety.
+- Persist constant metadata on compiled routes (`constant_params` and type
+  snapshots) so cache keys and plan signatures flip whenever shared constants
+  change, and extend cache/unit tests to cover the new behaviour.
+- Thread the bound constant map through the executor, local dependencies, and
+  FastAPI schema probe so every code path executes against the same named
+  bindings instead of positional lists.
+- Document the binding semantics in the README (no more manual quoting) and
+  cover typed constants, identifier validation, and quote-heavy secrets in the
+  regression suite.
+
 ## Demo HTML embedding refresh (current branch)
 
 - Documented GitHub Markdown HTML support and our demo pattern in `docs/html-embedding.md`, including sanitisation rules and the screenshot fallback.
