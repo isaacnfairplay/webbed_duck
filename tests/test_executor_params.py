@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import duckdb
 import pyarrow as pa
 import pyarrow.parquet as pq
 import pytest
@@ -175,6 +176,35 @@ WHERE ($enabled = enabled_again)
     assert data["enabled_again"] == [True]
     assert data["ratio_again"][0] == pytest.approx(2.5)
     assert data["text_again"] == ["Alpha"]
+
+
+def test_constant_binding_handles_quotes(tmp_path: Path) -> None:
+    source = tmp_path / "src"
+    build = tmp_path / "build"
+    source.mkdir()
+
+    _write_pair(
+        source,
+        "quoted",
+        """id = "quoted"
+path = "/quoted"
+cache_mode = "passthrough"
+
+[constants]
+dangerous = "O'Brian"
+""".strip(),
+        "SELECT {{const.dangerous}} AS value",
+    )
+
+    compile_routes(source, build)
+    routes = load_compiled_routes(build)
+    route = next(item for item in routes if item.id == "quoted")
+    con = duckdb.connect()
+    try:
+        result = con.execute(route.prepared_sql, route.constant_params).fetchone()
+    finally:
+        con.close()
+    assert result == ("O'Brian",)
 
 
 def test_executor_reports_conversion_failure(tmp_path: Path) -> None:

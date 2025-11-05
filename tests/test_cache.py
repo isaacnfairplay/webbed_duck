@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import duckdb
@@ -38,6 +39,39 @@ storage = "{storage_root.as_posix()}"
     expected_cache_dir = storage_root / "cache"
     assert store._root == expected_cache_dir
     assert expected_cache_dir.is_dir()
+
+
+def test_cache_route_signature_includes_constants(tmp_path: Path) -> None:
+    route = RouteDefinition(
+        id="sample",
+        path="/sample",
+        methods=["GET"],
+        raw_sql="SELECT source.table",
+        prepared_sql="SELECT source.table",
+        param_order=[],
+        params=[],
+        constants={"table": "source.table"},
+        constant_params={},
+        constant_types={"table": "IDENTIFIER"},
+        constant_param_types={},
+    )
+    alt_route = replace(
+        route,
+        constants={"table": "other.table"},
+        constant_types={"table": "IDENTIFIER"},
+    )
+    assert cache_mod._route_signature(route) != cache_mod._route_signature(alt_route)
+
+    store = cache_mod.CacheStore(tmp_path)
+    settings = cache_mod.CacheSettings(
+        enabled=True,
+        ttl_seconds=0,
+        rows_per_page=10,
+        enforce_page_size=False,
+    )
+    key1 = store.compute_key(route, {}, settings)
+    key2 = store.compute_key(alt_route, {}, settings)
+    assert key1.digest != key2.digest
 
 
 @pytest.mark.skipif(TestClient is None, reason="fastapi is not available")

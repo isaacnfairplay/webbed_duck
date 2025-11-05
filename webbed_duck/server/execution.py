@@ -31,6 +31,7 @@ class RouteExecutionError(RuntimeError):
 class _PreparedRoute:
     params: Mapping[str, object]
     ordered: Sequence[object]
+    bindings: Mapping[str, object]
 
 
 class RouteExecutor:
@@ -86,7 +87,7 @@ class RouteExecutor:
             return fetch_cached_table(
                 route,
                 prepared.params,
-                prepared.ordered,
+                prepared.bindings,
                 offset=offset,
                 limit=limit,
                 store=self._cache_store,
@@ -111,12 +112,14 @@ class RouteExecutor:
         if preprocessed:
             processed = dict(params)
             ordered_params = list(ordered) if ordered is not None else self._ordered_from_processed(route, processed)
-            return _PreparedRoute(params=processed, ordered=ordered_params)
+            bindings = self._build_bindings(route, processed)
+            return _PreparedRoute(params=processed, ordered=ordered_params, bindings=bindings)
 
         coerced = self._coerce_params(route, params)
         processed = run_preprocessors(route.preprocess, coerced, route=route, request=request)
         ordered_params = self._ordered_from_processed(route, processed)
-        return _PreparedRoute(params=processed, ordered=ordered_params)
+        bindings = self._build_bindings(route, processed)
+        return _PreparedRoute(params=processed, ordered=ordered_params, bindings=bindings)
 
     def _coerce_params(
         self, route: RouteDefinition, provided: Mapping[str, object]
@@ -174,6 +177,36 @@ class RouteExecutor:
                 ordered.append(None)
         return ordered
 
+    def _build_bindings(
+        self, route: RouteDefinition, processed: Mapping[str, object]
+    ) -> Mapping[str, object]:
+        bindings: dict[str, object] = {}
+        seen: set[str] = set()
+        for name in route.param_order:
+            if name in seen:
+                continue
+            seen.add(name)
+            if name in processed:
+                bindings[name] = processed[name]
+                continue
+            spec = route.find_param(name)
+            if spec is None:
+                bindings[name] = processed.get(name)
+                continue
+            if spec.default is not None:
+                bindings[name] = spec.default
+            elif spec.required:
+                raise RouteExecutionError(
+                    f"Missing required parameter '{name}' after preprocessing for route '{route.id}'"
+                )
+            else:
+                bindings[name] = None
+
+        for name, value in route.constant_params.items():
+            bindings[name] = value
+
+        return bindings
+
     def _make_reader_factory(
         self,
         route: RouteDefinition,
@@ -218,7 +251,7 @@ class RouteExecutor:
         con = duckdb.connect()
         try:
             self._register_dependencies(con, route, prepared.params, request=request)
-            cursor = con.execute(route.prepared_sql, prepared.ordered)
+            cursor = con.execute(route.prepared_sql, prepared.bindings)
             return con, cursor
         except Exception:
             con.close()
@@ -332,7 +365,7 @@ class RouteExecutor:
             artifacts = materialize_parquet_artifacts(
                 target,
                 prepared.params,
-                prepared.ordered,
+                prepared.bindings,
                 store=self._cache_store,
                 config=self._cache_config,
                 reader_factory=self._make_reader_factory(target, prepared, request=request),

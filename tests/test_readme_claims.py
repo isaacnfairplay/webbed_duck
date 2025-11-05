@@ -21,7 +21,13 @@ import duckdb
 from tests.conftest import write_sidecar_route
 from webbed_duck import cli as cli_module
 from webbed_duck.config import Config, _as_path, load_config
-from webbed_duck.core.compiler import compile_route_file, compile_routes
+import webbed_duck.core.compiler as compiler
+from webbed_duck.core.compiler import (
+    RouteCompilationError,
+    compile_route_file,
+    compile_route_text,
+    compile_routes,
+)
 from webbed_duck.core.incremental import run_incremental
 from webbed_duck.core.routes import ParameterSpec, RouteDefinition, load_compiled_routes
 from webbed_duck.plugins import assets as assets_plugins
@@ -102,6 +108,30 @@ order_by = ["day_value"]
 ```sql
 SELECT {{day}} AS day_value
 ORDER BY day_value;
+```
+"""
+
+
+ROUTE_CONSTANTS = """+++
+id = "constant_demo"
+path = "/constant-demo"
+
+[constants.sales_table]
+type = "identifier"
+value = "warehouse.daily_sales"
+
+[secrets.reporting_password]
+service = "duckdb"
+username = "etl"
+
++++
+
+```sql
+SELECT *
+FROM {{const.sales_table}}
+WHERE region = {{const.region_filter}}
+  AND password = {{const.reporting_password}}
+  AND api_key = {{const.global_api_key}}
 ```
 """
 
@@ -307,6 +337,16 @@ class ReadmeContext:
     external_adapter_checks: dict[str, bool]
     share_config: object
     quality_gate_tools: set[str]
+    constant_route_raw_sql: str
+    constant_route_prepared_sql: str
+    constant_route_constants: dict[str, object]
+    constant_route_constant_params: dict[str, object]
+    constant_route_constant_types: dict[str, str]
+    constant_route_constant_param_types: dict[str, str]
+    server_constants: dict[str, object]
+    server_secrets: dict[str, dict[str, str]]
+    constant_conflict_error: str | None
+    missing_secret_error: str | None
 
 
 def _inject_file_list_preprocessor(params, *, context, files):
@@ -389,6 +429,7 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
     write_sidecar_route(src_dir, "cached_page_flex", ROUTE_PAGED_FLEX)
     write_sidecar_route(src_dir, "cached_invariant", ROUTE_INVARIANT_SUPERSET)
     write_sidecar_route(src_dir, "cached_invariant_shards", ROUTE_INVARIANT_SHARDS)
+    write_sidecar_route(src_dir, "constant_demo", ROUTE_CONSTANTS)
 
     (src_dir / "readme_child.toml").write_text(ROUTE_DEP_CHILD_TOML + "\n", encoding="utf-8")
     (src_dir / "readme_child.sql").write_text(ROUTE_DEP_CHILD_SQL + "\n", encoding="utf-8")
@@ -396,8 +437,35 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
     (src_dir / "readme_parent.sql").write_text(ROUTE_DEP_PARENT_SQL + "\n", encoding="utf-8")
     (src_dir / "readme_parent.md").write_text("# Parent documentation\n", encoding="utf-8")
 
-    compile_routes(src_dir, build_dir)
-    compile_routes(src_dir, rebuild_dir)
+    server_constants = {"region_filter": "NE"}
+    server_secrets = {"global_api_key": {"service": "ops", "username": "reporter"}}
+
+    class DummyKeyring:
+        @staticmethod
+        def get_password(service: str, username: str) -> str | None:
+            if (service, username) == ("duckdb", "etl"):
+                return "hunter2"
+            if (service, username) == ("ops", "reporter"):
+                return "api-key"
+            return None
+
+    original_keyring = getattr(compiler, "keyring", None)
+    compiler.keyring = DummyKeyring()
+    try:
+        compile_routes(
+            src_dir,
+            build_dir,
+            server_constants=server_constants,
+            server_secrets=server_secrets,
+        )
+        compile_routes(
+            src_dir,
+            rebuild_dir,
+            server_constants=server_constants,
+            server_secrets=server_secrets,
+        )
+    finally:
+        compiler.keyring = original_keyring
 
     source_pairs: dict[str, dict[str, bool]] = {}
     legacy_sidecars_present = False
@@ -424,8 +492,11 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
     route_cache_modes = {route.id: route.cache_mode for route in routes}
     route_returns = {route.id: route.returns for route in routes}
     route_uses = {route.id: list(route.uses) for route in routes}
+    constant_route = next(route for route in routes if route.id == "constant_demo")
     config = load_config(None)
     config.server.storage_root = storage_root
+    config.server.constants = dict(server_constants)
+    config.server.secrets = {name: dict(spec) for name, spec in server_secrets.items()}
     config.auth.mode = "pseudo"
     config.auth.allowed_domains = ["example.com"]
     config.email.adapter = f"{_install_email_adapter(records := [])}:send_email"
@@ -678,17 +749,17 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
                 con.execute("SELECT COUNT(*) FROM read_parquet(?::TEXT[])", [[str(sample_path)]]).fetchone()[0]
                 >= 0
             )
-        preprocessed_route = RouteDefinition(
-            id="doc_duckdb_preprocessor",
-            path="/doc_duckdb_preprocessor",
-            methods=["GET"],
-            raw_sql="SELECT COUNT(*) AS row_count FROM read_parquet($files::TEXT[])",
-            prepared_sql="SELECT COUNT(*) AS row_count FROM read_parquet(?::TEXT[])",
-            param_order=["files"],
-            params=(ParameterSpec(name="files", required=False, default=None),),
-            metadata={},
-            preprocess=(
-                {
+            preprocessed_route = RouteDefinition(
+                id="doc_duckdb_preprocessor",
+                path="/doc_duckdb_preprocessor",
+                methods=["GET"],
+                raw_sql="SELECT COUNT(*) AS row_count FROM read_parquet({{files}}::TEXT[])",
+                prepared_sql="SELECT COUNT(*) AS row_count FROM read_parquet($files::TEXT[])",
+                param_order=["files"],
+                params=(ParameterSpec(name="files", required=False, default=None),),
+                metadata={},
+                preprocess=(
+                    {
                     "callable": "tests.test_readme_claims:_inject_file_list_preprocessor",
                     "files": [str(sample_path)],
                 },
@@ -791,6 +862,35 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
     if repo_structure["tests"]:
         quality_gate_tools.add("pytest")
 
+    constant_conflict_error: str | None = None
+    try:
+        compile_route_text(
+            """+++\nid = \"conflict\"\npath = \"/conflict\"\n[constants]\nshared = \"route\"\n+++\n\n```sql\nSELECT {{const.shared}}\n```\n""",
+            source_path=src_dir / "conflict.toml",
+            server_constants={"shared": "server"},
+        )
+    except RouteCompilationError as exc:
+        constant_conflict_error = str(exc)
+
+    missing_secret_error: str | None = None
+
+    class _MissingSecretKeyring:
+        @staticmethod
+        def get_password(service: str, username: str) -> str | None:
+            return None
+
+    original_after_compile = getattr(compiler, "keyring", None)
+    compiler.keyring = _MissingSecretKeyring()
+    try:
+        compile_route_text(
+            """+++\nid = \"missing_secret\"\npath = \"/missing-secret\"\n[secrets.secret]\nservice = \"app\"\nusername = \"robot\"\n+++\n\n```sql\nSELECT {{const.secret}}\n```\n""",
+            source_path=src_dir / "missing_secret.toml",
+        )
+    except RouteCompilationError as exc:
+        missing_secret_error = str(exc)
+    finally:
+        compiler.keyring = original_after_compile
+
     pyproject = tomllib.loads((repo_root / "pyproject.toml").read_text(encoding="utf-8"))
     project_data = pyproject.get("project", {})
     python_requires = project_data.get("requires-python", "")
@@ -885,6 +985,16 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
         duckdb_binding_checks=duckdb_binding_checks,
         external_adapter_checks=external_adapter_checks,
         quality_gate_tools=quality_gate_tools,
+        constant_route_raw_sql=constant_route.raw_sql,
+        constant_route_prepared_sql=constant_route.prepared_sql,
+        constant_route_constants=dict(constant_route.constants),
+        constant_route_constant_params=dict(constant_route.constant_params),
+        constant_route_constant_types=dict(constant_route.constant_types),
+        constant_route_constant_param_types=dict(constant_route.constant_param_types),
+        server_constants=dict(server_constants),
+        server_secrets={name: dict(spec) for name, spec in server_secrets.items()},
+        constant_conflict_error=constant_conflict_error,
+        missing_secret_error=missing_secret_error,
     )
 
 
@@ -1473,7 +1583,7 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
             s,
         )),
         (lambda s: s.startswith("- Bind everything that comes from the request context"), lambda s: _ensure(
-            "?" in ctx.compiled_routes[0].prepared_sql, s
+            "$" in ctx.compiled_routes[0].prepared_sql, s
         )),
         (lambda s: s.startswith("If a value is fixed in TOML"), lambda s: _ensure(
             any(
@@ -1481,6 +1591,61 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
                 for use in ctx.route_uses.get("readme_parent", [])
                 for arg in use.args.values()
             ),
+            s,
+        )),
+        (lambda s: s.startswith("To keep table names, glob patterns, or other identifiers manageable"), lambda s: _ensure(
+            "{{const.sales_table}}" in ROUTE_CONSTANTS and "{{const.region_filter}}" in ROUTE_CONSTANTS,
+            s,
+        )),
+        (lambda s: s.startswith("them with `{{const.NAME}}` inside SQL."), lambda s: _ensure(
+            ctx.constant_route_constant_params
+            and all(name.startswith("const_") for name in ctx.constant_route_constant_params)
+            and "$const_region_filter" in ctx.constant_route_prepared_sql,
+            s,
+        )),
+        (lambda s: s.startswith("plan caching just like request parameters."), lambda s: _ensure(
+            "const_region_filter" in ctx.constant_route_constant_params
+            and "const_global_api_key" in ctx.constant_route_constant_params,
+            s,
+        )),
+        (lambda s: s.startswith("When a constant represents an identifier"), lambda s: _ensure(
+            ctx.constant_route_constant_types.get("sales_table") == "IDENTIFIER"
+            and "warehouse.daily_sales" in ctx.constant_route_raw_sql
+            and "const_sales_table" not in ctx.constant_route_constant_params,
+            s,
+        )),
+        (lambda s: s.startswith("`type = \"identifier\"` to inline"), lambda s: _ensure(
+            ctx.constant_route_constant_types.get("sales_table") == "IDENTIFIER"
+            and "warehouse.daily_sales" in ctx.constant_route_raw_sql,
+            s,
+        )),
+        (lambda s: s.startswith("Server-wide values can live in `config.toml`"), lambda s: _ensure(
+            "region_filter" in ctx.constant_route_constants
+            and "global_api_key" in ctx.constant_route_constants
+            and "region_filter" in ctx.server_constants
+            and "global_api_key" in ctx.server_secrets,
+            s,
+        )),
+        (lambda s: s.startswith("frontmatter. If two sources define the same constant name"), lambda s: _ensure(
+            ctx.constant_conflict_error is not None
+            and "defined multiple times" in ctx.constant_conflict_error,
+            s,
+        )),
+        (lambda s: s.startswith("value constants are bound as named parameters"), lambda s: _ensure(
+            "const_reporting_password" in ctx.constant_route_constant_params
+            and "$const_reporting_password" in ctx.constant_route_prepared_sql,
+            s,
+        )),
+        (lambda s: s.startswith("`type = \"identifier\"` are validated against a conservative"), lambda s: _ensure(
+            re.fullmatch(r"[A-Za-z0-9_.]+", str(ctx.constant_route_constants.get("sales_table", ""))) is not None,
+            s,
+        )),
+        (lambda s: s.startswith("through the system keyring"), lambda s: _ensure(
+            ctx.missing_secret_error is not None and "keyring" in ctx.missing_secret_error,
+            s,
+        )),
+        (lambda s: s.startswith("development."), lambda s: _ensure(
+            ctx.missing_secret_error is not None,
             s,
         )),
         (lambda s: s.startswith("DuckDB allows parameter binding for table functions"), lambda s: _ensure(
