@@ -16,11 +16,16 @@ class ParameterType(str, Enum):
     INTEGER = "int"
     FLOAT = "float"
     BOOLEAN = "bool"
+    DATE = "date"
+    DATETIME = "datetime"
 
     @classmethod
     def from_string(cls, value: str) -> "ParameterType":
+        normalized = value.strip().lower()
+        if normalized == "timestamp":
+            normalized = "datetime"
         try:
-            return cls(value)
+            return cls(normalized)
         except ValueError as exc:  # pragma: no cover - defensive programming
             raise ValueError(f"Unsupported parameter type: {value!r}") from exc
 
@@ -49,6 +54,20 @@ class ParameterSpec:
             if lowered in {"0", "false", "f", "no", "n"}:
                 return False
             raise ValueError(f"Cannot interpret {raw!r} as boolean")
+        if self.type is ParameterType.DATE:
+            from ..utils.datetime import parse_iso_date
+
+            try:
+                return parse_iso_date(raw)
+            except ValueError as exc:
+                raise ValueError(f"Cannot interpret {raw!r} as date") from exc
+        if self.type is ParameterType.DATETIME:
+            from ..utils.datetime import parse_iso_datetime
+
+            try:
+                return parse_iso_datetime(raw)
+            except ValueError as exc:
+                raise ValueError(f"Cannot interpret {raw!r} as datetime") from exc
         raise TypeError(f"Unsupported parameter type: {self.type!r}")
 
 

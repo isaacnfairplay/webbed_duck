@@ -1,6 +1,7 @@
 """Parameter form rendering for server-side routes."""
 from __future__ import annotations
 
+import datetime as _dt
 import html
 from typing import Iterable, Mapping, Sequence
 
@@ -8,6 +9,7 @@ import pyarrow as pa
 
 from ....core.routes import ParameterSpec, ParameterType
 from ....server.cache import InvariantFilterSetting
+from ....utils.datetime import isoformat_datetime
 from ..invariants import (
     coerce_page_set,
     coerce_invariant_index,
@@ -232,6 +234,10 @@ def _input_attrs_for_spec(spec: ParameterSpec) -> tuple[str, str]:
         return "number", " step='any'"
     if spec.type is ParameterType.BOOLEAN:
         return "text", ""
+    if spec.type is ParameterType.DATE:
+        return "date", ""
+    if spec.type is ParameterType.DATETIME:
+        return "text", " data-wd-type='datetime'"
     return "text", ""
 
 
@@ -463,6 +469,10 @@ def _stringify_param_value(value: object) -> str:
         return ""
     if isinstance(value, bool):
         return "true" if value else "false"
+    if isinstance(value, _dt.datetime):
+        return isoformat_datetime(value)
+    if isinstance(value, _dt.date):
+        return value.isoformat()
     return str(value)
 
 
