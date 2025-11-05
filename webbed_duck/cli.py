@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import functools
 import statistics
 import sys
 import threading
@@ -73,6 +74,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Directory containing TOML/SQL route sidecars",
     )
     compile_parser.add_argument("--build", default="routes_build", help="Destination directory for compiled routes")
+    compile_parser.add_argument(
+        "--config",
+        default=None,
+        help="Optional configuration file providing server constants",
+    )
 
     serve_parser = subparsers.add_parser("serve", help="Run the development server")
     serve_parser.add_argument("--build", default=None, help="Directory containing compiled routes")
@@ -107,7 +113,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     if args.command == "compile":
-        return _cmd_compile(args.source, args.build)
+        return _cmd_compile(args.source, args.build, config_path=args.config)
     if args.command == "serve":
         return _cmd_serve(args)
     if args.command == "run-incremental":
@@ -119,8 +125,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 1
 
 
-def _cmd_compile(source: str, build: str) -> int:
-    compiled = compile_routes(source, build)
+def _cmd_compile(source: str, build: str, *, config_path: str | None = None) -> int:
+    constants: Mapping[str, str] | None = None
+    if config_path:
+        try:
+            config = load_config(Path(config_path))
+        except ConfigError as exc:
+            print(f"[webbed-duck] ERROR: {exc}", file=sys.stderr)
+            return 2
+        constants = config.server.constants
+    compiled = compile_routes(source, build, global_constants=constants)
     print(f"Compiled {len(compiled)} route(s) to {build}")
     return 0
 
@@ -160,7 +174,11 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
     if auto_compile and source_dir is not None:
         try:
-            compiled = compile_routes(source_dir, build_dir)
+            compiled = compile_routes(
+                source_dir,
+                build_dir,
+                global_constants=config.server.constants,
+            )
         except FileNotFoundError as exc:
             print(f"[webbed-duck] Auto-compile skipped: {exc}", file=sys.stderr)
         except Exception as exc:  # pragma: no cover - runtime safeguard
@@ -180,7 +198,13 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     stop_event: threading.Event | None = None
     watch_thread: threading.Thread | None = None
     if watch_enabled and source_dir is not None:
-        stop_event, watch_thread = _start_watcher(app, source_dir, build_dir, watch_interval)
+        stop_event, watch_thread = _start_watcher(
+            app,
+            source_dir,
+            build_dir,
+            watch_interval,
+            config.server.constants,
+        )
     elif watch_enabled and source_dir is None:
         print("[webbed-duck] Watch mode enabled but no source directory configured", file=sys.stderr)
 
@@ -247,12 +271,25 @@ def _cmd_perf(args: argparse.Namespace) -> int:
     return 0
 
 
-def _start_watcher(app, source_dir: Path, build_dir: Path, interval: float) -> tuple[threading.Event, threading.Thread]:
+def _start_watcher(
+    app,
+    source_dir: Path,
+    build_dir: Path,
+    interval: float,
+    constants: Mapping[str, str] | None,
+) -> tuple[threading.Event, threading.Thread]:
     stop_event = threading.Event()
     effective_interval = max(WATCH_INTERVAL_MIN, float(interval))
     thread = threading.Thread(
         target=_watch_source,
-        args=(app, source_dir, build_dir, effective_interval, stop_event),
+        args=(
+            app,
+            source_dir,
+            build_dir,
+            effective_interval,
+            stop_event,
+            constants,
+        ),
         daemon=True,
         name="webbed-duck-watch",
     )
@@ -263,11 +300,28 @@ def _start_watcher(app, source_dir: Path, build_dir: Path, interval: float) -> t
     return stop_event, thread
 
 
-def _watch_source(app, source_dir: Path, build_dir: Path, interval: float, stop_event: threading.Event) -> None:
+def _watch_source(
+    app,
+    source_dir: Path,
+    build_dir: Path,
+    interval: float,
+    stop_event: threading.Event,
+    constants: Mapping[str, str] | None,
+) -> None:
     snapshot = build_source_fingerprint(source_dir)
+    compile_and_reload = functools.partial(
+        _compile_and_reload,
+        global_constants=constants,
+    )
     while not stop_event.wait(interval):
         try:
-            snapshot, count = _watch_iteration(app, source_dir, build_dir, snapshot)
+            snapshot, count = _watch_iteration(
+                app,
+                source_dir,
+                build_dir,
+                snapshot,
+                compile_and_reload=compile_and_reload,
+            )
         except Exception as exc:  # pragma: no cover - runtime safeguard
             print(f"[webbed-duck] Watcher failed to compile routes: {exc}", file=sys.stderr)
             continue
@@ -282,11 +336,12 @@ def _compile_and_reload(
     *,
     compile_fn=compile_routes,
     load_fn=None,
+    global_constants: Mapping[str, str] | None = None,
 ) -> int:
     from .core.routes import load_compiled_routes
 
     loader = load_fn or load_compiled_routes
-    compile_fn(source_dir, build_dir)
+    compile_fn(source_dir, build_dir, global_constants=global_constants)
     routes = loader(build_dir)
     reload_fn = getattr(app.state, "reload_routes", None)
     if reload_fn is None:

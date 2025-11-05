@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import types
 
 import pytest
 
@@ -109,6 +110,85 @@ def test_compile_route(tmp_path: Path) -> None:
     assert loaded[0].id == "sample"
 
 
+def test_compile_injects_route_constants(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"with_constant\"\n"
+        "path = \"/with_constant\"\n"
+        "[constants]\n"
+        "projection = \"widget_id\"\n"
+        "+++\n\n"
+        "```sql\nSELECT {{const.projection}} AS alias\n```\n"
+    )
+    definition = compile_route_file(write_route(tmp_path, route_text))
+    assert definition.raw_sql == "SELECT widget_id AS alias"
+    assert definition.prepared_sql == "SELECT widget_id AS alias"
+
+
+def test_compile_injects_server_constants(tmp_path: Path) -> None:
+    _write_pair(
+        tmp_path,
+        "shared",
+        """
+path = "/shared"
+""".strip(),
+        """
+SELECT '{{const.schema}}' AS schema_name
+""".strip(),
+    )
+
+    compiled = compile_routes(
+        tmp_path,
+        tmp_path / "build",
+        global_constants={"schema": "analytics"},
+    )
+    assert compiled[0].raw_sql == "SELECT 'analytics' AS schema_name"
+
+
+def test_compile_rejects_conflicting_constants(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"conflict\"\n"
+        "path = \"/conflict\"\n"
+        "[constants]\n"
+        "shared = \"route\"\n"
+        "+++\n\n"
+        "```sql\nSELECT 1\n```\n"
+    )
+    with pytest.raises(RouteCompilationError) as excinfo:
+        compile_route_file(
+            write_route(tmp_path, route_text),
+            global_constants={"shared": "global"},
+        )
+    assert "conflicts with a server-level constant" in str(excinfo.value)
+
+
+def test_compile_resolves_keyring_constant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fake_get_password(service: str, username: str) -> str | None:
+        if (service, username) == ("duckdb", "readonly"):
+            return "s3cr3t"
+        return None
+
+    monkeypatch.setattr(
+        "webbed_duck.core.constants.keyring",
+        types.SimpleNamespace(get_password=fake_get_password),
+        raising=False,
+    )
+
+    route_text = (
+        "+++\n"
+        "id = \"secret\"\n"
+        "path = \"/secret\"\n"
+        "[constants.password.secret]\n"
+        "service = \"duckdb\"\n"
+        "username = \"readonly\"\n"
+        "+++\n\n"
+        "```sql\nSELECT '{{const.password}}' AS secret_value\n```\n"
+    )
+    definition = compile_route_file(write_route(tmp_path, route_text))
+    assert definition.raw_sql == "SELECT 's3cr3t' AS secret_value"
 def test_compile_from_toml_sql_pair(tmp_path: Path) -> None:
     _write_pair(
         tmp_path,

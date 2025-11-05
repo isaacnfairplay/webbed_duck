@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Sequence
 
+from .constants import resolve_constant_table
 from .routes import (
     ParameterSpec,
     ParameterType,
@@ -29,6 +30,7 @@ _KNOWN_FRONTMATTER_KEYS = {
     "append",
     "assets",
     "cache",
+    "constants",
     "charts",
     "cache-mode",
     "cache_mode",
@@ -93,7 +95,12 @@ class _RouteSource:
     doc_path: Path | None
 
 
-def compile_routes(source_dir: str | Path, build_dir: str | Path) -> List[RouteDefinition]:
+def compile_routes(
+    source_dir: str | Path,
+    build_dir: str | Path,
+    *,
+    global_constants: Mapping[str, str] | None = None,
+) -> List[RouteDefinition]:
     """Compile all route source files from ``source_dir`` into ``build_dir``."""
 
     src = Path(source_dir)
@@ -103,15 +110,24 @@ def compile_routes(source_dir: str | Path, build_dir: str | Path) -> List[RouteD
     dest.mkdir(parents=True, exist_ok=True)
 
     compiled: List[RouteDefinition] = []
+    constant_map = dict(global_constants or {})
     for source in _iter_route_sources(src):
         text = _compose_route_text(source)
-        definition = compile_route_text(text, source_path=source.toml_path)
+        definition = compile_route_text(
+            text,
+            source_path=source.toml_path,
+            global_constants=constant_map,
+        )
         compiled.append(definition)
         _write_route_module(definition, source.toml_path, src, dest)
     return compiled
 
 
-def compile_route_file(path: str | Path) -> RouteDefinition:
+def compile_route_file(
+    path: str | Path,
+    *,
+    global_constants: Mapping[str, str] | None = None,
+) -> RouteDefinition:
     """Compile a single TOML/SQL sidecar into a :class:`RouteDefinition`."""
 
     toml_path = Path(path)
@@ -134,10 +150,19 @@ def compile_route_file(path: str | Path) -> RouteDefinition:
     parts.append(f"```sql\n{sql_text}\n```")
     body = "\n\n".join(parts)
     text = f"{FRONTMATTER_DELIMITER}\n{toml_text}\n{FRONTMATTER_DELIMITER}\n\n{body}\n"
-    return compile_route_text(text, source_path=toml_path)
+    return compile_route_text(
+        text,
+        source_path=toml_path,
+        global_constants=global_constants,
+    )
 
 
-def compile_route_text(text: str, *, source_path: Path) -> RouteDefinition:
+def compile_route_text(
+    text: str,
+    *,
+    source_path: Path,
+    global_constants: Mapping[str, str] | None = None,
+) -> RouteDefinition:
     """Compile ``text`` into a :class:`RouteDefinition`."""
 
     frontmatter, body = _split_frontmatter(text)
@@ -151,7 +176,18 @@ def compile_route_text(text: str, *, source_path: Path) -> RouteDefinition:
     metadata = _extract_metadata(metadata_raw)
     sections = _interpret_sections(metadata_raw, directives, metadata)
 
+    global_constants = dict(global_constants or {})
+    route_constants = _extract_constants(metadata_raw.get("constants"), source_path)
+    for key in route_constants:
+        if key in global_constants:
+            raise RouteCompilationError(
+                f"Constant '{key}' defined in {source_path} conflicts with a server-level constant"
+            )
+    constants = {**global_constants, **route_constants}
+
     sql = _extract_sql(body)
+    if constants:
+        sql = _inject_constants(sql, constants, source_path)
     params = _parse_params(sections.params)
     param_order, prepared_sql = _prepare_sql(sql, params)
 
@@ -292,7 +328,15 @@ def _prepare_sql(sql: str, params: Sequence[ParameterSpec]) -> tuple[List[str], 
 
 
 def _extract_metadata(metadata: Mapping[str, object]) -> Mapping[str, object]:
-    reserved = {"id", "path", "methods", "params", "title", "description"}
+    reserved = {
+        "constants",
+        "id",
+        "path",
+        "methods",
+        "params",
+        "title",
+        "description",
+    }
     extras: Dict[str, object] = {}
     for key, value in metadata.items():
         if key in reserved:
@@ -786,3 +830,41 @@ __all__ = [
     "compile_routes",
     "RouteCompilationError",
 ]
+def _extract_constants(
+    raw: object,
+    source_path: Path,
+) -> dict[str, str]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, Mapping):
+        raise RouteCompilationError(
+            f"[constants] in {source_path} must be a table of string values"
+        )
+    return resolve_constant_table(
+        raw,
+        error_cls=RouteCompilationError,
+        source=f"{source_path} [constants]",
+    )
+
+
+_CONST_PATTERN = re.compile(
+    r"\{\{\s*const(?:ants)?\.(?P<name>[A-Za-z_][A-Za-z0-9_]*)\s*\}\}", re.IGNORECASE
+)
+_CONST_DOLLAR_PATTERN = re.compile(
+    r"\$const(?:ants)?\.(?P<name>[A-Za-z_][A-Za-z0-9_]*)", re.IGNORECASE
+)
+
+
+def _inject_constants(sql: str, constants: Mapping[str, str], source_path: Path) -> str:
+    def replace(match: re.Match[str]) -> str:
+        name = match.group("name")
+        key = name
+        if key not in constants:
+            raise RouteCompilationError(
+                f"Constant '{name}' referenced in {source_path} is not defined"
+            )
+        return constants[key]
+
+    sql = _CONST_PATTERN.sub(replace, sql)
+    sql = _CONST_DOLLAR_PATTERN.sub(replace, sql)
+    return sql

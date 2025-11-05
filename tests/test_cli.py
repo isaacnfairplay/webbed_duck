@@ -82,16 +82,17 @@ def test_start_watcher_clamps_interval(
     monkeypatch.setattr(cli.threading, "Thread", fake_thread)
 
     app = types.SimpleNamespace(state=types.SimpleNamespace())
-    stop_event, thread = cli._start_watcher(app, tmp_path, tmp_path, 0.05)
+    stop_event, thread = cli._start_watcher(app, tmp_path, tmp_path, 0.05, {})
 
     assert isinstance(stop_event, cli.threading.Event)
     assert isinstance(thread, _FakeThread)
     assert captured["name"] == "webbed-duck-watch"
     assert captured["daemon"] is True
     args = captured["args"]
-    assert isinstance(args, tuple) and len(args) == 5
+    assert isinstance(args, tuple) and len(args) == 6
     assert args[1] == tmp_path and args[2] == tmp_path
     assert args[3] == pytest.approx(0.2)
+    assert args[5] == {}
     out = capsys.readouterr().out
     assert "[webbed-duck] Watching" in out
     assert "interval=0.20s" in out
@@ -208,16 +209,22 @@ def test_cmd_perf_reports_stats(monkeypatch: pytest.MonkeyPatch, capsys: pytest.
 def test_cmd_compile_reports_count(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     captured: dict[str, object] = {}
 
-    def fake_compile(source: str | Path, build: str | Path) -> list[str]:
+    def fake_compile(
+        source: str | Path,
+        build: str | Path,
+        *,
+        global_constants=None,
+    ) -> list[str]:
         captured["source"] = source
         captured["build"] = build
+        captured["constants"] = global_constants
         return ["a", "b", "c"]
 
     monkeypatch.setattr(cli, "compile_routes", fake_compile)
 
     code = cli._cmd_compile("src", "build")
     assert code == 0
-    assert captured == {"source": "src", "build": "build"}
+    assert captured == {"source": "src", "build": "build", "constants": None}
     out = capsys.readouterr().out.strip()
     assert out == "Compiled 3 route(s) to build"
 
@@ -294,6 +301,7 @@ def test_cmd_serve_auto_compile_and_watch(
         watch_interval=1.5,
         host="127.0.0.1",
         port=8000,
+        constants={},
     )
     storage_root = tmp_path / "storage"
     storage_root.mkdir()
@@ -306,9 +314,15 @@ def test_cmd_serve_auto_compile_and_watch(
 
     compiled_routes: list[Path] = []
 
-    def fake_compile(source: Path, build: Path) -> list[str]:
+    def fake_compile(
+        source: Path,
+        build: Path,
+        *,
+        global_constants=None,
+    ) -> list[str]:
         compiled_routes.append(source)
         assert build == build_dir
+        assert global_constants == server_config.constants
         return ["route"]
 
     monkeypatch.setattr(cli, "compile_routes", fake_compile)
@@ -335,11 +349,12 @@ def test_cmd_serve_auto_compile_and_watch(
         def join(self, timeout: float | None = None) -> None:
             self.join_timeout = timeout
 
-    def fake_start_watcher(app, source: Path, build: Path, interval: float):  # type: ignore[no-untyped-def]
+    def fake_start_watcher(app, source: Path, build: Path, interval: float, constants):  # type: ignore[no-untyped-def]
         watcher_calls["app"] = app
         watcher_calls["source"] = source
         watcher_calls["build"] = build
         watcher_calls["interval"] = interval
+        watcher_calls["constants"] = constants
         stop = _Stop()
         thread = _Thread()
         watcher_calls["stop"] = stop
@@ -380,6 +395,7 @@ def test_cmd_serve_auto_compile_and_watch(
     assert watcher_calls["source"] == source_dir
     assert watcher_calls["build"] == build_dir
     assert watcher_calls["interval"] == 1.5
+    assert watcher_calls["constants"] == server_config.constants
     assert watcher_calls["stop"].set_called is True
     assert watcher_calls["thread"].join_timeout == 2
     assert run_calls == {"app": app_obj, "host": "127.0.0.1", "port": 8000}
@@ -403,6 +419,7 @@ def test_cmd_serve_watch_interval_clamp(
         watch_interval=1.0,
         host="127.0.0.1",
         port=8000,
+        constants={},
     )
     storage_root = tmp_path / "storage"
     storage_root.mkdir()
@@ -433,8 +450,9 @@ def test_cmd_serve_watch_interval_clamp(
         def join(self, timeout: float | None = None) -> None:
             self.join_timeout = timeout
 
-    def fake_start_watcher(app, source: Path, build: Path, interval: float):  # type: ignore[no-untyped-def]
+    def fake_start_watcher(app, source: Path, build: Path, interval: float, constants):  # type: ignore[no-untyped-def]
         recorded["interval"] = interval
+        recorded["constants"] = constants
         stop = _Stop()
         thread = _Thread()
         recorded["stop"] = stop
@@ -469,6 +487,7 @@ def test_cmd_serve_watch_interval_clamp(
     code = cli._cmd_serve(args)
     assert code == 0
     assert recorded["interval"] == pytest.approx(cli.WATCH_INTERVAL_MIN)
+    assert recorded["constants"] == server_config.constants
     assert recorded["stop"].called is True
     assert recorded["thread"].join_timeout == 2
 
@@ -489,6 +508,7 @@ def test_cmd_serve_config_watch_interval_clamped(
         watch_interval=0.05,
         host="127.0.0.1",
         port=8000,
+        constants={},
     )
     storage_root = tmp_path / "storage"
     storage_root.mkdir()
@@ -519,8 +539,9 @@ def test_cmd_serve_config_watch_interval_clamped(
         def join(self, timeout: float | None = None) -> None:
             self.join_timeout = timeout
 
-    def fake_start_watcher(app, source: Path, build: Path, interval: float):  # type: ignore[no-untyped-def]
+    def fake_start_watcher(app, source: Path, build: Path, interval: float, constants):  # type: ignore[no-untyped-def]
         recorded["interval"] = interval
+        recorded["constants"] = constants
         stop = _Stop()
         thread = _Thread()
         recorded["stop"] = stop
@@ -555,6 +576,7 @@ def test_cmd_serve_config_watch_interval_clamped(
     code = cli._cmd_serve(args)
     assert code == 0
     assert recorded["interval"] == pytest.approx(cli.WATCH_INTERVAL_MIN)
+    assert recorded["constants"] == server_config.constants
     assert recorded["stop"].called is True
     assert recorded["thread"].join_timeout == 2
 
@@ -574,6 +596,7 @@ def test_cmd_serve_auto_compile_failure_reports_error(
         watch_interval=1.0,
         host="127.0.0.1",
         port=8000,
+        constants={},
     )
     storage_root = tmp_path / "storage"
     storage_root.mkdir()
@@ -608,8 +631,13 @@ def test_cmd_serve_auto_compile_failure_reports_error(
 def test_compile_and_reload_invokes_reload(tmp_path: Path) -> None:
     called: dict[str, object] = {}
 
-    def fake_compile(source_dir: Path, build_dir: Path) -> None:
-        called["compile"] = (source_dir, build_dir)
+    def fake_compile(
+        source_dir: Path,
+        build_dir: Path,
+        *,
+        global_constants=None,
+    ) -> None:
+        called["compile"] = (source_dir, build_dir, global_constants)
 
     def fake_load(build_dir: Path) -> list[str]:
         called["load"] = build_dir
@@ -618,9 +646,16 @@ def test_compile_and_reload_invokes_reload(tmp_path: Path) -> None:
     captured: dict[str, object] = {}
     app = types.SimpleNamespace(state=types.SimpleNamespace(reload_routes=lambda routes: captured.setdefault("routes", routes)))
 
-    count = cli._compile_and_reload(app, tmp_path, tmp_path / "build", compile_fn=fake_compile, load_fn=fake_load)
+    count = cli._compile_and_reload(
+        app,
+        tmp_path,
+        tmp_path / "build",
+        compile_fn=fake_compile,
+        load_fn=fake_load,
+        global_constants={"SHARED": "value"},
+    )
     assert count == 2
-    assert called["compile"] == (tmp_path, tmp_path / "build")
+    assert called["compile"] == (tmp_path, tmp_path / "build", {"SHARED": "value"})
     assert called["load"] == tmp_path / "build"
     assert captured["routes"] == ["a", "b"]
 
