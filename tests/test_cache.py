@@ -7,7 +7,7 @@ import pytest
 import pyarrow as pa
 
 from tests.conftest import write_sidecar_route
-from webbed_duck.config import load_config
+from webbed_duck.config import RuntimeConfig, load_config
 from webbed_duck.core.compiler import compile_routes
 from webbed_duck.core.routes import RouteDefinition, load_compiled_routes
 from webbed_duck.server.app import create_app
@@ -19,13 +19,19 @@ except ModuleNotFoundError:  # pragma: no cover - optional dependency
     TestClient = None  # type: ignore
 
 
+def _configure_storage(config, root: Path) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    config.server.storage_root = root
+    config.runtime = RuntimeConfig(storage=root)
+
+
 def test_cache_store_respects_configured_storage_root(tmp_path: Path) -> None:
     storage_root = tmp_path / "custom-root" / "nested"
     config_path = tmp_path / "config.toml"
     config_path.write_text(
         f"""
-[server]
-storage_root = "{storage_root.as_posix()}"
+[runtime]
+storage = "{storage_root.as_posix()}"
 """.strip(),
         encoding="utf-8",
     )
@@ -49,8 +55,8 @@ def test_cache_files_materialize_under_configured_storage_root(tmp_path: Path) -
     config_path = tmp_path / "config.toml"
     config_path.write_text(
         f"""
-[server]
-storage_root = "{storage_root.as_posix()}"
+[runtime]
+storage = "{storage_root.as_posix()}"
 """.strip(),
         encoding="utf-8",
     )
@@ -105,8 +111,7 @@ def test_cache_hit_skips_duckdb(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
     compile_routes(src, build)
     routes = load_compiled_routes(build)
     config = load_config(None)
-    config.server.storage_root = tmp_path / "storage"
-    config.server.storage_root.mkdir()
+    _configure_storage(config, tmp_path / "storage")
     config.cache.page_rows = 1
     app = create_app(routes, config)
     client = TestClient(app)
@@ -147,8 +152,7 @@ def test_cache_enforces_row_limit(tmp_path: Path) -> None:
     compile_routes(src, build)
     routes = load_compiled_routes(build)
     config = load_config(None)
-    config.server.storage_root = tmp_path / "storage"
-    config.server.storage_root.mkdir()
+    _configure_storage(config, tmp_path / "storage")
     config.cache.page_rows = 2
     app = create_app(routes, config)
     client = TestClient(app)
@@ -187,8 +191,7 @@ def test_cache_respects_enforce_page_size_false(tmp_path: Path) -> None:
     compile_routes(src, build)
     routes = load_compiled_routes(build)
     config = load_config(None)
-    config.server.storage_root = tmp_path / "storage"
-    config.server.storage_root.mkdir()
+    _configure_storage(config, tmp_path / "storage")
     config.cache.page_rows = 2
     app = create_app(routes, config)
     client = TestClient(app)
@@ -239,8 +242,7 @@ def test_invariant_filter_uses_superset_cache(tmp_path: Path, monkeypatch: pytes
     compile_routes(src, build)
     routes = load_compiled_routes(build)
     config = load_config(None)
-    config.server.storage_root = tmp_path / "storage"
-    config.server.storage_root.mkdir()
+    _configure_storage(config, tmp_path / "storage")
     app = create_app(routes, config)
     client = TestClient(app)
 
@@ -304,8 +306,7 @@ def test_invariant_filter_case_insensitive_values(
     compile_routes(src, build)
     routes = load_compiled_routes(build)
     config = load_config(None)
-    config.server.storage_root = tmp_path / "storage"
-    config.server.storage_root.mkdir()
+    _configure_storage(config, tmp_path / "storage")
     app = create_app(routes, config)
     client = TestClient(app)
 
@@ -401,8 +402,7 @@ def test_invariant_filter_supports_null_requests(
     compile_routes(src, build)
     routes = load_compiled_routes(build)
     config = load_config(None)
-    config.server.storage_root = tmp_path / "storage"
-    config.server.storage_root.mkdir()
+    _configure_storage(config, tmp_path / "storage")
     app = create_app(routes, config)
     client = TestClient(app)
 
@@ -480,8 +480,7 @@ def test_invariant_combines_filtered_caches(tmp_path: Path, monkeypatch: pytest.
     compile_routes(src, build)
     routes = load_compiled_routes(build)
     config = load_config(None)
-    config.server.storage_root = tmp_path / "storage"
-    config.server.storage_root.mkdir()
+    _configure_storage(config, tmp_path / "storage")
     app = create_app(routes, config)
     client = TestClient(app)
 
@@ -556,8 +555,7 @@ def test_invariant_partial_cache_triggers_query(tmp_path: Path, monkeypatch: pyt
     compile_routes(src, build)
     routes = load_compiled_routes(build)
     config = load_config(None)
-    config.server.storage_root = tmp_path / "storage"
-    config.server.storage_root.mkdir()
+    _configure_storage(config, tmp_path / "storage")
     app = create_app(routes, config)
     client = TestClient(app)
 
@@ -631,8 +629,7 @@ def test_invariant_filters_apply_to_html_views(tmp_path: Path) -> None:
     compile_routes(src, build)
     routes = load_compiled_routes(build)
     config = load_config(None)
-    config.server.storage_root = tmp_path / "storage"
-    config.server.storage_root.mkdir()
+    _configure_storage(config, tmp_path / "storage")
     app = create_app(routes, config)
     client = TestClient(app)
 
@@ -687,8 +684,7 @@ def test_invariant_filters_coerce_numeric_strings(tmp_path: Path) -> None:
     compile_routes(src, build)
     routes = load_compiled_routes(build)
     config = load_config(None)
-    config.server.storage_root = tmp_path / "storage"
-    config.server.storage_root.mkdir()
+    _configure_storage(config, tmp_path / "storage")
     app = create_app(routes, config)
     client = TestClient(app)
 
