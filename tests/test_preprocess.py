@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import textwrap
 from pathlib import Path
 
 import pyarrow as pa
@@ -39,6 +41,65 @@ def test_run_preprocessors_supports_varied_signatures() -> None:
     assert result["name"] == "pre-value-post"
     # note merged from options payload
     assert result["note"] == "memo"
+
+
+def test_run_preprocessors_supports_file_references(tmp_path: Path) -> None:
+    route = _make_route_definition()
+    script = tmp_path / "custom_preprocessor.py"
+    script.write_text(
+        textwrap.dedent(
+            """
+            from __future__ import annotations
+
+            from typing import Mapping
+
+            from webbed_duck.server.preprocess import PreprocessContext
+
+
+            def append_suffix(params: Mapping[str, object], *, context: PreprocessContext, suffix: str) -> Mapping[str, object]:
+                result = dict(params)
+                result["name"] = f"{result.get('name', '')}{suffix}"
+                return result
+            """
+        ).strip()
+        + "\n"
+    )
+    callable_path = f"{os.path.relpath(script)}:append_suffix"
+    steps = [{"callable": callable_path, "suffix": "!"}]
+
+    result = run_preprocessors(steps, {"name": "duck"}, route=route, request=None)
+
+    assert result["name"] == "duck!"
+
+
+def test_run_preprocessors_discovers_package_modules(tmp_path: Path) -> None:
+    route = _make_route_definition()
+    package_dir = tmp_path / "plugins_pkg"
+    package_dir.mkdir()
+    (package_dir / "__init__.py").write_text("\n")
+    (package_dir / "decorate.py").write_text(
+        textwrap.dedent(
+            """
+            from __future__ import annotations
+
+            from typing import Mapping
+
+
+            def decorate(params: Mapping[str, object], *, suffix: str) -> Mapping[str, object]:
+                result = dict(params)
+                result["name"] = f"{result.get('name', '')}{suffix}"
+                return result
+            """
+        ).strip()
+        + "\n"
+    )
+
+    callable_path = f"{package_dir}:decorate"
+    steps = [{"callable": callable_path, "suffix": "?"}]
+
+    result = run_preprocessors(steps, {"name": "duck"}, route=route, request=None)
+
+    assert result["name"] == "duck?"
 
 
 def test_run_preprocessors_integrates_with_local_runner(tmp_path: Path) -> None:
