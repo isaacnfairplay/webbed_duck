@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Mapping, Sequence
 
 from ..config import Config, load_config
+from ..runtime.paths import get_storage
 from ..server.cache import CacheStore
 from ..server.execution import RouteExecutionError, RouteExecutor
 from ..server.overlay import OverlayStore, apply_overrides
@@ -31,8 +32,9 @@ class LocalRouteRunner:
         if config is None:
             config = load_config(None)
         self._config = config
-        self._cache_store = CacheStore(self._config.server.storage_root)
-        self._overlay_store = OverlayStore(self._config.server.storage_root)
+        storage_root = get_storage(self._config)
+        self._cache_store = CacheStore(storage_root)
+        self._overlay_store = OverlayStore(storage_root)
 
     def run(
         self,

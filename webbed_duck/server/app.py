@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .. import __version__ as PACKAGE_VERSION
 from ..config import Config
+from ..runtime.paths import get_storage
 from ..static.chartjs import CHARTJS_VERSION
 from ..core.routes import ParameterSpec, ParameterType, RouteDefinition
 from ..plugins.charts import render_route_charts
@@ -125,16 +126,19 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
     if not routes:
         raise ValueError("At least one route must be provided to create the application")
 
+    storage_root = get_storage(config)
+
     app = FastAPI(title="webbed_duck", version=PACKAGE_VERSION)
     app.state.config = config
+    app.state.storage_root = storage_root
     app.state.analytics = AnalyticsStore(
         weight=config.analytics.weight_interactions,
         enabled=config.analytics.enabled,
     )
     app.state.routes = list(routes)
     app.state.route_index = {route.id: route for route in app.state.routes}
-    app.state.overlays = OverlayStore(config.server.storage_root)
-    app.state.meta = MetaStore(config.server.storage_root)
+    app.state.overlays = OverlayStore(storage_root)
+    app.state.meta = MetaStore(storage_root)
     app.state.session_store = SessionStore(app.state.meta, config.auth)
     app.state.share_store = ShareStore(app.state.meta, config)
     app.state.email_sender = load_email_sender(config.email.adapter)
@@ -144,9 +148,9 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
         session_store=app.state.session_store,
     )
 
-    app.state.cache_store = CacheStore(config.server.storage_root)
+    app.state.cache_store = CacheStore(storage_root)
     chartjs_route = f"/vendor/{CHARTJS_FILENAME}"
-    _prepare_chartjs_assets(app, config.server.storage_root)
+    _prepare_chartjs_assets(app, storage_root)
     app.state._dynamic_route_handles = _register_dynamic_routes(app, app.state.routes)
 
     assets_root = Path(__file__).resolve().parent.parent / "static" / "assets" / "wd"
@@ -336,7 +340,7 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
         record = {column: payload.get(column) for column in columns}
         try:
             path = append_record(
-                app.state.config.server.storage_root,
+                app.state.storage_root,
                 destination=destination,
                 columns=columns,
                 record=record,
