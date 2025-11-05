@@ -26,6 +26,7 @@ if str(REPO_ROOT) not in sys.path:
 from webbed_duck.config import Config, load_config  # noqa: E402
 from webbed_duck.core.compiler import compile_routes  # noqa: E402
 from webbed_duck.core.routes import load_compiled_routes  # noqa: E402
+from webbed_duck.server import preferred_uvicorn_http_implementation  # noqa: E402
 from webbed_duck.server.app import create_app  # noqa: E402
 from webbed_duck.server.session import SESSION_COOKIE_NAME  # noqa: E402
 
@@ -253,7 +254,13 @@ def main() -> None:
     _configure_runtime(config, storage_root, build_dir, host, port)
 
     app = create_app(routes, config)
-    uvicorn_config = uvicorn.Config(app, host=host, port=port, log_level="warning")
+    uvicorn_config = uvicorn.Config(
+        app,
+        host=host,
+        port=port,
+        log_level="warning",
+        http=preferred_uvicorn_http_implementation(),
+    )
     server = uvicorn.Server(uvicorn_config)
     server_thread = threading.Thread(target=server.run, daemon=True)
     server_thread.start()
