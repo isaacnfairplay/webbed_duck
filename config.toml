@@ -1,5 +1,7 @@
+[runtime]
+storage = "/tmp/webbed-duck-storage"
+
 [server]
-storage_root = "storage"
 host = "127.0.0.1"
 port = 8000
 source_dir = "routes_src"
