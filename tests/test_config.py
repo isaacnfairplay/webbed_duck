@@ -7,13 +7,35 @@ import os
 import pytest
 
 from webbed_duck import config as config_mod
-from webbed_duck.config import load_config
+from webbed_duck.config import ConfigError, load_config
 
 
-def _write_config(tmp_path: Path, content: str) -> Path:
+def _write_config(
+    tmp_path: Path,
+    content: str,
+    *,
+    include_runtime: bool = True,
+    runtime_path: Path | None = None,
+) -> Path:
     path = tmp_path / "config.toml"
-    path.write_text(content, encoding="utf-8")
+    pieces: list[str] = []
+    if include_runtime:
+        storage_root = (runtime_path or (tmp_path / "storage")).resolve()
+        pieces.append(
+            f"[runtime]\nstorage = \"{storage_root.as_posix()}\""
+        )
+    body = content.strip()
+    if body:
+        pieces.append(body)
+    path.write_text("\n\n".join(pieces) + "\n", encoding="utf-8")
     return path
+
+
+def test_load_config_requires_explicit_file(tmp_path: Path) -> None:
+    path = tmp_path / "missing.toml"
+
+    with pytest.raises(ConfigError, match="Configuration file not found"):
+        load_config(path)
 
 
 def test_load_config_validates_basic_overrides(tmp_path: Path) -> None:
@@ -157,7 +179,27 @@ enforce_global_page_size = true
     assert config.cache.enforce_global_page_size is True
 
 
-def test_load_config_allows_storage_root_alias(tmp_path: Path) -> None:
+def test_load_config_requires_runtime_storage_section(tmp_path: Path) -> None:
+    path = _write_config(tmp_path, "", include_runtime=False)
+
+    with pytest.raises(ConfigError, match=r"\[runtime\].storage"):
+        load_config(path)
+
+
+def test_load_config_rejects_missing_runtime_storage_value(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path,
+        """
+[runtime]
+""".strip(),
+        include_runtime=False,
+    )
+
+    with pytest.raises(ConfigError, match=r"\[runtime\].storage"):
+        load_config(path)
+
+
+def test_load_config_rejects_storage_section(tmp_path: Path) -> None:
     storage_root = tmp_path / "alias-root"
     path = _write_config(
         tmp_path,
@@ -167,59 +209,35 @@ root = "{storage_root.as_posix()}"
 """.strip(),
     )
 
-    config = load_config(path)
+    with pytest.raises(ConfigError, match=r"legacy \[storage\]"):
+        load_config(path)
 
-    assert config.server.storage_root == storage_root
 
-
-def test_load_config_rejects_conflicting_storage_alias(tmp_path: Path) -> None:
-    storage_root = tmp_path / "alias-root"
+def test_load_config_rejects_server_storage_root(tmp_path: Path) -> None:
     server_root = tmp_path / "other-root"
     path = _write_config(
         tmp_path,
         f"""
-[storage]
-root = "{storage_root.as_posix()}"
-
 [server]
 storage_root = "{server_root.as_posix()}"
 """.strip(),
     )
 
-    with pytest.raises(ValueError, match="conflicts"):
+    with pytest.raises(ConfigError, match="legacy keys"):
         load_config(path)
 
 
-def test_load_config_resolves_relative_storage_root(tmp_path: Path) -> None:
-    config_dir = tmp_path / "cfg"
-    config_dir.mkdir()
-    config_path = config_dir / "config.toml"
-    config_path.write_text(
-        """
-[server]
-storage_root = "../custom-storage"
-""".strip(),
-        encoding="utf-8",
-    )
-
-    config = load_config(config_path)
-
-    expected = (config_dir / "../custom-storage").resolve()
-    assert config.server.storage_root == expected
-
-
-def test_load_config_rejects_unknown_storage_keys(tmp_path: Path) -> None:
-    storage_root = tmp_path / "alias-root"
+def test_load_config_rejects_relative_runtime_storage(tmp_path: Path) -> None:
     path = _write_config(
         tmp_path,
-        f"""
-[storage]
-root = "{storage_root.as_posix()}"
-extra = true
+        """
+[runtime]
+storage = "relative/path"
 """.strip(),
+        include_runtime=False,
     )
 
-    with pytest.raises(ValueError, match="unknown keys"):
+    with pytest.raises(ConfigError, match="must be absolute"):
         load_config(path)
 
 
@@ -231,13 +249,14 @@ def test_load_config_rejects_windows_path_on_posix(
     path = _write_config(
         tmp_path,
         """
-[storage]
-root = "E:/web_storage"
+[runtime]
+storage = "E:/web_storage"
 """.strip(),
+        include_runtime=False,
     )
     monkeypatch.setattr(config_mod, "_is_wsl", lambda: False)
 
-    with pytest.raises(ValueError, match="Windows-style"):
+    with pytest.raises(ConfigError, match="Windows-style"):
         load_config(path)
 
 
@@ -251,14 +270,17 @@ def test_load_config_translates_windows_path_in_wsl(
     path = _write_config(
         tmp_path,
         """
-[storage]
-root = "E:/web_storage"
+[runtime]
+storage = "E:/web_storage"
 """.strip(),
+        include_runtime=False,
     )
     monkeypatch.setattr(config_mod, "_is_wsl", lambda: True)
     monkeypatch.setattr(config_mod, "_WSL_MOUNT_ROOT", mount_root, raising=False)
 
     config = load_config(path)
 
-    assert config.server.storage_root == mount_root / "e" / "web_storage"
+    expected = mount_root / "e" / "web_storage"
+    assert config.server.storage_root == expected
+    assert config.runtime.storage == expected
 
