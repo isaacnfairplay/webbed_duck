@@ -21,6 +21,7 @@ import pytest
 
 from webbed_duck.config import (
     Config,
+    ConfigError,
     _as_path,
     _hours_to_seconds,
     _non_negative_int,
@@ -30,6 +31,25 @@ from webbed_duck.config import (
     _parse_ui,
     load_config,
 )
+
+
+def _write_config(
+    tmp_path: Path,
+    body: str,
+    *,
+    include_runtime: bool = True,
+    storage: Path | None = None,
+) -> Path:
+    path = tmp_path / "config.toml"
+    sections: list[str] = []
+    if include_runtime:
+        storage_path = (storage or (tmp_path / "storage-root")).resolve()
+        sections.append(f'[runtime]\nstorage = "{storage_path.as_posix()}"')
+    body = body.strip()
+    if body:
+        sections.append(body)
+    path.write_text("\n\n".join(sections) + "\n", encoding="utf-8")
+    return path
 
 
 def _toml_literal(value: Any) -> str:
@@ -51,7 +71,7 @@ def _toml_literal(value: Any) -> str:
 
 
 SERVER_DEFAULTS = [
-    ("storage_root", Path("storage")),
+    ("storage_root", (Path.cwd() / "storage")),
     ("host", "127.0.0.1"),
     ("port", 8000),
     ("source_dir", Path("routes_src")),
@@ -223,7 +243,6 @@ CONFIG_OVERRIDE_CASES = [
     ("server", "watch", False, "watch", False),
     ("server", "watch_interval", 2.5, "watch_interval", 2.5),
     ("server", "watch_interval", 0.75, "watch_interval", 0.75),
-    ("server", "storage_root", "data/storage", "storage_root", Path("data/storage")),
     ("server", "build_dir", "compiled_routes", "build_dir", Path("compiled_routes")),
     ("server", "source_dir", "source_routes", "source_dir", Path("source_routes")),
     ("ui", "show_http_warning", False, "show_http_warning", False),
@@ -295,9 +314,8 @@ def test_load_config_bulk_overrides(
 ) -> None:
     """Validate that declarative overrides persist correctly across sections."""
 
-    config_text = f"[{section}]\n{toml_key} = {_toml_literal(raw_value)}\n"
-    path = tmp_path / "config.toml"
-    path.write_text(config_text, encoding="utf-8")
+    config_text = f"[{section}]\n{toml_key} = {_toml_literal(raw_value)}"
+    path = _write_config(tmp_path, config_text)
 
     config = load_config(path)
     section_obj = getattr(config, section)
@@ -443,43 +461,67 @@ def test_parse_email_allows_none_adapter() -> None:
 
 
 INVALID_CONFIG_CASES = [
-    """
-    [storage]
-    root = "storage"
-    extra = "boom"
-    """,
-    """
-    [storage]
-    root = "one"
+    (
+        """
+[storage]
+root = "storage"
+extra = "boom"
+""",
+        ConfigError,
+        True,
+    ),
+    (
+        """
+[storage]
+root = "one"
 
-    [server]
-    storage_root = "two"
-    """,
-    """
-    [auth]
-    allowed_domains = "not-a-list"
-    """,
-    """
-    [server]
-    port = 70000
-    """,
-    """
-    [server]
-    watch_interval = 0
-    """,
+[server]
+storage_root = "two"
+""",
+        ConfigError,
+        True,
+    ),
+    (
+        """
+[auth]
+allowed_domains = "not-a-list"
+""",
+        ValueError,
+        True,
+    ),
+    (
+        """
+[server]
+port = 70000
+""",
+        ValueError,
+        True,
+    ),
+    (
+        """
+[server]
+watch_interval = 0
+""",
+        ValueError,
+        True,
+    ),
 ]
 
 
 @pytest.mark.parametrize(
-    "config_snippet",
+    ("config_snippet", "expected_exception", "include_runtime"),
     INVALID_CONFIG_CASES,
     ids=[f"invalid-{index}" for index, _ in enumerate(INVALID_CONFIG_CASES, start=1)],
 )
-def test_invalid_config_inputs_raise(tmp_path: Path, config_snippet: str) -> None:
+def test_invalid_config_inputs_raise(
+    tmp_path: Path,
+    config_snippet: str,
+    expected_exception: type[Exception],
+    include_runtime: bool,
+) -> None:
     """Exercise defensive branches that reject unsupported configuration."""
 
-    path = tmp_path / "config.toml"
-    path.write_text(config_snippet.strip() + "\n", encoding="utf-8")
+    path = _write_config(tmp_path, config_snippet, include_runtime=include_runtime)
 
-    with pytest.raises(ValueError):
+    with pytest.raises(expected_exception):
         load_config(path)
