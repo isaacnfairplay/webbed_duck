@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from webbed_duck.core import compiler as compiler_mod
 from webbed_duck.core.compiler import RouteCompilationError, compile_route_file, compile_routes
 from webbed_duck.core.routes import load_compiled_routes
 from webbed_duck.server.app import create_app
@@ -107,6 +108,83 @@ def test_compile_route(tmp_path: Path) -> None:
 
     loaded = load_compiled_routes(build_dir)
     assert loaded[0].id == "sample"
+
+
+def test_compile_injects_constants(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"constant_demo\"\n"
+        "path = \"/constant\"\n"
+        "[constants]\n"
+        "table_name = \"my_table\"\n"
+        "+++\n\n"
+        "```sql\nSELECT * FROM {{ const.table_name }} WHERE base = '{{ const.base_dir }}'\n```\n"
+    )
+    route_path = write_route(tmp_path, route_text)
+    definition = compile_route_file(
+        route_path, constants={"base_dir": "/var/data"}
+    )
+    assert definition.constants == {
+        "base_dir": "/var/data",
+        "table_name": "my_table",
+    }
+    assert (
+        definition.raw_sql
+        == "SELECT * FROM my_table WHERE base = '/var/data'"
+    )
+    assert "{{ const" not in definition.prepared_sql
+
+
+def test_compile_route_secret_constant(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(compiler_mod.keyring, "get_password", lambda s, u: "sekret")
+    route_text = (
+        "+++\n"
+        "id = \"secret_demo\"\n"
+        "path = \"/secret\"\n"
+        "[secrets.db_password]\n"
+        "service = \"db\"\n"
+        "username = \"readonly\"\n"
+        "+++\n\n"
+        "```sql\nSELECT '{{ const.db_password }}' AS pwd\n```\n"
+    )
+    route_path = write_route(tmp_path, route_text)
+    definition = compile_route_file(route_path)
+    assert definition.constants["db_password"] == "sekret"
+    assert definition.raw_sql == "SELECT 'sekret' AS pwd"
+
+
+def test_compile_constant_conflict(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"conflict\"\n"
+        "path = \"/conflict\"\n"
+        "[constants]\n"
+        "shared = \"route\"\n"
+        "+++\n\n"
+        "```sql\nSELECT 1\n```\n"
+    )
+    route_path = write_route(tmp_path, route_text)
+    with pytest.raises(RouteCompilationError) as excinfo:
+        compile_route_file(route_path, constants={"shared": "server"})
+    assert "Constant 'shared'" in str(excinfo.value)
+
+
+def test_compile_secret_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(compiler_mod.keyring, "get_password", lambda s, u: None)
+    route_text = (
+        "+++\n"
+        "id = \"missing_secret\"\n"
+        "path = \"/missing_secret\"\n"
+        "[secrets.token]\n"
+        "service = \"svc\"\n"
+        "username = \"user\"\n"
+        "+++\n\n"
+        "```sql\nSELECT 1\n```\n"
+    )
+    route_path = write_route(tmp_path, route_text)
+    with pytest.raises(RouteCompilationError) as excinfo:
+        compile_route_file(route_path)
+    assert "Secret 'token'" in str(excinfo.value)
 
 
 def test_compile_from_toml_sql_pair(tmp_path: Path) -> None:

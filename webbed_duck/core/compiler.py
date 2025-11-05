@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Sequence
 
+import keyring
+
 from .routes import (
     ParameterSpec,
     ParameterType,
@@ -24,6 +26,9 @@ PLACEHOLDER_PATTERN = re.compile(
     r"\{\{\s*(?P<brace>[a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}|\$(?P<dollar>[a-zA-Z_][a-zA-Z0-9_]*)"
 )
 DIRECTIVE_PATTERN = re.compile(r"<!--\s*@(?P<name>[a-zA-Z0-9_.:-]+)(?P<body>.*?)-->", re.DOTALL)
+CONSTANT_PATTERN = re.compile(
+    r"\{\{\s*const\.(?P<name>[a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}", re.IGNORECASE
+)
 
 _KNOWN_FRONTMATTER_KEYS = {
     "append",
@@ -44,6 +49,8 @@ _KNOWN_FRONTMATTER_KEYS = {
     "methods",
     "params",
     "path",
+    "constants",
+    "secrets",
     "postprocess",
     "preprocess",
     "returns",
@@ -93,7 +100,12 @@ class _RouteSource:
     doc_path: Path | None
 
 
-def compile_routes(source_dir: str | Path, build_dir: str | Path) -> List[RouteDefinition]:
+def compile_routes(
+    source_dir: str | Path,
+    build_dir: str | Path,
+    *,
+    constants: Mapping[str, str] | None = None,
+) -> List[RouteDefinition]:
     """Compile all route source files from ``source_dir`` into ``build_dir``."""
 
     src = Path(source_dir)
@@ -103,15 +115,24 @@ def compile_routes(source_dir: str | Path, build_dir: str | Path) -> List[RouteD
     dest.mkdir(parents=True, exist_ok=True)
 
     compiled: List[RouteDefinition] = []
+    resolved_constants = _normalize_constant_map(constants)
     for source in _iter_route_sources(src):
         text = _compose_route_text(source)
-        definition = compile_route_text(text, source_path=source.toml_path)
+        definition = compile_route_text(
+            text,
+            source_path=source.toml_path,
+            constants=resolved_constants,
+        )
         compiled.append(definition)
         _write_route_module(definition, source.toml_path, src, dest)
     return compiled
 
 
-def compile_route_file(path: str | Path) -> RouteDefinition:
+def compile_route_file(
+    path: str | Path,
+    *,
+    constants: Mapping[str, str] | None = None,
+) -> RouteDefinition:
     """Compile a single TOML/SQL sidecar into a :class:`RouteDefinition`."""
 
     toml_path = Path(path)
@@ -134,10 +155,15 @@ def compile_route_file(path: str | Path) -> RouteDefinition:
     parts.append(f"```sql\n{sql_text}\n```")
     body = "\n\n".join(parts)
     text = f"{FRONTMATTER_DELIMITER}\n{toml_text}\n{FRONTMATTER_DELIMITER}\n\n{body}\n"
-    return compile_route_text(text, source_path=toml_path)
+    return compile_route_text(text, source_path=toml_path, constants=constants)
 
 
-def compile_route_text(text: str, *, source_path: Path) -> RouteDefinition:
+def compile_route_text(
+    text: str,
+    *,
+    source_path: Path,
+    constants: Mapping[str, str] | None = None,
+) -> RouteDefinition:
     """Compile ``text`` into a :class:`RouteDefinition`."""
 
     frontmatter, body = _split_frontmatter(text)
@@ -151,7 +177,14 @@ def compile_route_text(text: str, *, source_path: Path) -> RouteDefinition:
     metadata = _extract_metadata(metadata_raw)
     sections = _interpret_sections(metadata_raw, directives, metadata)
 
+    resolved_constants = _resolve_route_constants(
+        metadata_raw,
+        base_constants=_normalize_constant_map(constants),
+        source_path=source_path,
+    )
+
     sql = _extract_sql(body)
+    sql = _apply_constants(sql, resolved_constants, source_path)
     params = _parse_params(sections.params)
     param_order, prepared_sql = _prepare_sql(sql, params)
 
@@ -191,6 +224,7 @@ def compile_route_text(text: str, *, source_path: Path) -> RouteDefinition:
         cache_mode=sections.cache_mode,
         returns=sections.returns,
         uses=sections.uses,
+        constants=resolved_constants,
     )
 
 
@@ -235,6 +269,114 @@ def _extract_sql(body: str) -> str:
     if not match:
         raise RouteCompilationError("No SQL code block found in route file")
     return match.group("sql").strip()
+
+
+def _normalize_constant_map(constants: Mapping[str, str] | None) -> dict[str, str]:
+    if not constants:
+        return {}
+    normalized: dict[str, str] = {}
+    for key, value in constants.items():
+        normalized[str(key)] = str(value)
+    return normalized
+
+
+def _resolve_route_constants(
+    metadata: MutableMapping[str, Any],
+    *,
+    base_constants: Mapping[str, str],
+    source_path: Path,
+) -> dict[str, str]:
+    constants = dict(base_constants)
+    constants_section = metadata.pop("constants", None)
+    if constants_section is not None:
+        if not isinstance(constants_section, Mapping):
+            raise RouteCompilationError(
+                f"[constants] must be a table of string values in {source_path}"
+            )
+        for key, value in constants_section.items():
+            name = str(key)
+            _assign_constant(
+                constants,
+                name,
+                _stringify_route_constant(value, name, source_path),
+                source_path,
+            )
+
+    secrets_section = metadata.pop("secrets", None)
+    if secrets_section is not None:
+        if not isinstance(secrets_section, Mapping):
+            raise RouteCompilationError(
+                f"[secrets] must be a table of keyring references in {source_path}"
+            )
+        for key, payload in secrets_section.items():
+            name = str(key)
+            secret_value = _resolve_route_secret(name, payload, source_path)
+            _assign_constant(constants, name, secret_value, source_path)
+
+    return constants
+
+
+def _assign_constant(
+    constants: MutableMapping[str, str],
+    name: str,
+    value: str,
+    source_path: Path,
+) -> None:
+    if name in constants:
+        raise RouteCompilationError(
+            f"Constant '{name}' has multiple definitions (check server constants and {source_path})"
+        )
+    constants[name] = value
+
+
+def _stringify_route_constant(value: Any, name: str, source_path: Path) -> str:
+    if isinstance(value, Mapping):
+        raise RouteCompilationError(
+            f"Constant '{name}' in {source_path} must be a string value"
+        )
+    try:
+        return str(value)
+    except Exception as exc:  # pragma: no cover - defensive
+        raise RouteCompilationError(
+            f"Constant '{name}' in {source_path} could not be converted to string"
+        ) from exc
+
+
+def _resolve_route_secret(name: str, payload: Any, source_path: Path) -> str:
+    service: str | None
+    username: str | None
+    if isinstance(payload, Mapping):
+        service = payload.get("service")
+        username = payload.get("username") or payload.get("name")
+    else:
+        text = str(payload)
+        if ":" not in text:
+            raise RouteCompilationError(
+                f"Secret '{name}' in {source_path} must provide service:username"
+            )
+        service, username = text.split(":", 1)
+    if not service or not username:
+        raise RouteCompilationError(
+            f"Secret '{name}' in {source_path} must provide both service and username"
+        )
+    secret = keyring.get_password(str(service), str(username))
+    if secret is None:
+        raise RouteCompilationError(
+            f"Secret '{name}' in {source_path} was not found in keyring (service='{service}', username='{username}')"
+        )
+    return secret
+
+
+def _apply_constants(sql: str, constants: Mapping[str, str], source_path: Path) -> str:
+    def replace(match: re.Match[str]) -> str:
+        name = match.group("name")
+        if name not in constants:
+            raise RouteCompilationError(
+                f"SQL in {source_path} referenced undefined constant '{name}'"
+            )
+        return constants[name]
+
+    return CONSTANT_PATTERN.sub(replace, sql)
 
 
 def _parse_params(raw: Mapping[str, object]) -> List[ParameterSpec]:
@@ -292,7 +434,16 @@ def _prepare_sql(sql: str, params: Sequence[ParameterSpec]) -> tuple[List[str], 
 
 
 def _extract_metadata(metadata: Mapping[str, object]) -> Mapping[str, object]:
-    reserved = {"id", "path", "methods", "params", "title", "description"}
+    reserved = {
+        "id",
+        "path",
+        "methods",
+        "params",
+        "title",
+        "description",
+        "constants",
+        "secrets",
+    }
     extras: Dict[str, object] = {}
     for key, value in metadata.items():
         if key in reserved:
@@ -749,6 +900,7 @@ def _write_route_module(definition: RouteDefinition, source_path: Path, src_root
             }
             for spec in definition.params
         ],
+        "constants": dict(definition.constants),
         "title": definition.title,
         "description": definition.description,
         "metadata": dict(definition.metadata or {}),

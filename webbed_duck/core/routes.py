@@ -74,6 +74,7 @@ class RouteDefinition:
     prepared_sql: str
     param_order: Sequence[str]
     params: Sequence[ParameterSpec]
+    constants: Mapping[str, str] = field(default_factory=dict)
     title: str | None = None
     description: str | None = None
     metadata: Mapping[str, Any] | None = None
@@ -189,6 +190,12 @@ def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
             args = {}
         uses.append(RouteUse(alias=str(alias), call=str(call), mode=mode, args=args))
 
+    constants_data = route.get("constants")
+    if isinstance(constants_data, Mapping):
+        constants = {str(k): str(v) for k, v in constants_data.items()}
+    else:
+        constants = {}
+
     return RouteDefinition(
         id=str(route["id"]),
         path=str(route["path"]),
@@ -197,6 +204,7 @@ def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
         prepared_sql=str(route["prepared_sql"]),
         param_order=list(route.get("param_order", [])),
         params=params,
+        constants=constants,
         title=route.get("title"),
         description=route.get("description"),
         metadata=metadata,

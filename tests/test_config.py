@@ -50,6 +50,52 @@ allowed_domains = ["example.com", "service.local"]
     assert config.auth.allowed_domains == ["example.com", "service.local"]
 
 
+def test_load_config_parses_server_constants_and_secrets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        config_mod.keyring,
+        "get_password",
+        lambda service, username: "sekret"
+        if (service, username) == ("svc", "user")
+        else None,
+    )
+    path = _write_config(
+        tmp_path,
+        """
+[server.constants]
+data_root = "/srv/data"
+
+[server.secrets.api_key]
+service = "svc"
+username = "user"
+""".strip(),
+    )
+
+    config = load_config(path)
+    assert config.server.constants == {
+        "data_root": "/srv/data",
+        "api_key": "sekret",
+    }
+
+
+def test_load_config_missing_server_secret_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(config_mod.keyring, "get_password", lambda *_: None)
+    path = _write_config(
+        tmp_path,
+        """
+[server.secrets.api_key]
+service = "svc"
+username = "user"
+""".strip(),
+    )
+
+    with pytest.raises(ConfigError, match="api_key"):
+        load_config(path)
+
+
 def test_load_config_rejects_invalid_port(tmp_path: Path) -> None:
     path = _write_config(
         tmp_path,

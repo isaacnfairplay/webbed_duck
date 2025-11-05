@@ -160,7 +160,9 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
     if auto_compile and source_dir is not None:
         try:
-            compiled = compile_routes(source_dir, build_dir)
+            compiled = compile_routes(
+                source_dir, build_dir, constants=config.server.constants
+            )
         except FileNotFoundError as exc:
             print(f"[webbed-duck] Auto-compile skipped: {exc}", file=sys.stderr)
         except Exception as exc:  # pragma: no cover - runtime safeguard
@@ -286,7 +288,10 @@ def _compile_and_reload(
     from .core.routes import load_compiled_routes
 
     loader = load_fn or load_compiled_routes
-    compile_fn(source_dir, build_dir)
+    config = getattr(app.state, "config", None)
+    server_config = getattr(config, "server", None)
+    constants = getattr(server_config, "constants", None)
+    compile_fn(source_dir, build_dir, constants=constants)
     routes = loader(build_dir)
     reload_fn = getattr(app.state, "reload_routes", None)
     if reload_fn is None:

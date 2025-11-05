@@ -242,8 +242,8 @@ def test_compile_and_reload_invokes_reload(monkeypatch: pytest.MonkeyPatch, tmp_
     routes = next(routes for name, routes in COMPILE_AND_RELOAD_CASES if name == label)
     captured: dict[str, Any] = {}
 
-    def fake_compile(source: Path, build: Path) -> None:
-        captured["compiled"] = (source, build)
+    def fake_compile(source: Path, build: Path, **kwargs: object) -> None:
+        captured["compiled"] = (source, build, kwargs.get("constants"))
 
     def fake_load(path: Path) -> list[str]:
         captured["loaded"] = path
@@ -265,7 +265,7 @@ def test_compile_and_reload_invokes_reload(monkeypatch: pytest.MonkeyPatch, tmp_
     build_dir = tmp_path / "build"
 
     result = cli._compile_and_reload(app, source_dir, build_dir, compile_fn=fake_compile, load_fn=fake_load)
-    assert captured["compiled"] == (source_dir, build_dir)
+    assert captured["compiled"] == (source_dir, build_dir, None)
     assert captured["loaded"] == build_dir
     assert app.state.last == routes
     assert result == len(routes)
@@ -279,4 +279,10 @@ def test_compile_and_reload_missing_reload_handler(tmp_path: Path) -> None:
             self.state = object()
 
     with pytest.raises(RuntimeError):
-        cli._compile_and_reload(EmptyApp(), tmp_path / "src", tmp_path / "build", compile_fn=lambda *_: None, load_fn=lambda _: [])
+        cli._compile_and_reload(
+            EmptyApp(),
+            tmp_path / "src",
+            tmp_path / "build",
+            compile_fn=lambda *_args, **_kwargs: None,
+            load_fn=lambda _path: [],
+        )

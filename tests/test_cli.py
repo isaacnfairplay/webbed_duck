@@ -294,6 +294,7 @@ def test_cmd_serve_auto_compile_and_watch(
         watch_interval=1.5,
         host="127.0.0.1",
         port=8000,
+        constants={},
     )
     storage_root = tmp_path / "storage"
     storage_root.mkdir()
@@ -306,9 +307,10 @@ def test_cmd_serve_auto_compile_and_watch(
 
     compiled_routes: list[Path] = []
 
-    def fake_compile(source: Path, build: Path) -> list[str]:
+    def fake_compile(source: Path, build: Path, **kwargs: object) -> list[str]:
         compiled_routes.append(source)
         assert build == build_dir
+        assert kwargs.get("constants") == {}
         return ["route"]
 
     monkeypatch.setattr(cli, "compile_routes", fake_compile)
@@ -403,6 +405,7 @@ def test_cmd_serve_watch_interval_clamp(
         watch_interval=1.0,
         host="127.0.0.1",
         port=8000,
+        constants={},
     )
     storage_root = tmp_path / "storage"
     storage_root.mkdir()
@@ -489,6 +492,7 @@ def test_cmd_serve_config_watch_interval_clamped(
         watch_interval=0.05,
         host="127.0.0.1",
         port=8000,
+        constants={},
     )
     storage_root = tmp_path / "storage"
     storage_root.mkdir()
@@ -574,6 +578,7 @@ def test_cmd_serve_auto_compile_failure_reports_error(
         watch_interval=1.0,
         host="127.0.0.1",
         port=8000,
+        constants={},
     )
     storage_root = tmp_path / "storage"
     storage_root.mkdir()
@@ -608,8 +613,8 @@ def test_cmd_serve_auto_compile_failure_reports_error(
 def test_compile_and_reload_invokes_reload(tmp_path: Path) -> None:
     called: dict[str, object] = {}
 
-    def fake_compile(source_dir: Path, build_dir: Path) -> None:
-        called["compile"] = (source_dir, build_dir)
+    def fake_compile(source_dir: Path, build_dir: Path, **kwargs: object) -> None:
+        called["compile"] = (source_dir, build_dir, kwargs.get("constants"))
 
     def fake_load(build_dir: Path) -> list[str]:
         called["load"] = build_dir
@@ -620,7 +625,7 @@ def test_compile_and_reload_invokes_reload(tmp_path: Path) -> None:
 
     count = cli._compile_and_reload(app, tmp_path, tmp_path / "build", compile_fn=fake_compile, load_fn=fake_load)
     assert count == 2
-    assert called["compile"] == (tmp_path, tmp_path / "build")
+    assert called["compile"] == (tmp_path, tmp_path / "build", None)
     assert called["load"] == tmp_path / "build"
     assert captured["routes"] == ["a", "b"]
 

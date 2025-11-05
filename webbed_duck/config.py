@@ -8,6 +8,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping, MutableMapping, Sequence
 
+import keyring
+
 try:
     import tomllib  # Python 3.11+
 except ModuleNotFoundError:  # pragma: no cover - fallback for older interpreters
@@ -39,6 +41,7 @@ class ServerConfig:
     auto_compile: bool = True
     watch: bool = False
     watch_interval: float = 1.0
+    constants: Mapping[str, str] = field(default_factory=dict)
     _on_storage_root_change: Callable[[Path], None] | None = field(
         default=None, repr=False, compare=False
     )
@@ -335,9 +338,77 @@ def _parse_server(
         if interval <= 0:
             raise ValueError("server.watch_interval must be greater than zero")
         overrides["watch_interval"] = interval
+
+    constants = dict(base.constants)
+    constants_updated = False
+    if "constants" in data:
+        constants_data = data["constants"]
+        if not isinstance(constants_data, Mapping):
+            raise ValueError("server.constants must be a table of string values")
+        constants = dict(constants)
+        for key, value in constants_data.items():
+            name = str(key)
+            if name in constants:
+                raise ValueError(f"Duplicate server constant '{name}' defined")
+            constants[name] = _stringify_constant(value, context=f"server.constants.{name}")
+        constants_updated = True
+
+    if "secrets" in data:
+        secrets_data = data["secrets"]
+        if not isinstance(secrets_data, Mapping):
+            raise ValueError("server.secrets must be a table of secret definitions")
+        constants = dict(constants)
+        constants_updated = True
+        for key, payload in secrets_data.items():
+            name = str(key)
+            if name in constants:
+                raise ValueError(
+                    f"Duplicate server constant '{name}' defined via secrets"
+                )
+            constants[name] = _resolve_keyring_secret(
+                payload, context=f"server.secrets.{name}"
+            )
+
+    if constants_updated:
+        overrides["constants"] = constants
     if not overrides:
         return base
     return replace(base, **overrides)
+
+
+def _stringify_constant(value: Any, *, context: str) -> str:
+    if isinstance(value, Mapping):
+        raise ValueError(f"{context} must be a string value")
+    try:
+        text = str(value)
+    except Exception as exc:  # pragma: no cover - defensive programming
+        raise ValueError(f"{context} could not be coerced to string") from exc
+    return text
+
+
+def _resolve_keyring_secret(payload: Any, *, context: str) -> str:
+    service: str | None
+    username: str | None
+    if isinstance(payload, Mapping):
+        service = payload.get("service")
+        username = payload.get("username") or payload.get("name")
+    else:
+        text = str(payload)
+        if ":" not in text:
+            raise ValueError(
+                f"{context} must provide service and username (service:username)"
+            )
+        service, username = text.split(":", 1)
+    if not service or not username:
+        raise ValueError(
+            f"{context} must provide both 'service' and 'username' for keyring access"
+        )
+    secret = keyring.get_password(str(service), str(username))
+    if secret is None:
+        raise ConfigError(
+            f"Keyring secret not found for {context} (service='{service}', username='{username}')"
+        )
+    return secret
 
 
 def _parse_ui(data: Mapping[str, Any], base: UIConfig) -> UIConfig:
