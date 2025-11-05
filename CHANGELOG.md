@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Allow routes to interpolate `{{const.NAME}}` tokens with values sourced from
+  TOML `[constants]`, server-level constants, or keyring-backed `[secrets]`
+  entries. Compilation now fails on conflicting names, and secrets resolve via
+  `keyring.get_password` before SQL placeholder binding.
+- Persist DuckDB type/origin metadata for resolved constants (flagging secrets),
+  infer types from TOML or explicit overrides, extend watch-mode coverage to
+  catch constant edits, and keep keyring lookup failures redacted.
+
 - Auto-generated documentation index now surfaces a GitHub-linked inventory of
   Python, SQL, and JavaScript source files so reviewers can jump straight to
   the repository snapshot behind each document.

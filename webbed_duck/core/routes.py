@@ -9,6 +9,16 @@ from types import ModuleType
 from typing import Any, List, Mapping, Sequence
 
 
+@dataclass(slots=True)
+class ConstantBinding:
+    """Resolved compile-time constant metadata."""
+
+    value: str
+    origin: str
+    duckdb_type: str
+    secret: bool = False
+
+
 class ParameterType(str, Enum):
     STRING = "str"
     INTEGER = "int"
@@ -88,6 +98,7 @@ class RouteDefinition:
     cache_mode: str = "materialize"
     returns: str = "relation"
     uses: Sequence[RouteUse] = ()
+    constants: Mapping[str, ConstantBinding] = field(default_factory=dict)
 
     def find_param(self, name: str) -> ParameterSpec | None:
         for param in self.params:
@@ -189,6 +200,30 @@ def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
             args = {}
         uses.append(RouteUse(alias=str(alias), call=str(call), mode=mode, args=args))
 
+    constants_data = route.get("constants")
+    constants: dict[str, ConstantBinding] = {}
+    if isinstance(constants_data, Mapping):
+        for key, value in constants_data.items():
+            name = str(key)
+            if isinstance(value, Mapping):
+                text = str(value.get("value", ""))
+                origin = str(value.get("origin", name))
+                duckdb_type = str(value.get("duckdb_type", "VARCHAR"))
+                secret = bool(value.get("secret", False))
+                constants[name] = ConstantBinding(
+                    value=text,
+                    origin=origin,
+                    duckdb_type=duckdb_type,
+                    secret=secret,
+                )
+            else:
+                constants[name] = ConstantBinding(
+                    value=str(value),
+                    origin=name,
+                    duckdb_type="VARCHAR",
+                    secret=False,
+                )
+
     return RouteDefinition(
         id=str(route["id"]),
         path=str(route["path"]),
@@ -211,10 +246,12 @@ def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
         cache_mode=str(route.get("cache_mode", "materialize")).lower(),
         returns=str(route.get("returns", "relation")).lower(),
         uses=uses,
+        constants=constants,
     )
 
 
 __all__ = [
+    "ConstantBinding",
     "ParameterSpec",
     "ParameterType",
     "RouteDefinition",
