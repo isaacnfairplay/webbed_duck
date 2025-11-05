@@ -9,6 +9,7 @@ from typing import Callable, Iterable
 import duckdb
 
 from ..config import Config, load_config
+from ..runtime import get_storage
 from .local import run_route
 
 
@@ -34,7 +35,7 @@ def run_incremental(
 
     if config is None:
         config = load_config(None)
-    conn = _open_checkpoint_db(config.server.storage_root)
+    conn = _open_checkpoint_db(get_storage(config))
     try:
         last_value = _read_checkpoint(conn, route_id, cursor_param)
         results: list[IncrementalResult] = []

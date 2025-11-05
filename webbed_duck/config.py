@@ -6,7 +6,7 @@ import os
 import re
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Mapping, MutableMapping, Sequence
+from typing import Any, Callable, Mapping, MutableMapping, Sequence
 
 try:
     import tomllib  # Python 3.11+
@@ -18,11 +18,20 @@ _WINDOWS_ABSOLUTE_PATH = re.compile(r"^(?P<drive>[A-Za-z]):[\\/](?P<rest>.*)$")
 _WSL_MOUNT_ROOT: Path = Path("/mnt")
 
 
+class ConfigError(Exception):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class RuntimeConfig:
+    storage: Path
+
+
 @dataclass(slots=True)
 class ServerConfig:
     """HTTP server configuration."""
 
-    storage_root: Path = Path("storage")
+    _storage_root: Path = field(default=Path("storage"), repr=False)
     host: str = "127.0.0.1"
     port: int = 8000
     source_dir: Path | None = Path("routes_src")
@@ -30,6 +39,21 @@ class ServerConfig:
     auto_compile: bool = True
     watch: bool = False
     watch_interval: float = 1.0
+    _storage_changed: Callable[[Path], None] | None = field(
+        default=None, init=False, repr=False, compare=False
+    )
+
+    @property
+    def storage_root(self) -> Path:
+        return self._storage_root
+
+    @storage_root.setter
+    def storage_root(self, value: Path | str) -> None:
+        path = Path(value)
+        if self._storage_changed is not None:
+            self._storage_changed(path)
+        else:
+            self._storage_root = path
 
 
 @dataclass(slots=True)
@@ -112,6 +136,19 @@ class Config:
     share: ShareConfig = field(default_factory=ShareConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
     feature_flags: FeatureFlagsConfig = field(default_factory=FeatureFlagsConfig)
+    runtime: RuntimeConfig = field(init=False)
+
+    def __post_init__(self) -> None:
+        self._bind_runtime_storage(self.server._storage_root)
+
+    def _bind_runtime_storage(self, storage: Path) -> None:
+        def _sync(path: Path) -> None:
+            resolved = Path(path).expanduser().resolve(strict=False)
+            object.__setattr__(self.server, "_storage_root", resolved)
+            object.__setattr__(self, "runtime", RuntimeConfig(storage=resolved))
+
+        object.__setattr__(self.server, "_storage_changed", _sync)
+        _sync(storage)
 
 
 def _is_wsl() -> bool:
@@ -189,35 +226,54 @@ def load_config(path: str | Path | None = None) -> Config:
     config_path = Path(path)
     data = _load_toml(config_path)
     base_dir = config_path.parent.resolve()
-    storage_data = data.get("storage")
-    storage_root_override: Path | None = None
-    if isinstance(storage_data, Mapping):
-        unknown_storage_keys = set(storage_data) - {"root"}
-        if unknown_storage_keys:
-            unknown = ", ".join(sorted(unknown_storage_keys))
-            raise ValueError(f"storage.* contains unknown keys: {unknown}")
-        if "root" in storage_data:
-            storage_root_override = _as_path(
-                storage_data["root"], relative_to=base_dir
-            )
+    if "storage_root" in data or "cache_root" in data:
+        raise ConfigError(
+            "Remove legacy keys. Use [runtime].storage (absolute, writable)."
+        )
+    if "storage" in data:
+        raise ConfigError(
+            "Remove legacy [storage] section. Use [runtime].storage (absolute, writable)."
+        )
+
+    runtime_data = data.get("runtime")
+    if not isinstance(runtime_data, Mapping):
+        raise ConfigError(
+            "Missing [runtime].storage. Provide an absolute, writable path."
+        )
+
+    try:
+        storage_value = runtime_data["storage"]
+    except Exception as exc:  # pragma: no cover - defensive
+        raise ConfigError(
+            "Missing [runtime].storage. Provide an absolute, writable path."
+        ) from exc
+
+    try:
+        storage_path = _as_path(storage_value)
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
+    if not storage_path.is_absolute():
+        raise ConfigError(f"[runtime].storage must be absolute: {storage_path}")
+    try:
+        storage_path.mkdir(parents=True, exist_ok=True)
+        probe = storage_path / ".write_test"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+    except Exception as exc:  # pragma: no cover - filesystem errors
+        raise ConfigError(f"[runtime].storage not writable: {storage_path}") from exc
 
     server_data = data.get("server")
-    server_declared_storage_root = False
     if isinstance(server_data, Mapping):
-        server_declared_storage_root = "storage_root" in server_data
+        if "storage_root" in server_data:
+            raise ConfigError(
+                "Remove legacy keys. Use [runtime].storage (absolute, writable)."
+            )
         cfg.server = _parse_server(
             server_data, base=cfg.server, relative_to=base_dir
         )
+        cfg._bind_runtime_storage(cfg.server._storage_root)
 
-    if storage_root_override is not None:
-        if (
-            server_declared_storage_root
-            and Path(cfg.server.storage_root) != storage_root_override
-        ):
-            raise ValueError(
-                "storage.root conflicts with server.storage_root; choose one"
-            )
-        cfg.server.storage_root = storage_root_override
+    cfg.server.storage_root = storage_path
     ui_data = data.get("ui")
     if isinstance(ui_data, Mapping):
         cfg.ui = _parse_ui(ui_data, base=cfg.ui)
@@ -249,10 +305,6 @@ def _parse_server(
     relative_to: Path | None = None,
 ) -> ServerConfig:
     overrides: MutableMapping[str, Any] = {}
-    if "storage_root" in data:
-        overrides["storage_root"] = _as_path(
-            data["storage_root"], relative_to=relative_to
-        )
     if "host" in data:
         overrides["host"] = str(data["host"])
     if "port" in data:

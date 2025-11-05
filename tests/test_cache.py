@@ -24,13 +24,14 @@ def test_cache_store_respects_configured_storage_root(tmp_path: Path) -> None:
     config_path = tmp_path / "config.toml"
     config_path.write_text(
         f"""
-[server]
-storage_root = "{storage_root.as_posix()}"
+[runtime]
+storage = "{storage_root.as_posix()}"
 """.strip(),
         encoding="utf-8",
     )
     config = load_config(config_path)
 
+    assert config.runtime.storage == storage_root
     assert config.server.storage_root == storage_root
 
     store = cache_mod.CacheStore(config.server.storage_root)
@@ -49,8 +50,8 @@ def test_cache_files_materialize_under_configured_storage_root(tmp_path: Path) -
     config_path = tmp_path / "config.toml"
     config_path.write_text(
         f"""
-[server]
-storage_root = "{storage_root.as_posix()}"
+[runtime]
+storage = "{storage_root.as_posix()}"
 """.strip(),
         encoding="utf-8",
     )
