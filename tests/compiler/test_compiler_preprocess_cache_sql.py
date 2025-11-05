@@ -150,7 +150,7 @@ def test_build_cache_normalizes_order_by(values):
             "SELECT * FROM items WHERE id = {{id}}",
             [ParameterSpec(name="id", type=ParameterType.INTEGER)],
             ["id"],
-            "SELECT * FROM items WHERE id = ?",
+            "SELECT * FROM items WHERE id = $param_id",
         ),
         (
             "SELECT $name FROM dual WHERE id = {{id}}",
@@ -159,7 +159,7 @@ def test_build_cache_normalizes_order_by(values):
                 ParameterSpec(name="name"),
             ],
             ["name", "id"],
-            "SELECT ? FROM dual WHERE id = ?",
+            "SELECT $param_name FROM dual WHERE id = $param_id",
         ),
     ],
 )
@@ -196,4 +196,8 @@ def test_prepare_sql_tracks_placeholder_order(case):
     sql, params, names = case
     order, prepared = _prepare_sql(sql, params)
     assert order == names
-    assert prepared.count("?") == len(names)
+    total = 0
+    for name in names:
+        placeholder = f"$param_{name}"
+        total += prepared.count(placeholder)
+    assert total == len(names)

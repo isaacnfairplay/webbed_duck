@@ -252,8 +252,8 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
     async def describe_route(route_id: str, request: Request) -> Mapping[str, object]:
         route = _get_route(app.state.routes, route_id)
         params = _collect_params(route, request)
-        ordered = [_value_for_name(params, name, route) for name in route.param_order]
-        table = _execute_sql(_limit_zero(route.prepared_sql), ordered)
+        bindings = route.bindings_from_params(params)
+        table = _execute_sql(_limit_zero(route.prepared_sql), bindings)
         schema = [
             {"name": field.name, "type": str(field.type)}
             for field in table.schema
@@ -719,7 +719,6 @@ def _execute_route(
     limit: int | None,
 ) -> RouteExecutionResult:
     processed = run_preprocessors(route.preprocess, params, route=route, request=request)
-    ordered = [_value_for_name(processed, name, route) for name in route.param_order]
     sanitized_offset = max(0, offset or 0)
     sanitized_limit = None if limit is None else max(0, int(limit))
     cache_store: CacheStore | None = getattr(request.app.state, "cache_store", None)
@@ -733,7 +732,6 @@ def _execute_route(
         cache_result = executor.execute_relation(
             route,
             processed,
-            ordered=ordered,
             preprocessed=True,
             offset=sanitized_offset,
             limit=sanitized_limit,
@@ -1297,19 +1295,6 @@ def _collect_params(route: RouteDefinition, request: Request) -> Mapping[str, ob
     return values
 
 
-def _value_for_name(values: Mapping[str, object], name: str, route: RouteDefinition) -> object:
-    if name not in values:
-        spec = route.find_param(name)
-        if spec is None:
-            raise _http_error("unknown_parameter", f"Parameter '{name}' not defined for route '{route.id}'")
-        if spec.default is not None:
-            return spec.default
-        if spec.required:
-            raise _http_error("missing_parameter", f"Missing required parameter '{name}'")
-        return None
-    return values[name]
-
-
 def _parse_local_reference(reference: str) -> ParsedLocalReference:
     prefix = "local:"
     if not reference.startswith(prefix):
@@ -1369,7 +1354,7 @@ def _coerce_int(value: object, label: str) -> int | None:
     raise _http_error("invalid_parameter", f"{label} must be an integer")
 
 
-def _execute_sql(sql: str, params: Iterable[object]) -> pa.Table:
+def _execute_sql(sql: str, params: Mapping[str, object]) -> pa.Table:
     con = duckdb.connect()
     try:
         cursor = con.execute(sql, params)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import time
 from pathlib import Path
 
 import sys
@@ -89,9 +90,11 @@ def test_start_watcher_clamps_interval(
     assert captured["name"] == "webbed-duck-watch"
     assert captured["daemon"] is True
     args = captured["args"]
-    assert isinstance(args, tuple) and len(args) == 5
+    assert isinstance(args, tuple) and len(args) == 7
     assert args[1] == tmp_path and args[2] == tmp_path
     assert args[3] == pytest.approx(0.2)
+    assert args[5] is cli.compile_routes
+    assert args[6] is None
     out = capsys.readouterr().out
     assert "[webbed-duck] Watching" in out
     assert "interval=0.20s" in out
@@ -109,7 +112,7 @@ def test_watch_iteration_skips_when_fingerprint_unchanged(tmp_path: Path) -> Non
     app = object()
     called: dict[str, object] = {}
 
-    def fake_reload(app_arg, source_dir, build_dir):  # type: ignore[no-untyped-def]
+    def fake_reload(app_arg, source_dir, build_dir, **_kwargs):  # type: ignore[no-untyped-def]
         called["app"] = app_arg
         return 5
 
@@ -142,7 +145,7 @@ def test_watch_iteration_triggers_reload_on_change(tmp_path: Path) -> None:
     app = object()
     calls: dict[str, object] = {}
 
-    def fake_reload(app_arg, source_dir, build_dir):  # type: ignore[no-untyped-def]
+    def fake_reload(app_arg, source_dir, build_dir, **_kwargs):  # type: ignore[no-untyped-def]
         calls["app"] = app_arg
         calls["source"] = source_dir
         calls["build"] = build_dir
@@ -159,6 +162,41 @@ def test_watch_iteration_triggers_reload_on_change(tmp_path: Path) -> None:
     assert count == 2
     assert updated.has_changed(snapshot)
     assert calls == {"app": app, "source": src, "build": build}
+
+
+def test_watch_iteration_detects_extra_path_changes(tmp_path: Path) -> None:
+    src = tmp_path / "src"
+    build = tmp_path / "build"
+    src.mkdir()
+    build.mkdir()
+    (src / "demo.toml").write_text("id='demo'\n", encoding="utf-8")
+    (src / "demo.sql").write_text("SELECT 1;\n", encoding="utf-8")
+    config_path = tmp_path / "config.toml"
+    config_path.write_text("[server]\nname='initial'\n", encoding="utf-8")
+
+    snapshot = cli.build_source_fingerprint(src, extra_files=(config_path,))
+    time.sleep(0.01)
+    config_path.write_text("[server]\nname='updated'\n", encoding="utf-8")
+
+    app = object()
+    calls: dict[str, object] = {}
+
+    def fake_reload(app_arg, source_dir, build_dir, **_kwargs):  # type: ignore[no-untyped-def]
+        calls["app"] = app_arg
+        return 1
+
+    updated, count = cli._watch_iteration(
+        app,
+        src,
+        build,
+        snapshot,
+        compile_and_reload=fake_reload,
+        extra_paths=(config_path,),
+    )
+
+    assert count == 1
+    assert updated.has_changed(snapshot)
+    assert calls == {"app": app}
 
 
 def test_perf_stats_from_timings() -> None:
@@ -208,16 +246,21 @@ def test_cmd_perf_reports_stats(monkeypatch: pytest.MonkeyPatch, capsys: pytest.
 def test_cmd_compile_reports_count(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     captured: dict[str, object] = {}
 
-    def fake_compile(source: str | Path, build: str | Path) -> list[str]:
+    def fake_compile(source: str | Path, build: str | Path, **kwargs: object) -> list[str]:
         captured["source"] = source
         captured["build"] = build
+        captured["kwargs"] = kwargs
         return ["a", "b", "c"]
 
     monkeypatch.setattr(cli, "compile_routes", fake_compile)
 
-    code = cli._cmd_compile("src", "build")
+    code = cli._cmd_compile("src", "build", None)
     assert code == 0
-    assert captured == {"source": "src", "build": "build"}
+    assert captured == {
+        "source": "src",
+        "build": "build",
+        "kwargs": {"server_constants": None, "server_secrets": None},
+    }
     out = capsys.readouterr().out.strip()
     assert out == "Compiled 3 route(s) to build"
 
@@ -294,6 +337,8 @@ def test_cmd_serve_auto_compile_and_watch(
         watch_interval=1.5,
         host="127.0.0.1",
         port=8000,
+        constants={},
+        secrets={},
     )
     storage_root = tmp_path / "storage"
     storage_root.mkdir()
@@ -306,9 +351,10 @@ def test_cmd_serve_auto_compile_and_watch(
 
     compiled_routes: list[Path] = []
 
-    def fake_compile(source: Path, build: Path) -> list[str]:
+    def fake_compile(source: Path, build: Path, **kwargs: object) -> list[str]:
         compiled_routes.append(source)
         assert build == build_dir
+        assert kwargs == {"server_constants": {}, "server_secrets": {}}
         return ["route"]
 
     monkeypatch.setattr(cli, "compile_routes", fake_compile)
@@ -335,11 +381,21 @@ def test_cmd_serve_auto_compile_and_watch(
         def join(self, timeout: float | None = None) -> None:
             self.join_timeout = timeout
 
-    def fake_start_watcher(app, source: Path, build: Path, interval: float):  # type: ignore[no-untyped-def]
+    def fake_start_watcher(
+        app,
+        source: Path,
+        build: Path,
+        interval: float,
+        *,
+        compile_fn=cli.compile_routes,
+        extra_paths=(),
+    ):  # type: ignore[no-untyped-def]
         watcher_calls["app"] = app
         watcher_calls["source"] = source
         watcher_calls["build"] = build
         watcher_calls["interval"] = interval
+        watcher_calls["compile_fn"] = compile_fn
+        watcher_calls["extra_paths"] = extra_paths
         stop = _Stop()
         thread = _Thread()
         watcher_calls["stop"] = stop
@@ -380,6 +436,7 @@ def test_cmd_serve_auto_compile_and_watch(
     assert watcher_calls["source"] == source_dir
     assert watcher_calls["build"] == build_dir
     assert watcher_calls["interval"] == 1.5
+    assert watcher_calls["extra_paths"] == (Path("config.toml"),)
     assert watcher_calls["stop"].set_called is True
     assert watcher_calls["thread"].join_timeout == 2
     assert run_calls == {"app": app_obj, "host": "127.0.0.1", "port": 8000}
@@ -403,6 +460,8 @@ def test_cmd_serve_watch_interval_clamp(
         watch_interval=1.0,
         host="127.0.0.1",
         port=8000,
+        constants={},
+        secrets={},
     )
     storage_root = tmp_path / "storage"
     storage_root.mkdir()
@@ -433,8 +492,18 @@ def test_cmd_serve_watch_interval_clamp(
         def join(self, timeout: float | None = None) -> None:
             self.join_timeout = timeout
 
-    def fake_start_watcher(app, source: Path, build: Path, interval: float):  # type: ignore[no-untyped-def]
+    def fake_start_watcher(
+        app,
+        source: Path,
+        build: Path,
+        interval: float,
+        *,
+        compile_fn=cli.compile_routes,
+        extra_paths=(),
+    ):  # type: ignore[no-untyped-def]
         recorded["interval"] = interval
+        recorded["compile_fn"] = compile_fn
+        recorded["extra_paths"] = extra_paths
         stop = _Stop()
         thread = _Thread()
         recorded["stop"] = stop
@@ -471,6 +540,8 @@ def test_cmd_serve_watch_interval_clamp(
     assert recorded["interval"] == pytest.approx(cli.WATCH_INTERVAL_MIN)
     assert recorded["stop"].called is True
     assert recorded["thread"].join_timeout == 2
+    assert recorded["extra_paths"] == (Path("config.toml"),)
+    assert recorded["extra_paths"] == (Path("config.toml"),)
 
 
 def test_cmd_serve_config_watch_interval_clamped(
@@ -489,6 +560,8 @@ def test_cmd_serve_config_watch_interval_clamped(
         watch_interval=0.05,
         host="127.0.0.1",
         port=8000,
+        constants={},
+        secrets={},
     )
     storage_root = tmp_path / "storage"
     storage_root.mkdir()
@@ -519,8 +592,18 @@ def test_cmd_serve_config_watch_interval_clamped(
         def join(self, timeout: float | None = None) -> None:
             self.join_timeout = timeout
 
-    def fake_start_watcher(app, source: Path, build: Path, interval: float):  # type: ignore[no-untyped-def]
+    def fake_start_watcher(
+        app,
+        source: Path,
+        build: Path,
+        interval: float,
+        *,
+        compile_fn=cli.compile_routes,
+        extra_paths=(),
+    ):  # type: ignore[no-untyped-def]
         recorded["interval"] = interval
+        recorded["compile_fn"] = compile_fn
+        recorded["extra_paths"] = extra_paths
         stop = _Stop()
         thread = _Thread()
         recorded["stop"] = stop
@@ -574,6 +657,8 @@ def test_cmd_serve_auto_compile_failure_reports_error(
         watch_interval=1.0,
         host="127.0.0.1",
         port=8000,
+        constants={},
+        secrets={},
     )
     storage_root = tmp_path / "storage"
     storage_root.mkdir()

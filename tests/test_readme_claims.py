@@ -21,6 +21,7 @@ import duckdb
 from tests.conftest import write_sidecar_route
 from webbed_duck import cli as cli_module
 from webbed_duck.config import Config, _as_path, load_config
+import webbed_duck.core.compiler as compiler
 from webbed_duck.core.compiler import compile_route_file, compile_routes
 from webbed_duck.core.incremental import run_incremental
 from webbed_duck.core.routes import ParameterSpec, RouteDefinition, load_compiled_routes
@@ -118,6 +119,26 @@ order_by = ["value"]
 
 ```sql
 SELECT range as value FROM range(0,5) ORDER BY value;
+```
+"""
+
+
+ROUTE_CONSTANTS = """+++
+id = "const_demo"
+path = "/const-demo"
+
+[constants]
+table = "warehouse.daily_sales"
+
+[secrets.api_password]
+service = "readme"
+username = "robot"
++++
+
+```sql
+SELECT *
+FROM {{const.table}}
+WHERE api_password = '{{const.api_password}}'
 ```
 """
 
@@ -247,6 +268,7 @@ class ReadmeContext:
     recompiled_hashes: dict[str, str]
     compiled_routes: list
     route_json: dict
+    constant_route: RouteDefinition
     html_text: str
     html_headers: dict[str, str]
     cards_text: str
@@ -389,6 +411,7 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
     write_sidecar_route(src_dir, "cached_page_flex", ROUTE_PAGED_FLEX)
     write_sidecar_route(src_dir, "cached_invariant", ROUTE_INVARIANT_SUPERSET)
     write_sidecar_route(src_dir, "cached_invariant_shards", ROUTE_INVARIANT_SHARDS)
+    write_sidecar_route(src_dir, "const_demo", ROUTE_CONSTANTS)
 
     (src_dir / "readme_child.toml").write_text(ROUTE_DEP_CHILD_TOML + "\n", encoding="utf-8")
     (src_dir / "readme_child.sql").write_text(ROUTE_DEP_CHILD_SQL + "\n", encoding="utf-8")
@@ -396,8 +419,21 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
     (src_dir / "readme_parent.sql").write_text(ROUTE_DEP_PARENT_SQL + "\n", encoding="utf-8")
     (src_dir / "readme_parent.md").write_text("# Parent documentation\n", encoding="utf-8")
 
-    compile_routes(src_dir, build_dir)
-    compile_routes(src_dir, rebuild_dir)
+    original_keyring = getattr(compiler, "keyring", None)
+
+    class _ReadmeKeyring:
+        @staticmethod
+        def get_password(service: str, username: str) -> str | None:
+            if service == "readme" and username == "robot":
+                return "s3cret"
+            return None
+
+    compiler.keyring = _ReadmeKeyring()
+    try:
+        compile_routes(src_dir, build_dir)
+        compile_routes(src_dir, rebuild_dir)
+    finally:
+        compiler.keyring = original_keyring
 
     source_pairs: dict[str, dict[str, bool]] = {}
     legacy_sidecars_present = False
@@ -421,6 +457,7 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
     recompiled_hashes = _hash_dir(rebuild_dir)
 
     routes = load_compiled_routes(build_dir)
+    constant_route = next(route for route in routes if route.id == "const_demo")
     route_cache_modes = {route.id: route.cache_mode for route in routes}
     route_returns = {route.id: route.returns for route in routes}
     route_uses = {route.id: list(route.uses) for route in routes}
@@ -682,9 +719,10 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
             id="doc_duckdb_preprocessor",
             path="/doc_duckdb_preprocessor",
             methods=["GET"],
-            raw_sql="SELECT COUNT(*) AS row_count FROM read_parquet($files::TEXT[])",
-            prepared_sql="SELECT COUNT(*) AS row_count FROM read_parquet(?::TEXT[])",
+            raw_sql="SELECT COUNT(*) AS row_count FROM read_parquet($param_files::TEXT[])",
+            prepared_sql="SELECT COUNT(*) AS row_count FROM read_parquet($param_files::TEXT[])",
             param_order=["files"],
+            param_placeholders={"files": "param_files"},
             params=(ParameterSpec(name="files", required=False, default=None),),
             metadata={},
             preprocess=(
@@ -825,6 +863,7 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
         recompiled_hashes=recompiled_hashes,
         compiled_routes=routes,
         route_json=route_json,
+        constant_route=constant_route,
         html_text=html_response.text,
         html_headers=dict(html_response.headers),
         html_rpc_payload=_rpc_payload_from(html_response.text),
@@ -1473,7 +1512,58 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
             s,
         )),
         (lambda s: s.startswith("- Bind everything that comes from the request context"), lambda s: _ensure(
-            "?" in ctx.compiled_routes[0].prepared_sql, s
+            "$param_" in ctx.compiled_routes[0].prepared_sql, s
+        )),
+        (lambda s: s.startswith("To keep table names"), lambda s: _ensure(
+            "warehouse.daily_sales" in ctx.constant_route.prepared_sql
+            and not ctx.constant_route.constants["table"].bind,
+            s,
+        )),
+        (lambda s: s.startswith("them with `{{const.NAME}}` inside SQL."), lambda s: _ensure(
+            ctx.constant_route.constants["table"].value == "warehouse.daily_sales",
+            s,
+        )),
+        (lambda s: s.startswith("Write '{{const.secret}}'"), lambda s: _ensure(
+            ctx.constant_route.constants["api_password"].bind
+            and ctx.constant_route.constants["api_password"].value == "s3cret"
+            and "$const_api_password" in ctx.constant_route.prepared_sql,
+            s,
+        )),
+        (lambda s: s.startswith("direct table reference)"), lambda s: _ensure(
+            ctx.constant_route.constants["api_password"].bind
+            and "$const_api_password" in ctx.constant_route.prepared_sql,
+            s,
+        )),
+        (lambda s: s.startswith("frontmatter."), lambda s: _ensure(
+            ctx.constant_route.constants["table"].source == "constants.table"
+            and ctx.constant_route.constants["api_password"].source == "secrets.api_password",
+            s,
+        )),
+        (lambda s: s.startswith("resolved through the system keyring"), lambda s: _ensure(
+            ctx.constant_route.constants["api_password"].value == "s3cret",
+            s,
+        )),
+        (lambda s: s.startswith("obvious during development."), lambda s: _ensure(
+            ctx.constant_route.constants["api_password"].duckdb_type == "VARCHAR",
+            s,
+        )),
+        (lambda s: s.startswith("compiler strips the quotes"), lambda s: _ensure(
+            ctx.constant_route.constants["api_password"].bind,
+            s,
+        )),
+        (lambda s: s.startswith("artifact:"), lambda s: _ensure(
+            "$const_api_password" in ctx.constant_route.prepared_sql,
+            s,
+        )),
+        (lambda s: s.startswith("cache signature"), lambda s: _ensure(
+            ctx.constant_route.constants["api_password"].duckdb_type == "VARCHAR"
+            and ctx.constant_route.constants["table"].duckdb_type == "VARCHAR",
+            s,
+        )),
+        (lambda s: s.startswith("Server-wide values can live in `config.toml`"), lambda s: _ensure(
+            ctx.constant_route.constants["api_password"].duckdb_type == "VARCHAR"
+            and ctx.constant_route.constants["api_password"].secret,
+            s,
         )),
         (lambda s: s.startswith("If a value is fixed in TOML"), lambda s: _ensure(
             any(

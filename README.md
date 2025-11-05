@@ -239,13 +239,39 @@ con.sql(
 
 - Bind everything that comes from the request context. Bound parameters eliminate SQL injection risk and ensure cache keys include the values that change the result set.
 
-### Rule B — Use literal interpolation only for compile-time constants
+### Rule B — Use constants for compile-time values
 
 If a value is fixed in TOML (for example `plant = "US01"` in `[uses.args]`), keep it literal in SQL:
 
 ```sql
 WHERE plant = 'US01'
 ```
+
+To keep table names, glob patterns, or other identifiers manageable, define them once in TOML under `[constants]` and reference
+them with `{{const.NAME}}` inside SQL. The compiler preserves identifier contexts (so `SELECT * FROM {{const.table}}` remains a
+direct table reference) while binding values wrapped in quotes. Write `'{{const.secret}}'` for passwords or paths so the
+compiler strips the quotes, binds a named parameter (for example `$const_secret`), and stores the resolved value in the compiled
+artifact:
+
+```toml
+[constants]
+sales_table = "warehouse.daily_sales"
+
+[secrets.reporting_password]
+service = "duckdb"
+username = "etl"
+```
+
+```sql
+SELECT * FROM {{const.sales_table}}
+WHERE password = '{{const.reporting_password}}'
+```
+
+Server-wide values can live in `config.toml` under `[server.constants]` or `[server.secrets]` and are merged with the route
+frontmatter. If two sources define the same constant name, compilation fails so collisions never reach runtime. Secrets are
+resolved through the system keyring via `keyring.get_password`; missing credentials raise a compiler error to keep failures
+obvious during development. Routes built with constant-dependent SQL embed both the literal expansion and the typed value in the
+cache signature so plan hashes flip whenever the constant changes.
 
 ### Binding DuckDB file paths safely
 
@@ -254,14 +280,14 @@ interpret them as SQL identifiers. Use `TEXT` parameters (or arrays) alongside c
 
 ```sql
 SELECT *
-FROM read_parquet(?::TEXT)
+FROM read_parquet($param_path::TEXT)
 ```
 
 To pass multiple artifacts, bind a Python list and cast to a DuckDB array:
 
 ```sql
 SELECT *
-FROM read_parquet(?::TEXT[])
+FROM read_parquet($param_paths::TEXT[])
 ```
 
 When the list needs to be composed dynamically (for example, calling another route to discover shard files), prefer a

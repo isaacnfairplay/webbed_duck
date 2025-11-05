@@ -6,7 +6,7 @@ from enum import Enum
 from importlib import util
 from pathlib import Path
 from types import ModuleType
-from typing import Any, List, Mapping, Sequence
+from typing import Any, List, Mapping, MutableMapping, Sequence
 
 
 class ParameterType(str, Enum):
@@ -66,6 +66,17 @@ class RouteUse:
 
 
 @dataclass(slots=True)
+class RouteConstant:
+    name: str
+    value: object
+    duckdb_type: str
+    placeholder: str
+    source: str | None = None
+    secret: bool = False
+    bind: bool = False
+
+
+@dataclass(slots=True)
 class RouteDefinition:
     id: str
     path: str
@@ -73,6 +84,7 @@ class RouteDefinition:
     raw_sql: str
     prepared_sql: str
     param_order: Sequence[str]
+    param_placeholders: Mapping[str, str]
     params: Sequence[ParameterSpec]
     title: str | None = None
     description: str | None = None
@@ -88,6 +100,18 @@ class RouteDefinition:
     cache_mode: str = "materialize"
     returns: str = "relation"
     uses: Sequence[RouteUse] = ()
+    constants: Mapping[str, "RouteConstant"] = field(default_factory=dict)
+
+    def bindings_from_params(self, processed: Mapping[str, object]) -> dict[str, object]:
+        """Combine processed route params with compile-time constants for execution."""
+
+        bindings: MutableMapping[str, object] = {}
+        for name, placeholder in self.param_placeholders.items():
+            bindings[placeholder] = processed.get(name)
+        for constant in self.constants.values():
+            if constant.bind:
+                bindings[constant.placeholder] = constant.value
+        return dict(bindings)
 
     def find_param(self, name: str) -> ParameterSpec | None:
         for param in self.params:
@@ -189,6 +213,39 @@ def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
             args = {}
         uses.append(RouteUse(alias=str(alias), call=str(call), mode=mode, args=args))
 
+    placeholders_data = route.get("param_placeholders")
+    if isinstance(placeholders_data, Mapping):
+        param_placeholders = {str(key): str(value) for key, value in placeholders_data.items()}
+    else:
+        param_placeholders = {spec.name: f"param_{spec.name}" for spec in params}
+
+    constants_data = route.get("constants")
+    constants: dict[str, RouteConstant] = {}
+    if isinstance(constants_data, Mapping):
+        for name, payload in constants_data.items():
+            placeholder_default = f"const_{name}"
+            duckdb_type = "VARCHAR"
+            source: str | None = None
+            secret = False
+            value: object = payload
+            if isinstance(payload, Mapping):
+                if "value" in payload:
+                    value = payload["value"]
+                duckdb_type = str(payload.get("duckdb_type", duckdb_type))
+                placeholder_default = str(payload.get("placeholder", placeholder_default))
+                raw_source = payload.get("source")
+                source = str(raw_source) if raw_source is not None else None
+                secret = bool(payload.get("secret", False))
+            constants[str(name)] = RouteConstant(
+                name=str(name),
+                value=value,
+                duckdb_type=duckdb_type,
+                placeholder=placeholder_default,
+                source=source,
+                secret=secret,
+                bind=bool(payload.get("bind", False)) if isinstance(payload, Mapping) else False,
+            )
+
     return RouteDefinition(
         id=str(route["id"]),
         path=str(route["path"]),
@@ -196,6 +253,7 @@ def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
         raw_sql=str(route["raw_sql"]),
         prepared_sql=str(route["prepared_sql"]),
         param_order=list(route.get("param_order", [])),
+        param_placeholders=param_placeholders,
         params=params,
         title=route.get("title"),
         description=route.get("description"),
@@ -211,6 +269,7 @@ def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
         cache_mode=str(route.get("cache_mode", "materialize")).lower(),
         returns=str(route.get("returns", "relation")).lower(),
         uses=uses,
+        constants=constants,
     )
 
 
@@ -218,6 +277,7 @@ __all__ = [
     "ParameterSpec",
     "ParameterType",
     "RouteDefinition",
+    "RouteConstant",
     "RouteDirective",
     "RouteUse",
     "load_compiled_routes",

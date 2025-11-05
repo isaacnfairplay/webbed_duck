@@ -16,9 +16,10 @@ def _make_route_definition() -> RouteDefinition:
         id="example",
         path="/example",
         methods=["GET"],
-        raw_sql="SELECT ?",
-        prepared_sql="SELECT ?",
+        raw_sql="SELECT $param_name",
+        prepared_sql="SELECT $param_name",
         param_order=["name"],
+        param_placeholders={"name": "param_name"},
         params=(),
         metadata={},
     )

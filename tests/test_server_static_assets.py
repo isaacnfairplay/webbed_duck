@@ -29,6 +29,7 @@ def test_package_assets_are_served(tmp_path: Path) -> None:
         raw_sql="SELECT 1 AS value",
         prepared_sql="SELECT 1 AS value",
         param_order=(),
+        param_placeholders={},
         params=(),
     )
 

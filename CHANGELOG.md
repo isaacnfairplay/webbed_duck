@@ -2,6 +2,22 @@
 
 ## Unreleased
 
+- Switch the compiler and executor to named DuckDB parameters (e.g.
+  `$param_name`) so compiled routes carry explicit placeholder maps.
+  Constants now resolve into typed `RouteConstant` records with binding
+  metadata, only substituting identifiers literally while quoting and
+  binding values (including keyring secrets). Cache signatures include the
+  constant payloads so plan hashes change whenever the inputs do.
+
+- Teach the CLI watcher to fingerprint additional files such as
+  `config.toml`; hot reloads now trigger when shared constants or secret
+  references change, covered by new watcher regression tests.
+
+- Allow routes to interpolate `{{const.NAME}}` tokens with values sourced from
+  TOML `[constants]`, server-level constants, or keyring-backed `[secrets]`
+  entries. Compilation now fails on conflicting names, and secrets resolve via
+  `keyring.get_password` before SQL placeholder binding.
+
 - Auto-generated documentation index now surfaces a GitHub-linked inventory of
   Python, SQL, and JavaScript source files so reviewers can jump straight to
   the repository snapshot behind each document.

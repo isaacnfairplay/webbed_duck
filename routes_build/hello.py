@@ -3,6 +3,7 @@ ROUTE = {'allowed_formats': [],
  'assets': None,
  'cache_mode': 'materialize',
  'charts': [{'id': 'greeting_length', 'type': 'line', 'y': 'greeting_length'}],
+ 'constants': {},
  'default_format': None,
  'description': 'Return a greeting using DuckDB',
  'directives': [],
@@ -28,6 +29,7 @@ ROUTE = {'allowed_formats': [],
               'overrides': {'allowed': ['note'], 'key_columns': ['greeting']}},
  'methods': ['GET'],
  'param_order': ['name', 'name'],
+ 'param_placeholders': {'name': 'param_name'},
  'params': [{'default': 'world',
              'description': 'Name to greet',
              'extra': {'ui_control': 'input',
@@ -46,9 +48,9 @@ ROUTE = {'allowed_formats': [],
                             'title_col': 'greeting'},
                  'html_t': {'show_params': ['name', 'greeting_length']}},
  'prepared_sql': 'SELECT\n'
-                 "  'Hello, ' || ? || '!' AS greeting,\n"
+                 "  'Hello, ' || $param_name || '!' AS greeting,\n"
                  "  'Personalized greeting rendered by DuckDB' AS note,\n"
-                 "  LENGTH('Hello, ' || ? || '!')::INT AS greeting_length,\n"
+                 "  LENGTH('Hello, ' || $param_name || '!')::INT AS greeting_length,\n"
                  '  CURRENT_TIMESTAMP AS created_at;',
  'preprocess': [],
  'raw_sql': 'SELECT\n'

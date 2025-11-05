@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import functools
 import statistics
 import sys
 import threading
@@ -73,6 +74,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Directory containing TOML/SQL route sidecars",
     )
     compile_parser.add_argument("--build", default="routes_build", help="Destination directory for compiled routes")
+    compile_parser.add_argument(
+        "--config",
+        default=None,
+        help="Optional configuration file providing shared constants and secrets",
+    )
 
     serve_parser = subparsers.add_parser("serve", help="Run the development server")
     serve_parser.add_argument("--build", default=None, help="Directory containing compiled routes")
@@ -107,7 +113,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     if args.command == "compile":
-        return _cmd_compile(args.source, args.build)
+        return _cmd_compile(args.source, args.build, args.config)
     if args.command == "serve":
         return _cmd_serve(args)
     if args.command == "run-incremental":
@@ -119,8 +125,24 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 1
 
 
-def _cmd_compile(source: str, build: str) -> int:
-    compiled = compile_routes(source, build)
+def _cmd_compile(source: str, build: str, config_path: str | None) -> int:
+    server_constants: Mapping[str, str] | None = None
+    server_secrets: Mapping[str, Mapping[str, str]] | None = None
+    if config_path:
+        try:
+            config = load_config(Path(config_path))
+        except ConfigError as exc:
+            print(f"[webbed-duck] ERROR: {exc}", file=sys.stderr)
+            return 2
+        server_constants = config.server.constants
+        server_secrets = config.server.secrets
+
+    compiled = compile_routes(
+        source,
+        build,
+        server_constants=server_constants,
+        server_secrets=server_secrets,
+    )
     print(f"Compiled {len(compiled)} route(s) to {build}")
     return 0
 
@@ -129,8 +151,9 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     from .core.routes import load_compiled_routes
     from .server.app import create_app
 
+    config_path = Path(args.config)
     try:
-        config = load_config(Path(args.config))
+        config = load_config(config_path)
     except ConfigError as exc:
         print(f"[webbed-duck] ERROR: {exc}", file=sys.stderr)
         return 2
@@ -158,9 +181,15 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     if args.watch_interval is not None:
         watch_interval = max(WATCH_INTERVAL_MIN, float(args.watch_interval))
 
+    compile_fn = functools.partial(
+        compile_routes,
+        server_constants=config.server.constants,
+        server_secrets=config.server.secrets,
+    )
+
     if auto_compile and source_dir is not None:
         try:
-            compiled = compile_routes(source_dir, build_dir)
+            compiled = compile_fn(source_dir, build_dir)
         except FileNotFoundError as exc:
             print(f"[webbed-duck] Auto-compile skipped: {exc}", file=sys.stderr)
         except Exception as exc:  # pragma: no cover - runtime safeguard
@@ -180,7 +209,14 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     stop_event: threading.Event | None = None
     watch_thread: threading.Thread | None = None
     if watch_enabled and source_dir is not None:
-        stop_event, watch_thread = _start_watcher(app, source_dir, build_dir, watch_interval)
+        stop_event, watch_thread = _start_watcher(
+            app,
+            source_dir,
+            build_dir,
+            watch_interval,
+            compile_fn=compile_fn,
+            extra_paths=(config_path,),
+        )
     elif watch_enabled and source_dir is None:
         print("[webbed-duck] Watch mode enabled but no source directory configured", file=sys.stderr)
 
@@ -247,12 +283,28 @@ def _cmd_perf(args: argparse.Namespace) -> int:
     return 0
 
 
-def _start_watcher(app, source_dir: Path, build_dir: Path, interval: float) -> tuple[threading.Event, threading.Thread]:
+def _start_watcher(
+    app,
+    source_dir: Path,
+    build_dir: Path,
+    interval: float,
+    *,
+    compile_fn=compile_routes,
+    extra_paths: Sequence[Path] | None = None,
+) -> tuple[threading.Event, threading.Thread]:
     stop_event = threading.Event()
     effective_interval = max(WATCH_INTERVAL_MIN, float(interval))
     thread = threading.Thread(
         target=_watch_source,
-        args=(app, source_dir, build_dir, effective_interval, stop_event),
+        args=(
+            app,
+            source_dir,
+            build_dir,
+            effective_interval,
+            stop_event,
+            compile_fn,
+            extra_paths,
+        ),
         daemon=True,
         name="webbed-duck-watch",
     )
@@ -263,11 +315,26 @@ def _start_watcher(app, source_dir: Path, build_dir: Path, interval: float) -> t
     return stop_event, thread
 
 
-def _watch_source(app, source_dir: Path, build_dir: Path, interval: float, stop_event: threading.Event) -> None:
-    snapshot = build_source_fingerprint(source_dir)
+def _watch_source(
+    app,
+    source_dir: Path,
+    build_dir: Path,
+    interval: float,
+    stop_event: threading.Event,
+    compile_fn=compile_routes,
+    extra_paths: Sequence[Path] | None = None,
+) -> None:
+    snapshot = build_source_fingerprint(source_dir, extra_files=extra_paths)
     while not stop_event.wait(interval):
         try:
-            snapshot, count = _watch_iteration(app, source_dir, build_dir, snapshot)
+            snapshot, count = _watch_iteration(
+                app,
+                source_dir,
+                build_dir,
+                snapshot,
+                compile_fn=compile_fn,
+                extra_paths=extra_paths,
+            )
         except Exception as exc:  # pragma: no cover - runtime safeguard
             print(f"[webbed-duck] Watcher failed to compile routes: {exc}", file=sys.stderr)
             continue
@@ -301,33 +368,47 @@ def _watch_iteration(
     build_dir: Path,
     snapshot: SourceFingerprint,
     *,
+    compile_fn=compile_routes,
     compile_and_reload=_compile_and_reload,
+    extra_paths: Sequence[Path] | None = None,
 ) -> tuple[SourceFingerprint, int]:
     """Perform a single watch iteration and return the updated snapshot and reload count."""
 
-    current = build_source_fingerprint(source_dir)
+    current = build_source_fingerprint(source_dir, extra_files=extra_paths)
     if not snapshot.has_changed(current):
         return snapshot, 0
-    count = compile_and_reload(app, source_dir, build_dir)
+    count = compile_and_reload(app, source_dir, build_dir, compile_fn=compile_fn)
     return current, count
 
 
 def build_source_fingerprint(
-    source_dir: Path, *, patterns: Sequence[str] = ("*.toml", "*.sql", "*.md")
+    source_dir: Path,
+    *,
+    patterns: Sequence[str] = ("*.toml", "*.sql", "*.md"),
+    extra_files: Sequence[Path] | None = None,
 ) -> SourceFingerprint:
     files: dict[str, tuple[float, int]] = {}
     root = Path(source_dir)
     if not root.exists():
-        return SourceFingerprint(files)
-    for pattern in patterns:
-        for path in sorted(root.rglob(pattern)):
-            if not path.is_file():
-                continue
-            try:
-                stat = path.stat()
-            except FileNotFoundError:  # pragma: no cover - filesystem race
-                continue
-            files[str(path.relative_to(root))] = (stat.st_mtime, stat.st_size)
+        files = {}
+    else:
+        for pattern in patterns:
+            for path in sorted(root.rglob(pattern)):
+                if not path.is_file():
+                    continue
+                try:
+                    stat = path.stat()
+                except FileNotFoundError:  # pragma: no cover - filesystem race
+                    continue
+                files[str(path.relative_to(root))] = (stat.st_mtime, stat.st_size)
+    for extra in extra_files or ():
+        extra_path = Path(extra)
+        try:
+            stat = extra_path.stat()
+        except FileNotFoundError:
+            files[f"__extra__::{extra_path}"] = (-1.0, -1)
+            continue
+        files[f"__extra__::{extra_path}"] = (stat.st_mtime, stat.st_size)
     return SourceFingerprint(files)
 
 

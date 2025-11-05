@@ -38,13 +38,16 @@ def _make_route(
                 metadata_dict[key] = value
     if "cache" not in metadata_dict:
         metadata_dict["cache"] = {"enabled": False}
+    order = list(param_order or [])
+    placeholders = {name: f"param_{name}" for name in order}
     return RouteDefinition(
         id=route_id,
         path=f"/{route_id}",
         methods=["GET"],
         raw_sql=sql,
         prepared_sql=sql,
-        param_order=list(param_order or []),
+        param_order=order,
+        param_placeholders=placeholders,
         params=list(params or []),
         metadata=metadata_dict,
         directives=(),

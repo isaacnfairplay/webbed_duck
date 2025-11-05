@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from webbed_duck.core import compiler
 from webbed_duck.core.compiler import RouteCompilationError, compile_route_file, compile_routes
 from webbed_duck.core.routes import load_compiled_routes
 from webbed_duck.server.app import create_app
@@ -99,7 +100,8 @@ def test_compile_route(tmp_path: Path) -> None:
     route_path = write_route(tmp_path, route_text)
     definition = compile_route_file(route_path)
     assert definition.param_order == ["name"]
-    assert definition.prepared_sql == "SELECT ? as value"
+    assert definition.param_placeholders == {"name": "param_name"}
+    assert definition.prepared_sql == "SELECT $param_name as value"
 
     build_dir = tmp_path / "build"
     compiled = compile_routes(tmp_path, build_dir)
@@ -107,6 +109,79 @@ def test_compile_route(tmp_path: Path) -> None:
 
     loaded = load_compiled_routes(build_dir)
     assert loaded[0].id == "sample"
+
+
+def test_compile_route_applies_constants(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"const_route\"\n"
+        "path = \"/const\"\n"
+        "[params.user_id]\n"
+        "type = \"int\"\n"
+        "required = true\n"
+        "[constants]\n"
+        "customer_table = \"mart.customers\"\n"
+        "+++\n\n"
+        "```sql\nSELECT * FROM {{const.customer_table}} WHERE id = {{user_id}}\n```\n"
+    )
+    route_path = write_route(tmp_path, route_text)
+    definition = compile_route_file(route_path)
+    constant = definition.constants["customer_table"]
+    assert constant.value == "mart.customers"
+    assert constant.bind is False
+    assert definition.prepared_sql == "SELECT * FROM mart.customers WHERE id = $param_user_id"
+    assert definition.param_order == ["user_id"]
+    assert definition.param_placeholders["user_id"] == "param_user_id"
+
+
+def test_compile_route_resolves_keyring_secret(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"secret_route\"\n"
+        "path = \"/secret\"\n"
+        "[secrets.api_password]\n"
+        "service = \"app\"\n"
+        "username = \"robot\"\n"
+        "+++\n\n"
+        "```sql\nSELECT '{{const.api_password}}' AS secret_value\n```\n"
+    )
+    route_path = write_route(tmp_path, route_text)
+
+    class DummyKeyring:
+        @staticmethod
+        def get_password(service: str, username: str) -> str | None:
+            if service == "app" and username == "robot":
+                return "s3cret"
+            return None
+
+    monkeypatch.setattr(compiler, "keyring", DummyKeyring())
+
+    definition = compile_route_file(route_path)
+    constant = definition.constants["api_password"]
+    assert constant.value == "s3cret"
+    assert constant.bind is True
+    assert definition.prepared_sql == "SELECT $const_api_password AS secret_value"
+
+
+def test_compile_route_detects_constant_conflicts(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"conflict\"\n"
+        "path = \"/conflict\"\n"
+        "[constants]\n"
+        "shared = \"route\"\n"
+        "+++\n\n"
+        "```sql\nSELECT '{{const.shared}}'\n```\n"
+    )
+    route_path = write_route(tmp_path, route_text)
+
+    with pytest.raises(RouteCompilationError):
+        compile_route_file(
+            route_path,
+            server_constants={"shared": "server"},
+        )
 
 
 def test_compile_from_toml_sql_pair(tmp_path: Path) -> None:

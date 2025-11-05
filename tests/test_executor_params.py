@@ -121,7 +121,7 @@ WHERE ($enabled = enabled_again)
         "tags": ["Alpha", "Omega"],
     }
 
-    prepared = executor._prepare(route, incoming, ordered=None, preprocessed=False)
+    prepared = executor._prepare(route, incoming, preprocessed=False)
 
     assert prepared.params["text"] == "Alpha"
     assert prepared.params["count"] == 7
@@ -149,19 +149,12 @@ WHERE ($enabled = enabled_again)
     ]
     assert list(route.param_order) == expected_order
 
-    for name, bound in zip(route.param_order, prepared.ordered):
-        if name == "ratio":
-            assert bound == pytest.approx(2.5)
-        elif name == "tags":
-            assert bound == ["Alpha", "Omega"]
-        elif name == "count":
-            assert bound == 7
-        elif name == "enabled":
-            assert bound is True
-        elif name == "text":
-            assert bound == "Alpha"
-        else:  # pragma: no cover - defensive safeguard
-            pytest.fail(f"Unexpected parameter {name!r}")
+    bindings = prepared.bindings
+    assert bindings[route.param_placeholders["ratio"]] == pytest.approx(2.5)
+    assert bindings[route.param_placeholders["tags"]] == ["Alpha", "Omega"]
+    assert bindings[route.param_placeholders["count"]] == 7
+    assert bindings[route.param_placeholders["enabled"]] is True
+    assert bindings[route.param_placeholders["text"]] == "Alpha"
 
     result = executor.execute_relation(route, incoming, offset=0, limit=None)
     table = result.table
@@ -221,9 +214,10 @@ def test_prepare_skips_preprocessors_when_marked(monkeypatch: pytest.MonkeyPatch
         id="pre_flagged",
         path="/pre_flagged",
         methods=["GET"],
-        raw_sql="SELECT 1",
-        prepared_sql="SELECT 1",
+        raw_sql="SELECT $param_name",
+        prepared_sql="SELECT $param_name",
         param_order=["name"],
+        param_placeholders={"name": "param_name"},
         params=(ParameterSpec(name="name"),),
         metadata={},
         preprocess=(
@@ -237,10 +231,10 @@ def test_prepare_skips_preprocessors_when_marked(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(execution_module, "run_preprocessors", _fail)
 
     executor = RouteExecutor({route.id: route}, cache_store=None, config=config)
-    prepared = executor._prepare(route, {"name": "duck"}, ordered=["sentinel"], preprocessed=True)
+    prepared = executor._prepare(route, {"name": "duck"}, preprocessed=True)
 
     assert prepared.params == {"name": "duck"}
-    assert prepared.ordered == ["sentinel"]
+    assert prepared.bindings == {"param_name": "duck"}
 
 
 def test_prepare_respects_values_added_by_preprocessors(
@@ -253,9 +247,10 @@ def test_prepare_respects_values_added_by_preprocessors(
         id="pre_injected",
         path="/pre_injected",
         methods=["GET"],
-        raw_sql="SELECT 1",
-        prepared_sql="SELECT 1",
+        raw_sql="SELECT $param_cursor, $param_optional",
+        prepared_sql="SELECT $param_cursor, $param_optional",
         param_order=["cursor", "optional"],
+        param_placeholders={"cursor": "param_cursor", "optional": "param_optional"},
         params=(
             ParameterSpec(name="cursor", required=False, default=None),
             ParameterSpec(name="optional", required=False, default=None),
@@ -275,11 +270,14 @@ def test_prepare_respects_values_added_by_preprocessors(
     monkeypatch.setattr(execution_module, "run_preprocessors", _fake_preprocessors)
 
     executor = RouteExecutor({route.id: route}, cache_store=None, config=config)
-    prepared = executor._prepare(route, {}, ordered=None, preprocessed=False)
+    prepared = executor._prepare(route, {}, preprocessed=False)
 
     assert prepared.params["cursor"] == "2024-01-01"
     assert prepared.params["optional"] == "set-by-pre"
-    assert prepared.ordered == ["2024-01-01", "set-by-pre"]
+    assert prepared.bindings == {
+        "param_cursor": "2024-01-01",
+        "param_optional": "set-by-pre",
+    }
 
 
 def test_executor_executes_duckdb_table_function_file_bindings(
@@ -350,13 +348,15 @@ CROSS JOIN multi_source;
     prepared = executor._prepare(
         route,
         {"single_path": str(single_path)},
-        ordered=None,
         preprocessed=False,
     )
 
     assert prepared.params["single_path"] == str(single_path)
     assert prepared.params["multi_paths"] == [str(single_path), str(second_path)]
-    assert prepared.ordered == [str(single_path), [str(single_path), str(second_path)]]
+    assert prepared.bindings == {
+        route.param_placeholders["single_path"]: str(single_path),
+        route.param_placeholders["multi_paths"]: [str(single_path), str(second_path)],
+    }
 
     result = executor.execute_relation(
         route,

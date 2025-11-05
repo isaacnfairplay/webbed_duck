@@ -111,6 +111,10 @@ class CacheStore:
             "rows_per_page": settings.rows_per_page,
             "order_by": list(settings.order_by),
             "params": _normalize_mapping(params),
+            "constants": {
+                constant.placeholder: constant.value
+                for constant in route.constants.values()
+            },
             "invariants": [
                 {
                     "param": setting.param,
@@ -1114,7 +1118,7 @@ def resolve_cache_settings(route: RouteDefinition, config: CacheConfig) -> Cache
 def fetch_cached_table(
     route: RouteDefinition,
     params: Mapping[str, object],
-    ordered_params: Sequence[object],
+    bindings: Mapping[str, object],
     *,
     offset: int,
     limit: int | None,
@@ -1126,8 +1130,8 @@ def fetch_cached_table(
     settings = resolve_cache_settings(route, config)
     effective_offset, effective_limit = _effective_window(offset, limit, settings)
     invariant_requests = _collect_invariant_requests(settings.invariant_filters, params)
-    reader_factory_fn = reader_factory or (lambda: _record_batch_reader(route.prepared_sql, ordered_params))
-    execute_sql_fn = execute_sql or (lambda: _execute_sql(route.prepared_sql, ordered_params))
+    reader_factory_fn = reader_factory or (lambda: _record_batch_reader(route.prepared_sql, bindings))
+    execute_sql_fn = execute_sql or (lambda: _execute_sql(route.prepared_sql, bindings))
 
     if not store or not settings.enabled:
         table = execute_sql_fn()
@@ -1223,7 +1227,7 @@ def fetch_cached_table(
 def materialize_parquet_artifacts(
     route: RouteDefinition,
     params: Mapping[str, object],
-    ordered_params: Sequence[object],
+    bindings: Mapping[str, object],
     *,
     store: CacheStore | None,
     config: CacheConfig,
@@ -1243,7 +1247,7 @@ def materialize_parquet_artifacts(
         raise RuntimeError(
             f"Route '{route.id}' received invariant-filter overrides incompatible with parquet_path mode"
         )
-    reader_factory_fn = reader_factory or (lambda: _record_batch_reader(route.prepared_sql, ordered_params))
+    reader_factory_fn = reader_factory or (lambda: _record_batch_reader(route.prepared_sql, bindings))
     cache_params = _prepare_cache_params(params, settings.invariant_filters)
     key = store.compute_key(route, cache_params, settings)
     route_signature = _route_signature(route)
@@ -1513,7 +1517,7 @@ def _slice_table(
 
 def _record_batch_reader(
     sql: str,
-    params: Sequence[object],
+    params: Mapping[str, object],
 ) -> tuple[pa.RecordBatchReader, Callable[[], None]]:
     con = duckdb.connect()
     cursor = con.execute(sql, params)
@@ -1521,7 +1525,7 @@ def _record_batch_reader(
     return reader, con.close
 
 
-def _execute_sql(sql: str, params: Sequence[object]) -> pa.Table:
+def _execute_sql(sql: str, params: Mapping[str, object]) -> pa.Table:
     con = duckdb.connect()
     try:
         cursor = con.execute(sql, params)
@@ -1550,6 +1554,9 @@ def _route_signature(route: RouteDefinition) -> str:
         "version": route.version,
         "sql": route.prepared_sql,
         "order": list(route.param_order),
+        "constants": {
+            constant.placeholder: constant.value for constant in route.constants.values()
+        },
     }
     encoded = json.dumps(payload, sort_keys=True, default=_json_default).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
@@ -1571,6 +1578,8 @@ def _normalize_mapping(values: Mapping[str, object]) -> dict[str, object]:
 
 
 def _json_default(value: object) -> object:
+    if isinstance(value, decimal.Decimal):
+        return str(value)
     if hasattr(value, "isoformat"):
         try:
             return value.isoformat()

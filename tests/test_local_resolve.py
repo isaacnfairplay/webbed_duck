@@ -128,9 +128,10 @@ def _sample_route() -> RouteDefinition:
         id="hello",
         path="/hello",
         methods=("GET",),
-        raw_sql="SELECT 1",
-        prepared_sql="SELECT 1",
+        raw_sql="SELECT $param_name",
+        prepared_sql="SELECT $param_name",
         param_order=("name",),
+        param_placeholders={"name": "param_name"},
         params=(
             ParameterSpec(name="name", type=ParameterType.STRING, required=False, default="World"),
         ),

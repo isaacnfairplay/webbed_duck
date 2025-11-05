@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Mapping, MutableMapping, Sequence
+from typing import Callable, Mapping, MutableMapping
 
 try:  # pragma: no cover - optional dependency for type checking
     from fastapi import Request
@@ -30,7 +30,7 @@ class RouteExecutionError(RuntimeError):
 @dataclass(slots=True)
 class _PreparedRoute:
     params: Mapping[str, object]
-    ordered: Sequence[object]
+    bindings: Mapping[str, object]
 
 
 class RouteExecutor:
@@ -53,7 +53,6 @@ class RouteExecutor:
         route: RouteDefinition,
         params: Mapping[str, object],
         *,
-        ordered: Sequence[object] | None = None,
         preprocessed: bool = False,
         offset: int = 0,
         limit: int | None = None,
@@ -62,7 +61,6 @@ class RouteExecutor:
         prepared = self._prepare(
             route,
             params,
-            ordered=ordered,
             preprocessed=preprocessed,
             request=request,
         )
@@ -86,7 +84,7 @@ class RouteExecutor:
             return fetch_cached_table(
                 route,
                 prepared.params,
-                prepared.ordered,
+                prepared.bindings,
                 offset=offset,
                 limit=limit,
                 store=self._cache_store,
@@ -104,19 +102,18 @@ class RouteExecutor:
         route: RouteDefinition,
         params: Mapping[str, object],
         *,
-        ordered: Sequence[object] | None,
         preprocessed: bool,
         request: Request | None = None,
     ) -> _PreparedRoute:
         if preprocessed:
             processed = dict(params)
-            ordered_params = list(ordered) if ordered is not None else self._ordered_from_processed(route, processed)
-            return _PreparedRoute(params=processed, ordered=ordered_params)
+            bindings = route.bindings_from_params(processed)
+            return _PreparedRoute(params=processed, bindings=bindings)
 
         coerced = self._coerce_params(route, params)
         processed = run_preprocessors(route.preprocess, coerced, route=route, request=request)
-        ordered_params = self._ordered_from_processed(route, processed)
-        return _PreparedRoute(params=processed, ordered=ordered_params)
+        bindings = route.bindings_from_params(processed)
+        return _PreparedRoute(params=processed, bindings=bindings)
 
     def _coerce_params(
         self, route: RouteDefinition, provided: Mapping[str, object]
@@ -151,28 +148,6 @@ class RouteExecutor:
                     f"Unable to convert value for parameter '{spec.name}'"
                 ) from exc
         return raw
-
-    def _ordered_from_processed(
-        self, route: RouteDefinition, processed: Mapping[str, object]
-    ) -> list[object | None]:
-        ordered: list[object | None] = []
-        for name in route.param_order:
-            if name in processed:
-                ordered.append(processed[name])
-                continue
-            spec = route.find_param(name)
-            if spec is None:
-                ordered.append(processed.get(name))
-                continue
-            if spec.default is not None:
-                ordered.append(spec.default)
-            elif spec.required:
-                raise RouteExecutionError(
-                    f"Missing required parameter '{name}' after preprocessing for route '{route.id}'"
-                )
-            else:
-                ordered.append(None)
-        return ordered
 
     def _make_reader_factory(
         self,
@@ -218,7 +193,7 @@ class RouteExecutor:
         con = duckdb.connect()
         try:
             self._register_dependencies(con, route, prepared.params, request=request)
-            cursor = con.execute(route.prepared_sql, prepared.ordered)
+            cursor = con.execute(route.prepared_sql, prepared.bindings)
             return con, cursor
         except Exception:
             con.close()
@@ -290,7 +265,6 @@ class RouteExecutor:
         return self._prepare(
             target,
             args,
-            ordered=None,
             preprocessed=False,
             request=request,
         )
@@ -332,7 +306,7 @@ class RouteExecutor:
             artifacts = materialize_parquet_artifacts(
                 target,
                 prepared.params,
-                prepared.ordered,
+                prepared.bindings,
                 store=self._cache_store,
                 config=self._cache_config,
                 reader_factory=self._make_reader_factory(target, prepared, request=request),
