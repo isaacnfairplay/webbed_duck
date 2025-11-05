@@ -208,18 +208,34 @@ def test_cmd_perf_reports_stats(monkeypatch: pytest.MonkeyPatch, capsys: pytest.
 def test_cmd_compile_reports_count(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
     captured: dict[str, object] = {}
 
-    def fake_compile(source: str | Path, build: str | Path) -> list[str]:
+    def fake_compile(source: str | Path, build: str | Path, **kwargs: object) -> list[str]:
         captured["source"] = source
         captured["build"] = build
+        captured["constants"] = kwargs.get("constants")
         return ["a", "b", "c"]
 
     monkeypatch.setattr(cli, "compile_routes", fake_compile)
 
     code = cli._cmd_compile("src", "build")
     assert code == 0
-    assert captured == {"source": "src", "build": "build"}
+    assert captured == {"source": "src", "build": "build", "constants": None}
     out = capsys.readouterr().out.strip()
     assert out == "Compiled 3 route(s) to build"
+
+
+def test_cmd_compile_forwards_constants(monkeypatch: pytest.MonkeyPatch) -> None:
+    recorded: dict[str, object] = {}
+
+    def fake_compile(source: str | Path, build: str | Path, **kwargs: object) -> list[str]:
+        recorded["constants"] = kwargs.get("constants")
+        return []
+
+    monkeypatch.setattr(cli, "compile_routes", fake_compile)
+
+    constants = {"shared": "VALUE"}
+    cli._cmd_compile("src", "build", constants=constants)
+
+    assert recorded["constants"] == constants
 
 
 def test_cmd_run_incremental_invokes_runner(
@@ -306,8 +322,8 @@ def test_cmd_serve_auto_compile_and_watch(
 
     compiled_routes: list[Path] = []
 
-    def fake_compile(source: Path, build: Path) -> list[str]:
-        compiled_routes.append(source)
+    def fake_compile(source: Path, build: Path, **kwargs: object) -> list[str]:
+        compiled_routes.append((source, kwargs.get("constants")))
         assert build == build_dir
         return ["route"]
 
@@ -376,7 +392,7 @@ def test_cmd_serve_auto_compile_and_watch(
 
     code = cli._cmd_serve(args)
     assert code == 0
-    assert compiled_routes == [source_dir]
+    assert compiled_routes == [(source_dir, None)]
     assert watcher_calls["source"] == source_dir
     assert watcher_calls["build"] == build_dir
     assert watcher_calls["interval"] == 1.5
@@ -608,8 +624,8 @@ def test_cmd_serve_auto_compile_failure_reports_error(
 def test_compile_and_reload_invokes_reload(tmp_path: Path) -> None:
     called: dict[str, object] = {}
 
-    def fake_compile(source_dir: Path, build_dir: Path) -> None:
-        called["compile"] = (source_dir, build_dir)
+    def fake_compile(source_dir: Path, build_dir: Path, **kwargs: object) -> None:
+        called["compile"] = (source_dir, build_dir, kwargs.get("constants"))
 
     def fake_load(build_dir: Path) -> list[str]:
         called["load"] = build_dir
@@ -620,9 +636,38 @@ def test_compile_and_reload_invokes_reload(tmp_path: Path) -> None:
 
     count = cli._compile_and_reload(app, tmp_path, tmp_path / "build", compile_fn=fake_compile, load_fn=fake_load)
     assert count == 2
-    assert called["compile"] == (tmp_path, tmp_path / "build")
+    assert called["compile"] == (tmp_path, tmp_path / "build", None)
     assert called["load"] == tmp_path / "build"
     assert captured["routes"] == ["a", "b"]
+
+
+def test_compile_and_reload_passes_server_constants(tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_compile(source_dir: Path, build_dir: Path, **kwargs: object) -> None:
+        captured["constants"] = kwargs.get("constants")
+
+    def fake_load(build_dir: Path) -> list[str]:
+        return []
+
+    server_constants = {"shared_path": "/data/shared"}
+    app = types.SimpleNamespace(
+        state=types.SimpleNamespace(
+            config=types.SimpleNamespace(server=types.SimpleNamespace(constants=server_constants)),
+            reload_routes=lambda routes: None,
+        )
+    )
+
+    count = cli._compile_and_reload(
+        app,
+        tmp_path,
+        tmp_path / "build",
+        compile_fn=fake_compile,
+        load_fn=fake_load,
+    )
+
+    assert count == 0
+    assert captured["constants"] == server_constants
 
 
 def test_compile_and_reload_requires_reload(tmp_path: Path) -> None:

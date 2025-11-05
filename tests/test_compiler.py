@@ -109,6 +109,96 @@ def test_compile_route(tmp_path: Path) -> None:
     assert loaded[0].id == "sample"
 
 
+def test_compile_applies_route_constants(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"with_constants\"\n"
+        "path = \"/constants\"\n"
+        "[constants]\n"
+        "table_name = \"analytics.sessions\"\n"
+        "[params.id]\n"
+        "type = \"int\"\n"
+        "required = true\n"
+        "+++\n\n"
+        "```sql\nSELECT * FROM {{table_name}} WHERE id = {{id}}\n```\n"
+    )
+    definition = compile_route_file(write_route(tmp_path, route_text))
+    assert definition.raw_sql == "SELECT * FROM analytics.sessions WHERE id = {{id}}"
+    assert definition.prepared_sql == "SELECT * FROM analytics.sessions WHERE id = ?"
+    assert definition.param_order == ["id"]
+
+
+def test_compile_merges_server_constants(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"needs_server_constant\"\n"
+        "path = \"/needs-server\"\n"
+        "[params.name]\n"
+        "type = \"str\"\n"
+        "+++\n\n"
+        "```sql\nSELECT {{shared_path}} AS base_path, {{name}} AS label\n```\n"
+    )
+    definition = compile_route_file(
+        write_route(tmp_path, route_text),
+        constants={"shared_path": "'/srv/data'"},
+    )
+    assert definition.raw_sql == "SELECT '/srv/data' AS base_path, {{name}} AS label"
+    assert definition.prepared_sql == "SELECT '/srv/data' AS base_path, ? AS label"
+
+
+def test_compile_rejects_constant_conflict_with_server(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"conflict\"\n"
+        "path = \"/conflict\"\n"
+        "[constants]\n"
+        "shared = \"route\"\n"
+        "+++\n\n"
+        "```sql\nSELECT {{shared}}\n```\n"
+    )
+    with pytest.raises(RouteCompilationError):
+        compile_route_file(
+            write_route(tmp_path, route_text),
+            constants={"shared": "server"},
+        )
+
+
+def test_compile_rejects_constant_conflict_with_param(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"param_conflict\"\n"
+        "path = \"/param-conflict\"\n"
+        "[constants]\n"
+        "value = \"literal\"\n"
+        "[params.value]\n"
+        "type = \"str\"\n"
+        "+++\n\n"
+        "```sql\nSELECT {{value}}\n```\n"
+    )
+    with pytest.raises(RouteCompilationError):
+        compile_route_file(write_route(tmp_path, route_text))
+
+
+def test_compile_resolves_keyring_constant(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"keyring_route\"\n"
+        "path = \"/keyring\"\n"
+        "[constants.secret]\n"
+        "secret = \"service:username\"\n"
+        "+++\n\n"
+        "```sql\nSELECT '{{secret}}' as secret_value\n```\n"
+    )
+
+    monkeypatch.setattr(
+        "webbed_duck.constants.keyring.get_password",
+        lambda service, username: "hunter2",
+    )
+
+    definition = compile_route_file(write_route(tmp_path, route_text))
+    assert definition.raw_sql == "SELECT 'hunter2' as secret_value"
+
+
 def test_compile_from_toml_sql_pair(tmp_path: Path) -> None:
     _write_pair(
         tmp_path,

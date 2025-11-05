@@ -8,6 +8,8 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping, MutableMapping, Sequence
 
+from .constants import ConstantResolutionError, parse_constant_block
+
 try:
     import tomllib  # Python 3.11+
 except ModuleNotFoundError:  # pragma: no cover - fallback for older interpreters
@@ -39,6 +41,7 @@ class ServerConfig:
     auto_compile: bool = True
     watch: bool = False
     watch_interval: float = 1.0
+    constants: Mapping[str, str] = field(default_factory=dict)
     _on_storage_root_change: Callable[[Path], None] | None = field(
         default=None, repr=False, compare=False
     )
@@ -335,6 +338,13 @@ def _parse_server(
         if interval <= 0:
             raise ValueError("server.watch_interval must be greater than zero")
         overrides["watch_interval"] = interval
+    if "constants" in data:
+        try:
+            overrides["constants"] = parse_constant_block(
+                data["constants"], context="server.constants"
+            )
+        except ConstantResolutionError as exc:
+            raise ValueError(str(exc)) from exc
     if not overrides:
         return base
     return replace(base, **overrides)

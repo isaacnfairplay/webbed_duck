@@ -87,6 +87,7 @@ webbed_duck/
 
 - Parameters are declared under `[params]` in the TOML file. Each entry can be a table (with `type`, `required`, `default`, `description`, and extra metadata) or a string shorthand when you only need to annotate the DuckDB type.
 - Within the SQL body, use `{{name}}` or `$name` placeholders. During compilation each placeholder becomes a bound parameter in the prepared statement, preserving type safety while keeping the SQL readable.
+- Declare compile-time constants under `[constants]` (route-level) or `[server.constants]` (shared) to splice literal strings into SQL before parameters are validated. Constants cannot reuse parameter names or override one another; conflicts fail compilation. When a constant references the keyring, the compiler resolves it during build so missing secrets stop the release early.
 - At request time the runtime reads query string values, validates types (including boolean coercion for `true`/`false`, `1`/`0`), applies defaults, and rejects missing required parameters. Ephemeral controls like pagination and sorting stay out of `[params]` and are applied after the core relation is resolved.
 - Additional runtime controls:
   - `?limit=` and `?offset=` apply post-query pagination without changing the SQL.
@@ -344,6 +345,7 @@ Common keys inside `<stem>.toml` include:
 - `version`: Optional semantic or document version string.
 - `default_format` / `allowed_formats`: Format negotiation defaults and restrictions.
 - `[params]`: Parameter declarations (see [How parameters work](#how-parameters-work)). String values become DuckDB type hints; tables support `type`, `required`, `default`, `description`, and custom keys.
+- `[constants]`: Compile-time string literals and secrets injected into SQL before parameters are bound. Constants can point to inline strings or keyring entries and must not reuse parameter names.
 - `[cache]`: On-disk pagination and TTL controls. Set `order_by = ["column"]` so cached shards recombine deterministically and consider `invariant_filters` for safe superset reuse.
 - `cache_mode`: Choose how the executor interacts with the cache (`materialize`, `passthrough`, `force_live`).
 - `returns`: Default return style for internal callers (`relation`, `parquet`, or `error_frame`).

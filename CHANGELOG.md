@@ -5,6 +5,10 @@
 - Auto-generated documentation index now surfaces a GitHub-linked inventory of
   Python, SQL, and JavaScript source files so reviewers can jump straight to
   the repository snapshot behind each document.
+- Introduced compile-time constants for routes and server configuration. `[constants]`
+  blocks (and shared `[server.constants]`) now support inline literals and
+  keyring-backed secrets that are expanded before SQL parameter binding, with
+  compile-time conflicts raised for overlapping names or missing secrets.
 - Reworked every demo TODO/placeholder so contributors must ship runnable
   generators that execute the real flows and rebuild `demo.md` artifacts from
   captured outputs, preventing hand-written walkthrough drift.

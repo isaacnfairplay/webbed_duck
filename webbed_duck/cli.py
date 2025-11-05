@@ -73,6 +73,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Directory containing TOML/SQL route sidecars",
     )
     compile_parser.add_argument("--build", default="routes_build", help="Destination directory for compiled routes")
+    compile_parser.add_argument(
+        "--config",
+        default=None,
+        help="Optional configuration file to load shared server constants",
+    )
 
     serve_parser = subparsers.add_parser("serve", help="Run the development server")
     serve_parser.add_argument("--build", default=None, help="Directory containing compiled routes")
@@ -107,7 +112,15 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     args = parser.parse_args(argv)
     if args.command == "compile":
-        return _cmd_compile(args.source, args.build)
+        constants = None
+        if args.config:
+            try:
+                config_obj = load_config(Path(args.config))
+            except ConfigError as exc:
+                print(f"[webbed-duck] ERROR: {exc}", file=sys.stderr)
+                return 2
+            constants = getattr(getattr(config_obj, "server", object()), "constants", None)
+        return _cmd_compile(args.source, args.build, constants=constants)
     if args.command == "serve":
         return _cmd_serve(args)
     if args.command == "run-incremental":
@@ -119,8 +132,13 @@ def main(argv: Sequence[str] | None = None) -> int:
     return 1
 
 
-def _cmd_compile(source: str, build: str) -> int:
-    compiled = compile_routes(source, build)
+def _cmd_compile(
+    source: str | Path,
+    build: str | Path,
+    *,
+    constants: Mapping[str, str] | None = None,
+) -> int:
+    compiled = compile_routes(source, build, constants=constants)
     print(f"Compiled {len(compiled)} route(s) to {build}")
     return 0
 
@@ -158,9 +176,15 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     if args.watch_interval is not None:
         watch_interval = max(WATCH_INTERVAL_MIN, float(args.watch_interval))
 
+    server_constants = getattr(config.server, "constants", None)
+
     if auto_compile and source_dir is not None:
         try:
-            compiled = compile_routes(source_dir, build_dir)
+            compiled = compile_routes(
+                source_dir,
+                build_dir,
+                constants=server_constants,
+            )
         except FileNotFoundError as exc:
             print(f"[webbed-duck] Auto-compile skipped: {exc}", file=sys.stderr)
         except Exception as exc:  # pragma: no cover - runtime safeguard
@@ -286,7 +310,20 @@ def _compile_and_reload(
     from .core.routes import load_compiled_routes
 
     loader = load_fn or load_compiled_routes
-    compile_fn(source_dir, build_dir)
+    server_constants: Mapping[str, str] | None = None
+    state = getattr(app, "state", None)
+    if state is not None:
+        config = getattr(state, "config", None)
+        if config is not None:
+            server = getattr(config, "server", None)
+            if server is not None:
+                constants_attr = getattr(server, "constants", None)
+                if isinstance(constants_attr, Mapping):
+                    server_constants = constants_attr
+    compile_kwargs: dict[str, object] = {}
+    if server_constants is not None:
+        compile_kwargs["constants"] = server_constants
+    compile_fn(source_dir, build_dir, **compile_kwargs)
     routes = loader(build_dir)
     reload_fn = getattr(app.state, "reload_routes", None)
     if reload_fn is None:

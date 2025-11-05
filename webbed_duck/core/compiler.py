@@ -17,6 +17,7 @@ from .routes import (
     RouteDirective,
     RouteUse,
 )
+from ..constants import ConstantResolutionError, parse_constant_block
 
 FRONTMATTER_DELIMITER = "+++"
 SQL_BLOCK_PATTERN = re.compile(r"```sql\s*(?P<sql>.*?)```", re.DOTALL | re.IGNORECASE)
@@ -55,6 +56,7 @@ _KNOWN_FRONTMATTER_KEYS = {
     "allowed_formats",
     "allowed-formats",
     "uses",
+    "constants",
 }
 
 
@@ -93,7 +95,12 @@ class _RouteSource:
     doc_path: Path | None
 
 
-def compile_routes(source_dir: str | Path, build_dir: str | Path) -> List[RouteDefinition]:
+def compile_routes(
+    source_dir: str | Path,
+    build_dir: str | Path,
+    *,
+    constants: Mapping[str, str] | None = None,
+) -> List[RouteDefinition]:
     """Compile all route source files from ``source_dir`` into ``build_dir``."""
 
     src = Path(source_dir)
@@ -105,13 +112,21 @@ def compile_routes(source_dir: str | Path, build_dir: str | Path) -> List[RouteD
     compiled: List[RouteDefinition] = []
     for source in _iter_route_sources(src):
         text = _compose_route_text(source)
-        definition = compile_route_text(text, source_path=source.toml_path)
+        definition = compile_route_text(
+            text,
+            source_path=source.toml_path,
+            constants=constants,
+        )
         compiled.append(definition)
         _write_route_module(definition, source.toml_path, src, dest)
     return compiled
 
 
-def compile_route_file(path: str | Path) -> RouteDefinition:
+def compile_route_file(
+    path: str | Path,
+    *,
+    constants: Mapping[str, str] | None = None,
+) -> RouteDefinition:
     """Compile a single TOML/SQL sidecar into a :class:`RouteDefinition`."""
 
     toml_path = Path(path)
@@ -134,10 +149,15 @@ def compile_route_file(path: str | Path) -> RouteDefinition:
     parts.append(f"```sql\n{sql_text}\n```")
     body = "\n\n".join(parts)
     text = f"{FRONTMATTER_DELIMITER}\n{toml_text}\n{FRONTMATTER_DELIMITER}\n\n{body}\n"
-    return compile_route_text(text, source_path=toml_path)
+    return compile_route_text(text, source_path=toml_path, constants=constants)
 
 
-def compile_route_text(text: str, *, source_path: Path) -> RouteDefinition:
+def compile_route_text(
+    text: str,
+    *,
+    source_path: Path,
+    constants: Mapping[str, str] | None = None,
+) -> RouteDefinition:
     """Compile ``text`` into a :class:`RouteDefinition`."""
 
     frontmatter, body = _split_frontmatter(text)
@@ -153,7 +173,26 @@ def compile_route_text(text: str, *, source_path: Path) -> RouteDefinition:
 
     sql = _extract_sql(body)
     params = _parse_params(sections.params)
-    param_order, prepared_sql = _prepare_sql(sql, params)
+    try:
+        route_constants = parse_constant_block(
+            metadata_raw.get("constants"),
+            context=f"{source_path} [constants]",
+        )
+    except ConstantResolutionError as exc:
+        raise RouteCompilationError(str(exc)) from exc
+
+    inherited_constants = dict(constants or {})
+    conflicts = set(inherited_constants) & set(route_constants)
+    if conflicts:
+        names = ", ".join(sorted(conflicts))
+        raise RouteCompilationError(
+            f"Constants {names} are defined in both server configuration and {source_path.name}"
+        )
+
+    combined_constants = {**inherited_constants, **route_constants}
+    _ensure_constant_param_boundaries(combined_constants, params, source_path)
+    sql_with_constants = _apply_constants(sql, combined_constants)
+    param_order, prepared_sql = _prepare_sql(sql_with_constants, params)
 
     methods = metadata_raw.get("methods") or ["GET"]
     if not isinstance(methods, Iterable) or isinstance(methods, (str, bytes)):
@@ -173,7 +212,7 @@ def compile_route_text(text: str, *, source_path: Path) -> RouteDefinition:
         id=sections.route_id,
         path=sections.path,
         methods=list(methods),
-        raw_sql=sql,
+        raw_sql=sql_with_constants,
         prepared_sql=prepared_sql,
         param_order=param_order,
         params=params,
@@ -276,6 +315,35 @@ def _parse_params(raw: Mapping[str, object]) -> List[ParameterSpec]:
     return params
 
 
+def _ensure_constant_param_boundaries(
+    constants: Mapping[str, str],
+    params: Sequence[ParameterSpec],
+    source_path: Path,
+) -> None:
+    if not constants:
+        return
+    param_names = {spec.name for spec in params}
+    clashes = param_names.intersection(constants)
+    if clashes:
+        names = ", ".join(sorted(clashes))
+        raise RouteCompilationError(
+            f"Constants {names} conflict with parameter names in {source_path.name}"
+        )
+
+
+def _apply_constants(sql: str, constants: Mapping[str, str]) -> str:
+    if not constants:
+        return sql
+
+    def replace(match: re.Match[str]) -> str:
+        name = match.group("brace") or match.group("dollar")
+        if name in constants:
+            return constants[name]
+        return match.group(0)
+
+    return PLACEHOLDER_PATTERN.sub(replace, sql)
+
+
 def _prepare_sql(sql: str, params: Sequence[ParameterSpec]) -> tuple[List[str], str]:
     param_names = {p.name for p in params}
     order: List[str] = []
@@ -292,7 +360,7 @@ def _prepare_sql(sql: str, params: Sequence[ParameterSpec]) -> tuple[List[str], 
 
 
 def _extract_metadata(metadata: Mapping[str, object]) -> Mapping[str, object]:
-    reserved = {"id", "path", "methods", "params", "title", "description"}
+    reserved = {"id", "path", "methods", "params", "title", "description", "constants"}
     extras: Dict[str, object] = {}
     for key, value in metadata.items():
         if key in reserved:

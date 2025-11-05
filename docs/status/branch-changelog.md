@@ -1,5 +1,15 @@
 # Branch-level Changelog
 
+## Compile-time constants and keyring secrets (current branch)
+
+- Introduced `[constants]` route metadata and `[server.constants]` configuration
+  blocks so SQL can reference shared literals before parameters are prepared.
+- Resolved keyring-backed entries during compilation, failing fast when secrets
+  are missing or when route/server definitions collide on the same name.
+- Updated the CLI watcher and compile flows to thread shared constants through
+  auto-compiles, refreshed README guidance, and expanded compiler/config tests
+  to cover inline strings, keyring lookups, and conflict cases.
+
 ## Demo HTML embedding refresh (current branch)
 
 - Documented GitHub Markdown HTML support and our demo pattern in `docs/html-embedding.md`, including sanitisation rules and the screenshot fallback.

@@ -134,6 +134,61 @@ chartjs_source = "https://cdn.example.com/chart.js"
     assert config.ui.chartjs_source == "https://cdn.example.com/chart.js"
 
 
+def test_load_config_parses_server_constants(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path,
+        """
+[server.constants]
+reports_path = "/srv/reports"
+""".strip(),
+    )
+
+    config = load_config(path)
+
+    assert config.server.constants == {"reports_path": "/srv/reports"}
+
+
+def test_load_config_resolves_keyring_constant(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _write_config(
+        tmp_path,
+        """
+[server.constants.password]
+secret = "service:reports"
+""".strip(),
+    )
+
+    monkeypatch.setattr(
+        "webbed_duck.constants.keyring.get_password",
+        lambda service, username: "hunter2",
+    )
+
+    config = load_config(path)
+
+    assert config.server.constants == {"password": "hunter2"}
+
+
+def test_load_config_keyring_constant_missing_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _write_config(
+        tmp_path,
+        """
+[server.constants.password]
+secret = "service:reports"
+""".strip(),
+    )
+
+    monkeypatch.setattr(
+        "webbed_duck.constants.keyring.get_password",
+        lambda service, username: None,
+    )
+
+    with pytest.raises(ValueError, match="keyring entry"):
+        load_config(path)
+
+
 def test_load_config_parses_feature_flags(tmp_path: Path) -> None:
     path = _write_config(
         tmp_path,
