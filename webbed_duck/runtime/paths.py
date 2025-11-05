@@ -6,8 +6,7 @@ from webbed_duck.config import Config
 
 
 def get_storage(cfg: Config) -> Path:
-    runtime = getattr(cfg, "runtime", None)
-    return runtime.storage if runtime is not None else Path(cfg.server.storage_root)
+    return cfg.runtime.storage
 
 
 def storage_pages(cfg: Config, route_id: str) -> Path:

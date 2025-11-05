@@ -4,9 +4,9 @@ from __future__ import annotations
 import contextlib
 import os
 import re
-from dataclasses import dataclass, field, replace
+from dataclasses import InitVar, dataclass, field, replace
 from pathlib import Path
-from typing import Any, Mapping, MutableMapping, Sequence
+from typing import Any, Callable, Mapping, MutableMapping, Sequence
 
 try:
     import tomllib  # Python 3.11+
@@ -31,7 +31,7 @@ class RuntimeConfig:
 class ServerConfig:
     """HTTP server configuration."""
 
-    storage_root: Path = Path("storage")
+    _storage_root: Path = field(default_factory=lambda: Path("storage"), repr=False)
     host: str = "127.0.0.1"
     port: int = 8000
     source_dir: Path | None = Path("routes_src")
@@ -39,6 +39,33 @@ class ServerConfig:
     auto_compile: bool = True
     watch: bool = False
     watch_interval: float = 1.0
+    _on_storage_change: Callable[[Path], None] | None = field(
+        default=None, repr=False, compare=False
+    )
+    initial_storage_root: InitVar[Path | str | None] = None
+
+    def __post_init__(self, initial_storage_root: Path | str | None) -> None:
+        if initial_storage_root is not None:
+            self.storage_root = initial_storage_root
+        else:
+            self._notify_storage_change()
+
+    def _notify_storage_change(self) -> None:
+        if self._on_storage_change is not None:
+            self._on_storage_change(self._storage_root)
+
+    def _bind_runtime(self, callback: Callable[[Path], None]) -> None:
+        self._on_storage_change = callback
+        self._notify_storage_change()
+
+    @property
+    def storage_root(self) -> Path:
+        return self._storage_root
+
+    @storage_root.setter
+    def storage_root(self, value: Path | str) -> None:
+        self._storage_root = Path(value)
+        self._notify_storage_change()
 
 
 @dataclass(slots=True)
@@ -124,9 +151,15 @@ class Config:
     runtime: RuntimeConfig = field(init=False)
 
     def __post_init__(self) -> None:
-        storage = Path(self.server.storage_root).expanduser().resolve(strict=False)
-        self.runtime = RuntimeConfig(storage=storage)
-        self.server.storage_root = storage
+        self._bind_server_storage()
+
+    def _bind_server_storage(self) -> None:
+        def _sync_runtime(storage: Path) -> None:
+            resolved = Path(storage).expanduser().resolve(strict=False)
+            object.__setattr__(self.server, "_storage_root", resolved)
+            self.runtime = RuntimeConfig(storage=resolved)
+
+        self.server._bind_runtime(_sync_runtime)
 
 
 def _is_wsl() -> bool:
@@ -249,8 +282,8 @@ def load_config(path: str | Path | None = None) -> Config:
         cfg.server = _parse_server(
             server_data, base=cfg.server, relative_to=base_dir
         )
+        cfg._bind_server_storage()
 
-    cfg.runtime = RuntimeConfig(storage=storage_path)
     cfg.server.storage_root = storage_path
     ui_data = data.get("ui")
     if isinstance(ui_data, Mapping):
