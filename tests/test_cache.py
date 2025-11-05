@@ -1089,6 +1089,32 @@ def test_prepare_invariant_filter_values_parses_temporal_strings() -> None:
     assert ts_use_casefold is False
 
 
+def test_prepare_invariant_filter_values_handles_tz_inputs_for_naive_timestamp_columns() -> None:
+    setting = cache_mod.InvariantFilterSetting(param="event", column="event")
+    column = pa.chunked_array(
+        [[dt.datetime(2024, 1, 2, 3, 4, 5)]],
+        type=pa.timestamp("us"),
+    )
+
+    values, include_null, use_casefold = cache_mod._prepare_invariant_filter_values(
+        ["2024-01-02T03:04:05Z", dt.datetime(2024, 1, 2, 3, 4, 5, tzinfo=dt.timezone.utc)],
+        column,
+        setting,
+    )
+
+    assert all(isinstance(item, dt.datetime) for item in values)
+    assert all(item.tzinfo is None for item in values)
+    assert values[0] == dt.datetime(2024, 1, 2, 3, 4, 5)
+    assert values[1] == dt.datetime(2024, 1, 2, 3, 4, 5)
+    assert include_null is False
+    assert use_casefold is False
+
+    # Ensure the coerced values can be materialized as an Arrow array that
+    # matches the naive timestamp column type.
+    pa_values = pa.array(values, type=column.type)
+    assert pa_values.type == column.type
+
+
 def test_canonicalize_invariant_mapping_collapses_decimal_variants() -> None:
     setting = cache_mod.InvariantFilterSetting(param="amount", column="amount")
     mapping = cache_mod.canonicalize_invariant_mapping(

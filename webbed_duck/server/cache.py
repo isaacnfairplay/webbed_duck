@@ -895,6 +895,8 @@ def _coerce_timestamp_like(value: object, column_type: pa.DataType) -> _dt.datet
                 dt_value = dt_value.replace(tzinfo=zone)
             else:
                 dt_value = dt_value.astimezone(zone)
+    elif not timezone_name and dt_value.tzinfo is not None:
+        dt_value = dt_value.astimezone(_dt.timezone.utc).replace(tzinfo=None)
     return dt_value
 
 
