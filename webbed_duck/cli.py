@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping, Sequence
 
-from .config import load_config
+from .config import ConfigError, load_config
 from .core.compiler import compile_routes
 from .core.incremental import run_incremental
 from .core.local import run_route
@@ -128,7 +128,12 @@ def _cmd_serve(args: argparse.Namespace) -> int:
     from .core.routes import load_compiled_routes
     from .server.app import create_app
 
-    config = load_config(args.config)
+    config_path = Path(args.config)
+    try:
+        config = load_config(config_path)
+    except ConfigError as exc:
+        print(f"[webbed-duck] ERROR: {exc}", file=sys.stderr)
+        return 2
 
     build_dir = Path(args.build) if args.build else Path(config.server.build_dir)
     source_dir = Path(args.source) if args.source else config.server.source_dir
@@ -193,7 +198,12 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
 
 def _cmd_run_incremental(args: argparse.Namespace) -> int:
-    config = load_config(args.config)
+    config_path = Path(args.config)
+    try:
+        config = load_config(config_path)
+    except ConfigError as exc:
+        print(f"[webbed-duck] ERROR: {exc}", file=sys.stderr)
+        return 2
     start = _parse_date(args.start)
     end = _parse_date(args.end)
     results = run_incremental(
@@ -210,7 +220,12 @@ def _cmd_run_incremental(args: argparse.Namespace) -> int:
 
 
 def _cmd_perf(args: argparse.Namespace) -> int:
-    config = load_config(args.config)
+    config_path = Path(args.config)
+    try:
+        config = load_config(config_path)
+    except ConfigError as exc:
+        print(f"[webbed-duck] ERROR: {exc}", file=sys.stderr)
+        return 2
     params = _parse_param_assignments(args.param)
     iterations = max(1, int(args.iterations))
     timings: list[float] = []
