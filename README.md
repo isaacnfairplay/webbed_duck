@@ -247,6 +247,29 @@ If a value is fixed in TOML (for example `plant = "US01"` in `[uses.args]`), kee
 WHERE plant = 'US01'
 ```
 
+To keep table names, glob patterns, or other identifiers manageable, define them once in TOML under `[constants]` and reference
+them with `{{const.NAME}}` inside SQL. The compiler replaces these markers before parameter binding, so the resulting SQL stays
+safe and cache-friendly:
+
+```toml
+[constants]
+sales_table = "warehouse.daily_sales"
+
+[secrets.reporting_password]
+service = "duckdb"
+username = "etl"
+```
+
+```sql
+SELECT * FROM {{const.sales_table}}
+WHERE password = '{{const.reporting_password}}'
+```
+
+Server-wide values can live in `config.toml` under `[server.constants]` or `[server.secrets]` and are merged with the route
+frontmatter. If two sources define the same constant name, compilation fails so collisions never reach runtime. Secrets are
+resolved through the system keyring via `keyring.get_password`; missing credentials raise a compiler error to keep failures
+obvious during development.
+
 ### Binding DuckDB file paths safely
 
 DuckDB allows parameter binding for table functions, but file paths and lists require explicit typing so the engine does not

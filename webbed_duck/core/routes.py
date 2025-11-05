@@ -88,6 +88,7 @@ class RouteDefinition:
     cache_mode: str = "materialize"
     returns: str = "relation"
     uses: Sequence[RouteUse] = ()
+    constants: Mapping[str, str] = field(default_factory=dict)
 
     def find_param(self, name: str) -> ParameterSpec | None:
         for param in self.params:
@@ -189,6 +190,12 @@ def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
             args = {}
         uses.append(RouteUse(alias=str(alias), call=str(call), mode=mode, args=args))
 
+    constants_data = route.get("constants")
+    if isinstance(constants_data, Mapping):
+        constants = {str(key): str(value) for key, value in constants_data.items()}
+    else:
+        constants = {}
+
     return RouteDefinition(
         id=str(route["id"]),
         path=str(route["path"]),
@@ -211,6 +218,7 @@ def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
         cache_mode=str(route.get("cache_mode", "materialize")).lower(),
         returns=str(route.get("returns", "relation")).lower(),
         uses=uses,
+        constants=constants,
     )
 
 
