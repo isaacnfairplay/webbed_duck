@@ -163,16 +163,19 @@ def _import_callable_module(reference: CallableReference) -> ModuleType:
     if reference.source == "path":
         return _load_module_from_path(reference.location, reference.display)
 
-    spec = find_spec(reference.location)
-    if spec is not None:
-        if spec.origin and spec.origin not in {"built-in", "frozen", "namespace"}:
-            return _load_module_from_path(spec.origin, reference.location)
-        search_locations = list(spec.submodule_search_locations or [])
-        for location in search_locations:
-            candidate = Path(location) / "__init__.py"
-            if candidate.exists():
-                return _load_module_from_path(str(candidate), reference.location)
-    return import_module(reference.location)
+    try:
+        return import_module(reference.location)
+    except ModuleNotFoundError:
+        spec = find_spec(reference.location)
+        if spec is not None:
+            if spec.origin and spec.origin not in {"built-in", "frozen", "namespace"}:
+                return _load_module_from_path(spec.origin, reference.location)
+            search_locations = list(spec.submodule_search_locations or [])
+            for location in search_locations:
+                candidate = Path(location) / "__init__.py"
+                if candidate.exists():
+                    return _load_module_from_path(str(candidate), reference.location)
+        raise
 
 
 def _load_module_from_path(module_reference: str, display_reference: str | None = None) -> ModuleType:
