@@ -22,7 +22,8 @@ ttl_hours = 2
 order_by = ["event_time", "table_route"]
 
 [[preprocess]]
-callable = "webbed_duck.demos.local_chaining_traceability:inject_prefix"
+callable_module = "webbed_duck.demos.local_chaining_traceability"
+callable_name = "inject_prefix"
 
 [[uses]]
 alias = "prefix_lookup"

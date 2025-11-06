@@ -1,0 +1,31 @@
+id = "preprocess_path_demo"
+path = "/demos/preprocess/path"
+title = "Filesystem path preprocess demo"
+description = "Exercises callable_path + callable_name with a local plugin file."
+default_format = "json"
+allowed_formats = ["json", "csv"]
+
+[params]
+[params.input]
+type = "str"
+required = false
+default = "teal"
+description = "User-provided value"
+
+[params.processed]
+type = "str"
+required = false
+description = "Value enriched by the path-based preprocessor"
+
+[params.source_file]
+type = "str"
+required = false
+description = "Set by the path preprocessor to confirm it executed"
+
+[[preprocess]]
+callable_path = "demos/preprocess-path/plugins/path_preprocessors.py"
+callable_name = "append_suffix_from_path"
+source = "input"
+target = "processed"
+suffix = "-path"
+source_file = "demos/preprocess-path/plugins/path_preprocessors.py"

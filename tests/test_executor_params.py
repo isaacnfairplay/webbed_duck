@@ -355,7 +355,11 @@ def test_prepare_skips_preprocessors_when_marked(monkeypatch: pytest.MonkeyPatch
         params=(ParameterSpec(name="name"),),
         metadata={},
         preprocess=(
-            {"callable": "tests.fake_preprocessors:add_suffix", "suffix": "-ignored"},
+            {
+                "callable_module": "tests.fake_preprocessors",
+                "callable_name": "add_suffix",
+                "suffix": "-ignored",
+            },
         ),
     )
 
@@ -389,7 +393,13 @@ def test_prepare_respects_values_added_by_preprocessors(
             ParameterSpec(name="optional", required=False, default=None),
         ),
         metadata={},
-        preprocess=({"callable": "tests.fake_preprocessors:add_suffix", "suffix": ""},),
+        preprocess=(
+            {
+                "callable_module": "tests.fake_preprocessors",
+                "callable_name": "add_suffix",
+                "suffix": "",
+            },
+        ),
     )
 
     def _fake_preprocessors(steps, params, *, route, request):  # type: ignore[override]

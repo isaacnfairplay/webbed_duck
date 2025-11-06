@@ -34,6 +34,11 @@ from .routes import (
     RouteDirective,
     RouteUse,
 )
+from ..server.preprocess import (
+    CallableSpec,
+    extract_callable_spec,
+    validate_preprocess_step,
+)
 
 FRONTMATTER_DELIMITER = "+++"
 SQL_BLOCK_PATTERN = re.compile(r"```sql\s*(?P<sql>.*?)```", re.DOTALL | re.IGNORECASE)
@@ -823,54 +828,103 @@ def _merge_param_payload(target: MutableMapping[str, dict[str, object]], payload
 def _build_preprocess(
     metadata: Mapping[str, Any], directives: Sequence[RouteDirective]
 ) -> list[Mapping[str, object]]:
-    steps: list[Mapping[str, object]] = []
+    raw_steps: list[Mapping[str, object]] = []
     base = metadata.get("preprocess")
-    steps.extend(_normalize_preprocess_entries(base))
+    raw_steps.extend(_normalize_preprocess_entries(base))
     for payload in _collect_directive_payloads(directives, "preprocess"):
-        steps.extend(_normalize_preprocess_entries(payload))
-    return steps
+        raw_steps.extend(_normalize_preprocess_entries(payload))
+
+    normalized: list[Mapping[str, object]] = []
+    for step in raw_steps:
+        try:
+            spec = extract_callable_spec(step)
+        except Exception as exc:  # pragma: no cover - defensive, exercised via validation
+            raise RouteCompilationError(f"Invalid preprocess configuration: {exc}") from exc
+
+        entry = {
+            k: v
+            for k, v in step.items()
+            if k
+            not in {
+                "callable",
+                "callable_module",
+                "callable_name",
+                "callable_path",
+                "module",
+                "name",
+                "path",
+            }
+        }
+        entry["callable_name"] = spec.name
+        if spec.module:
+            entry["callable_module"] = spec.module
+        if spec.path:
+            entry["callable_path"] = spec.path
+
+        try:
+            validate_preprocess_step(entry)
+        except Exception as exc:
+            raise RouteCompilationError(
+                f"Failed to import preprocess callable '{spec.describe()}': {exc}"
+            ) from exc
+
+        normalized.append(entry)
+    return normalized
 
 
 def _normalize_preprocess_entries(data: object) -> list[Mapping[str, object]]:
     entries: list[Mapping[str, object]] = []
+    callable_keys = {
+        "callable",
+        "callable_module",
+        "callable_name",
+        "callable_path",
+        "module",
+        "name",
+        "path",
+    }
     if isinstance(data, Mapping):
-        if any(key in data for key in ("callable", "path", "name")):
-            normalized = dict(data)
-            if "callable" not in normalized:
-                if "name" in normalized:
-                    normalized["callable"] = str(normalized.pop("name"))
-                elif "path" in normalized:
-                    normalized["callable"] = str(normalized.pop("path"))
-            if "callable" not in normalized:
-                raise RouteCompilationError("Preprocess directives must specify a callable name")
-            normalized["callable"] = str(normalized["callable"])
-            entries.append(normalized)
+        if any(key in data for key in callable_keys):
+            entries.append(_coerce_preprocess_payload(data))
         else:
             for name, options in data.items():
-                entry: dict[str, object] = {"callable": str(name)}
                 if isinstance(options, Mapping):
-                    entry.update(options)
-                entries.append(entry)
+                    payload = dict(options)
+                    if not any(key in payload for key in callable_keys):
+                        payload["callable"] = str(name)
+                    entries.append(_coerce_preprocess_payload(payload))
+                else:
+                    entries.append({"callable": str(name)})
     elif isinstance(data, Sequence) and not isinstance(data, (str, bytes)):
         for item in data:
             if isinstance(item, Mapping):
-                normalized = dict(item)
-                if "callable" not in normalized:
-                    if "name" in normalized:
-                        normalized["callable"] = str(normalized.pop("name"))
-                    elif "path" in normalized:
-                        normalized["callable"] = str(normalized.pop("path"))
-                if "callable" not in normalized:
-                    raise RouteCompilationError(
-                        "Preprocess directives must specify a callable name"
-                    )
-                normalized["callable"] = str(normalized["callable"])
-                entries.append(normalized)
+                entries.append(_coerce_preprocess_payload(item))
             else:
                 entries.append({"callable": str(item)})
     elif isinstance(data, str):
         entries.append({"callable": data})
     return entries
+
+
+def _coerce_preprocess_payload(payload: Mapping[str, Any]) -> Mapping[str, object]:
+    data = dict(payload)
+    if "callable" in data and not isinstance(data["callable"], str):
+        data["callable"] = str(data["callable"])
+    if "callable_name" in data and not isinstance(data["callable_name"], str):
+        data["callable_name"] = str(data["callable_name"])
+    if "callable_module" in data and data["callable_module"] is not None:
+        data["callable_module"] = str(data["callable_module"])
+    if "callable_path" in data and data["callable_path"] is not None:
+        data["callable_path"] = str(data["callable_path"])
+    if "module" in data and data["module"] is not None:
+        data["module"] = str(data["module"])
+    if "path" in data and data["path"] is not None and not isinstance(data["path"], str):
+        data["path"] = str(data["path"])
+    if "name" in data and "callable" not in data and "callable_name" not in data:
+        data["callable"] = str(data.pop("name"))
+    if "path" in data and "callable_path" not in data and "callable" not in data:
+        data["callable"] = str(data["path"])
+    return data
 
 
 def _build_postprocess(

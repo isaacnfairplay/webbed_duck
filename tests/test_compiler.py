@@ -337,7 +337,7 @@ def test_compile_extracts_directive_sections(tmp_path: Path) -> None:
         "title_col = \"title\"\n"
         "+++\n\n"
         "<!-- @meta default_format=\"html_c\" allowed_formats=\"html_c json\" -->\n"
-        "<!-- @preprocess {\"callable\": \"tests.fake:noop\"} -->\n"
+        "<!-- @preprocess {\"callable_module\": \"tests.fake_preprocessors\", \"callable_name\": \"return_none\"} -->\n"
         "<!-- @postprocess {\"html_c\": {\"image_col\": \"photo\"}} -->\n"
         "<!-- @charts [{\"id\": \"chart1\", \"type\": \"line\"}] -->\n"
         "<!-- @assets {\"image_getter\": \"static_fallback\"} -->\n"
@@ -346,10 +346,67 @@ def test_compile_extracts_directive_sections(tmp_path: Path) -> None:
     definition = compile_route_file(write_route(tmp_path, route_text))
     assert definition.default_format == "html_c"
     assert set(definition.allowed_formats) == {"html_c", "json"}
-    assert definition.preprocess[0]["callable"] == "tests.fake:noop"
+    step = definition.preprocess[0]
+    assert step["callable_module"] == "tests.fake_preprocessors"
+    assert step["callable_name"] == "return_none"
     assert definition.postprocess["html_c"]["image_col"] == "photo"
     assert definition.charts[0]["id"] == "chart1"
     assert definition.assets["image_getter"] == "static_fallback"
+
+
+def test_compile_preprocess_path_reference(tmp_path: Path) -> None:
+    plugin_dir = tmp_path / "plugins"
+    plugin_dir.mkdir()
+    plugin_file = plugin_dir / "formatting.py"
+    plugin_file.write_text(
+        """
+from typing import Mapping
+
+from webbed_duck.server.preprocess import PreprocessContext
+
+
+def tweak(params: Mapping[str, object], *, context: PreprocessContext) -> Mapping[str, object]:
+    updated = dict(params)
+    updated["note"] = context.route.id
+    return updated
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    route_text = (
+        "+++\n"
+        "id = \"path_case\"\n"
+        "path = \"/path\"\n"
+        "+++\n\n"
+        "<!-- @preprocess {\"callable_path\": \""
+        + str(plugin_file)
+        + "\", \"callable_name\": \"tweak\"} -->\n"
+        "```sql\nSELECT 1\n```\n"
+    )
+
+    definition = compile_route_file(write_route(tmp_path, route_text))
+    step = definition.preprocess[0]
+    assert step["callable_path"] == str(plugin_file.resolve())
+    assert step["callable_name"] == "tweak"
+
+
+def test_compile_preprocess_reports_missing_callable(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"broken_pre\"\n"
+        "path = \"/broken\"\n"
+        "+++\n\n"
+        "<!-- @preprocess {\"callable_module\": \"tests.fake_preprocessors\", \"callable_name\": \"missing\"} -->\n"
+        "```sql\nSELECT 1\n```\n"
+    )
+
+    with pytest.raises(RouteCompilationError) as excinfo:
+        compile_route_file(write_route(tmp_path, route_text))
+
+    message = str(excinfo.value)
+    assert "Failed to import preprocess callable" in message
+    assert "missing" in message
 
 
 def test_compile_fails_without_sql(tmp_path: Path) -> None:
