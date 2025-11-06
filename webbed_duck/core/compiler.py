@@ -49,9 +49,23 @@ BINDING_PATTERN = re.compile(r"\$(?P<name>[A-Za-z_][A-Za-z0-9_]*)")
 _FILTER_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 DIRECTIVE_PATTERN = re.compile(r"<!--\s*@(?P<name>[a-zA-Z0-9_.:-]+)(?P<body>.*?)-->", re.DOTALL)
 CONSTANT_PATTERN = re.compile(
-    r"\{\{\s*const(?:ant)?\.(?P<constant>[a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}",
+    r"\{\{\s*(?P<prefix>const(?:ant)?|constants|secrets|server\.constants|server\.secrets)\.(?P<constant>[a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}",
     re.IGNORECASE,
 )
+
+_CONSTANT_PREFIXES = (
+    "const.",
+    "constant.",
+    "constants.",
+    "secrets.",
+    "server.constants.",
+    "server.secrets.",
+)
+
+
+def _is_constant_reference(name: str) -> bool:
+    lowered = name.lower()
+    return any(lowered.startswith(prefix) for prefix in _CONSTANT_PREFIXES)
 
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
 
@@ -674,7 +688,7 @@ def _prepare_sql(
                 f"Template expression {placeholder!r} missing parameter name in {source_path}"
             )
         name = parts[0]
-        if name.startswith("const."):
+        if _is_constant_reference(name):
             # constants are handled earlier
             return placeholder
         if not _IDENTIFIER_PATTERN.match(name):

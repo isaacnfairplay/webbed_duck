@@ -296,6 +296,35 @@ def test_compile_route_typed_constants(tmp_path: Path) -> None:
         "const_limit": decimal.Decimal("12.34"),
     }
 
+
+def test_compile_route_accepts_extended_constant_prefixes(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"prefixed_constants\"\n"
+        "path = \"/prefixed_constants\"\n"
+        "[constants]\n"
+        "route_value = \"route\"\n"
+        "+++\n\n"
+        "```sql\n"
+        "SELECT {{server.constants.shared}} AS from_server, {{constants.route_value}} AS from_route\n"
+        "```\n"
+    )
+    route_path = write_route(tmp_path, route_text)
+
+    definition = compile_route_file(
+        route_path,
+        server_constants={"shared": "server"},
+    )
+
+    assert definition.constants == {"shared": "server", "route_value": "route"}
+    assert definition.prepared_sql == (
+        "SELECT $const_shared AS from_server, $const_route_value AS from_route"
+    )
+    assert definition.constant_params == {
+        "const_shared": "server",
+        "const_route_value": "route",
+    }
+
 def test_compile_route_detects_constant_conflicts(tmp_path: Path) -> None:
     route_text = (
         "+++\n"
