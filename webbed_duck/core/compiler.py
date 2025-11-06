@@ -33,6 +33,7 @@ from .routes import (
     RouteDefinition,
     RouteDirective,
     RouteUse,
+    TemplateSlot,
 )
 from ..plugins.loader import PluginLoader
 from ..server.preprocess import (
@@ -43,9 +44,8 @@ from ..server.preprocess import (
 
 FRONTMATTER_DELIMITER = "+++"
 SQL_BLOCK_PATTERN = re.compile(r"```sql\s*(?P<sql>.*?)```", re.DOTALL | re.IGNORECASE)
-PLACEHOLDER_PATTERN = re.compile(
-    r"\{\{\s*(?P<brace>[a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}|\$(?P<dollar>[a-zA-Z_][a-zA-Z0-9_]*)"
-)
+_TEMPLATE_PLACEHOLDER = re.compile(r"\{\{\s*(?P<body>[^{}]+?)\s*\}\}")
+_DOLLAR_PLACEHOLDER = re.compile(r"\$(?P<name>[A-Za-z_][A-Za-z0-9_]*)")
 DIRECTIVE_PATTERN = re.compile(r"<!--\s*@(?P<name>[a-zA-Z0-9_.:-]+)(?P<body>.*?)-->", re.DOTALL)
 CONSTANT_PATTERN = re.compile(
     r"\{\{\s*const(?:ant)?\.(?P<constant>[a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}",
@@ -53,6 +53,8 @@ CONSTANT_PATTERN = re.compile(
 )
 
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
+
+_KNOWN_TEMPLATE_FILTERS = {"literal", "identifier", "raw", "lower", "upper"}
 
 _KNOWN_FRONTMATTER_KEYS = {
     "append",
@@ -249,7 +251,7 @@ def compile_route_text(
     )
     sql, constant_param_map = _inject_constant_placeholders(sql, constant_bindings, source_path)
     params = _parse_params(sections.params)
-    param_order, prepared_sql, used_constant_params = _prepare_sql(
+    param_order, prepared_sql, used_constant_params, template_slots = _prepare_sql(
         sql,
         params,
         constant_param_map,
@@ -315,6 +317,7 @@ def compile_route_text(
         constant_params=constant_param_values,
         constant_types=constant_types,
         constant_param_types=constant_param_types,
+        template_slots=tuple(template_slots),
     )
 
 
@@ -653,27 +656,102 @@ def _prepare_sql(
     constant_params: Mapping[str, str],
     *,
     source_path: Path,
-) -> tuple[List[str], str, set[str]]:
-    param_names = {p.name for p in params}
-    order: List[str] = []
-    used_constants: set[str] = set()
+) -> tuple[list[str], str, set[str], list[TemplateSlot]]:
+    params_by_name = {p.name: p for p in params}
+    template_slots: list[TemplateSlot] = []
 
-    def replace(match: re.Match[str]) -> str:
-        name = match.group("brace") or match.group("dollar")
-        if name is None:
-            return match.group(0)
-        if name in constant_params:
-            used_constants.add(name)
-            return f"${name}"
-        if name in param_names:
-            order.append(name)
-            return f"${name}"
-        raise RouteCompilationError(
-            f"Placeholder '{name}' used in SQL but not declared or defined in {source_path}"
+    for match in _TEMPLATE_PLACEHOLDER.finditer(sql):
+        placeholder = match.group(0)
+        body = match.group("body") or ""
+        name, filters = _parse_template_expression(body, source_path)
+        spec = params_by_name.get(name)
+        if spec is None:
+            raise RouteCompilationError(
+                f"Placeholder '{placeholder}' references unknown parameter '{name}' in {source_path}"
+            )
+        if not spec.template_only:
+            raise RouteCompilationError(
+                f"Parameter '{name}' must be declared template_only to use '{{{{...}}}}' placeholders in {source_path}"
+            )
+        normalized_filters = _normalize_template_filters(spec, filters, source_path)
+        template_slots.append(
+            TemplateSlot(
+                placeholder=placeholder,
+                param=name,
+                filters=tuple(normalized_filters),
+            )
         )
 
-    prepared_sql = PLACEHOLDER_PATTERN.sub(replace, sql)
-    return order, prepared_sql, used_constants
+    order: list[str] = []
+    used_constants: set[str] = set()
+    for match in _DOLLAR_PLACEHOLDER.finditer(sql):
+        name = match.group("name")
+        if name in constant_params:
+            used_constants.add(name)
+            order.append(name)
+            continue
+        spec = params_by_name.get(name)
+        if spec is None:
+            raise RouteCompilationError(
+                f"Placeholder '${name}' used in SQL but not declared or defined in {source_path}"
+            )
+        if spec.template_only:
+            raise RouteCompilationError(
+                f"Template-only parameter '{name}' cannot be used with '$' bindings in {source_path}"
+            )
+        order.append(name)
+
+    return order, sql, used_constants, template_slots
+
+
+def _parse_template_expression(body: str, source_path: Path) -> tuple[str, list[str]]:
+    parts = [part.strip() for part in body.split("|")]
+    if not parts or not parts[0]:
+        raise RouteCompilationError(
+            f"Template placeholder '{{{{{body}}}}}' must reference a parameter name in {source_path}"
+        )
+    name = parts[0]
+    if not _IDENTIFIER_PATTERN.match(name):
+        raise RouteCompilationError(
+            f"Template placeholder '{{{{{body}}}}}' uses invalid parameter name '{name}' in {source_path}"
+        )
+    filters = [part for part in (item.strip().lower() for item in parts[1:]) if part]
+    return name, filters
+
+
+def _normalize_template_filters(
+    spec: ParameterSpec, filters: Sequence[str], source_path: Path
+) -> list[str]:
+    template_meta = spec.template or {}
+    policy_raw = template_meta.get("policy", "literal")
+    policy = str(policy_raw).lower()
+    if policy not in _KNOWN_TEMPLATE_FILTERS:
+        raise RouteCompilationError(
+            f"Parameter '{spec.name}' template policy '{policy_raw}' is not supported in {source_path}"
+        )
+
+    allowed: set[str] = {policy}
+    raw_allowed = template_meta.get("filters")
+    if isinstance(raw_allowed, str):
+        allowed.add(raw_allowed.lower())
+    elif isinstance(raw_allowed, Sequence) and not isinstance(raw_allowed, (str, bytes)):
+        allowed.update(str(item).lower() for item in raw_allowed)
+    elif raw_allowed is not None:
+        raise RouteCompilationError(
+            f"Parameter '{spec.name}' template filters must be a list of strings in {source_path}"
+        )
+
+    normalized = list(filters) if filters else [policy]
+    for name in normalized:
+        if name not in _KNOWN_TEMPLATE_FILTERS:
+            raise RouteCompilationError(
+                f"Template filter '{name}' for parameter '{spec.name}' is not supported in {source_path}"
+            )
+        if name not in allowed:
+            raise RouteCompilationError(
+                f"Template filter '{name}' is not allowed for parameter '{spec.name}' in {source_path}"
+            )
+    return normalized
 
 
 def _extract_metadata(metadata: Mapping[str, object]) -> Mapping[str, object]:
@@ -1193,6 +1271,14 @@ def _write_route_module(definition: RouteDefinition, source_path: Path, src_root
         "constant_params": _serialize_constant_table(
             definition.constant_params, definition.constant_param_types
         ),
+        "template_slots": [
+            {
+                "placeholder": slot.placeholder,
+                "param": slot.param,
+                "filters": list(slot.filters),
+            }
+            for slot in definition.template_slots
+        ],
     }
 
     module_content = (

@@ -436,7 +436,7 @@ def test_prepare_respects_values_added_by_preprocessors(
     assert prepared.ordered == ["2024-01-01", "set-by-pre"]
 
 
-def test_executor_executes_duckdb_table_function_file_bindings(
+def test_executor_rejects_file_function_runtime_params(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     config = load_config(None)
@@ -517,6 +517,87 @@ CROSS JOIN multi_source;
     assert prepared.params["multi_paths"] == [str(single_path), str(second_path)]
     assert prepared.ordered == [str(single_path), [str(single_path), str(second_path)]]
 
+    with pytest.raises(RouteExecutionError, match="cannot bind parameter"):
+        executor.execute_relation(
+            route,
+            params={"single_path": str(single_path)},
+            offset=0,
+            limit=None,
+        )
+
+
+def test_executor_allows_file_function_binding_when_disabled(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+    config.interpolation.forbid_db_params_in_file_functions = False
+
+    data_single = pa.table({"value": pa.array([1], type=pa.int64())})
+    data_multi = pa.table({"value": pa.array([2, 3], type=pa.int64())})
+    single_path = tmp_path / "single_allowed.parquet"
+    second_path = tmp_path / "second_allowed.parquet"
+    pq.write_table(data_single, single_path)
+    pq.write_table(data_multi, second_path)
+
+    source = tmp_path / "src_allowed"
+    build = tmp_path / "build_allowed"
+    source.mkdir()
+
+    _write_pair(
+        source,
+        "duckdb_paths",
+        """id = "duckdb_paths"
+path = "/duckdb_paths"
+cache_mode = "passthrough"
+
+[params.single_path]
+type = "str"
+required = true
+
+[params.multi_paths]
+type = "str"
+required = false
+""".strip(),
+        """WITH single_source AS (
+    SELECT COUNT(*) AS single_count, SUM(value) AS single_sum
+    FROM read_parquet($single_path::TEXT)
+),
+multi_source AS (
+    SELECT COUNT(*) AS multi_count, SUM(value) AS multi_sum
+    FROM read_parquet($multi_paths::TEXT[])
+)
+SELECT
+    single_source.single_count,
+    single_source.single_sum,
+    multi_source.multi_count,
+    multi_source.multi_sum
+FROM single_source
+CROSS JOIN multi_source;
+""".strip(),
+    )
+
+    compile_routes(source, build)
+    routes = load_compiled_routes(build)
+    route = next(item for item in routes if item.id == "duckdb_paths")
+
+    def _inject_file_list(steps, params, *, route, request):  # type: ignore[override]
+        assert steps == route.preprocess
+        assert params["single_path"] == str(single_path)
+        assert params.get("multi_paths") is None
+        updated = dict(params)
+        updated["multi_paths"] = [str(single_path), str(second_path)]
+        return updated
+
+    monkeypatch.setattr(execution_module, "run_preprocessors", _inject_file_list)
+
+    executor = RouteExecutor(
+        {item.id: item for item in routes},
+        cache_store=None,
+        config=config,
+        plugin_loader=PluginLoader(config.server.plugins_dir),
+    )
+
     result = executor.execute_relation(
         route,
         params={"single_path": str(single_path)},
@@ -531,3 +612,77 @@ CROSS JOIN multi_source;
     assert data["single_sum"] == [1]
     assert data["multi_count"] == [3]
     assert data["multi_sum"] == [6]
+
+
+def test_template_only_interpolation_with_guard(tmp_path: Path) -> None:
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+
+    data_single = pa.table({"value": pa.array([1], type=pa.int64())})
+    single_path = tmp_path / "templated.parquet"
+    pq.write_table(data_single, single_path)
+
+    source = tmp_path / "src_tmpl"
+    build = tmp_path / "build_tmpl"
+    source.mkdir()
+
+    guard_prefix = str(tmp_path)
+
+    _write_pair(
+        source,
+        "templated_paths",
+        f"""id = "templated_paths"
+path = "/templated_paths"
+cache_mode = "passthrough"
+
+[params.source_path]
+type = "str"
+template_only = true
+
+[params.source_path.template]
+policy = "literal"
+
+[params.source_path.guard]
+prefix = "{guard_prefix}"
+""".strip(),
+        """SELECT COUNT(*) AS rows_found FROM read_parquet({{source_path}});""",
+    )
+
+    compile_routes(source, build)
+    routes = load_compiled_routes(build)
+    route = next(item for item in routes if item.id == "templated_paths")
+
+    executor = RouteExecutor(
+        {item.id: item for item in routes},
+        cache_store=None,
+        config=config,
+        plugin_loader=PluginLoader(config.server.plugins_dir),
+    )
+
+    prepared = executor._prepare(
+        route,
+        {"source_path": str(single_path)},
+        ordered=None,
+        preprocessed=False,
+    )
+
+    assert "source_path" not in prepared.bindings
+
+    result = executor.execute_relation(
+        route,
+        params={"source_path": str(single_path)},
+        offset=0,
+        limit=None,
+    )
+
+    table = result.table
+    assert table.num_rows == 1
+    assert table.to_pydict()["rows_found"] == [1]
+
+    with pytest.raises(RouteExecutionError, match="must start with"):
+        executor.execute_relation(
+            route,
+            params={"source_path": str(tmp_path.parent / "other.parquet")},
+            offset=0,
+            limit=None,
+        )
