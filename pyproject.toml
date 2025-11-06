@@ -1,7 +1,7 @@
 # TODO[todo-pyproject-s8-q8r9]: Update tooling configuration to enforce ruff, mypy --strict, pytest, and forbidden-token scans for Step 8's CI guardrails.
 [project]
 name = "webbed-duck"
-version = "0.35.2"
+version = "0.36.0"
 description = "A parameterized SQL web server for DuckDB routes compiled from Markdown"
 authors = [
   { name = "Isaac Moore" }
