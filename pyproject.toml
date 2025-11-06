@@ -56,3 +56,8 @@ deadline = 750
 max_examples = 75
 stateful_step_count = 15
 print_blob = true
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.2",
+]
