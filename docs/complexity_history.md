@@ -1376,6 +1376,279 @@ The underlying metrics are available as [`complexity_history.csv`](complexity_hi
         }
       ],
       "version": "0.37.3"
+    },
+    {
+      "average": 5.544843049327354,
+      "average_grade": "B",
+      "blocks_analyzed": 446,
+      "grade_counts": {
+        "A": 287,
+        "B": 94,
+        "C": 49,
+        "D": 13,
+        "E": 1,
+        "F": 2
+      },
+      "modules": {
+        "webbed_duck/server/ui/widgets/multi_select.py": [
+          {
+            "classname": null,
+            "complexity": 12.0,
+            "endline": 92,
+            "kind": "function",
+            "lineno": 7,
+            "name": "render_multi_select",
+            "path": "webbed_duck/server/ui/widgets/multi_select.py",
+            "rank": "C"
+          },
+          {
+            "classname": null,
+            "complexity": 1.0,
+            "endline": 101,
+            "kind": "function",
+            "lineno": 95,
+            "name": "_escape",
+            "path": "webbed_duck/server/ui/widgets/multi_select.py",
+            "rank": "A"
+          }
+        ],
+        "webbed_duck/server/ui/widgets/params.py": [
+          {
+            "classname": null,
+            "complexity": 41.0,
+            "endline": 195,
+            "kind": "function",
+            "lineno": 36,
+            "name": "render_params_form",
+            "path": "webbed_duck/server/ui/widgets/params.py",
+            "rank": "F"
+          },
+          {
+            "classname": null,
+            "complexity": 18.0,
+            "endline": 381,
+            "kind": "function",
+            "lineno": 328,
+            "name": "_unique_invariant_options",
+            "path": "webbed_duck/server/ui/widgets/params.py",
+            "rank": "C"
+          },
+          {
+            "classname": null,
+            "complexity": 14.0,
+            "endline": 286,
+            "kind": "function",
+            "lineno": 244,
+            "name": "_resolve_select_options",
+            "path": "webbed_duck/server/ui/widgets/params.py",
+            "rank": "C"
+          },
+          {
+            "classname": null,
+            "complexity": 10.0,
+            "endline": 412,
+            "kind": "function",
+            "lineno": 384,
+            "name": "_unique_options_from_table",
+            "path": "webbed_duck/server/ui/widgets/params.py",
+            "rank": "B"
+          },
+          {
+            "classname": null,
+            "complexity": 10.0,
+            "endline": 432,
+            "kind": "function",
+            "lineno": 415,
+            "name": "_filter_options_by_table_values",
+            "path": "webbed_duck/server/ui/widgets/params.py",
+            "rank": "B"
+          },
+          {
+            "classname": null,
+            "complexity": 9.0,
+            "endline": 226,
+            "kind": "function",
+            "lineno": 198,
+            "name": "_parameter_from_invariant",
+            "path": "webbed_duck/server/ui/widgets/params.py",
+            "rank": "B"
+          },
+          {
+            "classname": null,
+            "complexity": 9.0,
+            "endline": 325,
+            "kind": "function",
+            "lineno": 303,
+            "name": "_normalize_options",
+            "path": "webbed_duck/server/ui/widgets/params.py",
+            "rank": "B"
+          },
+          {
+            "classname": null,
+            "complexity": 8.0,
+            "endline": 447,
+            "kind": "function",
+            "lineno": 435,
+            "name": "_resolve_option_column_name",
+            "path": "webbed_duck/server/ui/widgets/params.py",
+            "rank": "B"
+          },
+          {
+            "classname": null,
+            "complexity": 7.0,
+            "endline": 464,
+            "kind": "function",
+            "lineno": 450,
+            "name": "_normalize_selected_values",
+            "path": "webbed_duck/server/ui/widgets/params.py",
+            "rank": "B"
+          },
+          {
+            "classname": null,
+            "complexity": 6.0,
+            "endline": 476,
+            "kind": "function",
+            "lineno": 467,
+            "name": "_stringify_param_value",
+            "path": "webbed_duck/server/ui/widgets/params.py",
+            "rank": "B"
+          },
+          {
+            "classname": null,
+            "complexity": 6.0,
+            "endline": 241,
+            "kind": "function",
+            "lineno": 230,
+            "name": "_input_attrs_for_spec",
+            "path": "webbed_duck/server/ui/widgets/params.py",
+            "rank": "B"
+          },
+          {
+            "classname": null,
+            "complexity": 4.0,
+            "endline": 300,
+            "kind": "function",
+            "lineno": 289,
+            "name": "_merge_option_lists",
+            "path": "webbed_duck/server/ui/widgets/params.py",
+            "rank": "A"
+          },
+          {
+            "classname": null,
+            "complexity": 3.0,
+            "endline": 33,
+            "kind": "function",
+            "lineno": 26,
+            "name": "_default_ui_label",
+            "path": "webbed_duck/server/ui/widgets/params.py",
+            "rank": "A"
+          }
+        ]
+      },
+      "timestamp": "2025-11-06T18:07:34Z",
+      "top_blocks": [
+        {
+          "classname": null,
+          "complexity": 44.0,
+          "endline": 317,
+          "kind": "function",
+          "lineno": 169,
+          "name": "_route_from_mapping",
+          "path": "webbed_duck/core/routes.py",
+          "rank": "F"
+        },
+        {
+          "classname": null,
+          "complexity": 41.0,
+          "endline": 195,
+          "kind": "function",
+          "lineno": 36,
+          "name": "render_params_form",
+          "path": "webbed_duck/server/ui/widgets/params.py",
+          "rank": "F"
+        },
+        {
+          "classname": null,
+          "complexity": 32.0,
+          "endline": 610,
+          "kind": "function",
+          "lineno": 533,
+          "name": "_coerce_constant_value",
+          "path": "webbed_duck/core/compiler.py",
+          "rank": "E"
+        },
+        {
+          "classname": null,
+          "complexity": 27.0,
+          "endline": 350,
+          "kind": "function",
+          "lineno": 260,
+          "name": "_ordered_union",
+          "path": "webbed_duck/server/ui/layout.py",
+          "rank": "D"
+        },
+        {
+          "classname": null,
+          "complexity": 26.0,
+          "endline": 431,
+          "kind": "function",
+          "lineno": 317,
+          "name": "load_config",
+          "path": "webbed_duck/config.py",
+          "rank": "D"
+        },
+        {
+          "classname": null,
+          "complexity": 26.0,
+          "endline": 532,
+          "kind": "function",
+          "lineno": 434,
+          "name": "_parse_server",
+          "path": "webbed_duck/config.py",
+          "rank": "D"
+        },
+        {
+          "classname": null,
+          "complexity": 25.0,
+          "endline": 173,
+          "kind": "function",
+          "lineno": 86,
+          "name": "render_cards_html_with_assets",
+          "path": "webbed_duck/server/postprocess.py",
+          "rank": "D"
+        },
+        {
+          "classname": null,
+          "complexity": 25.0,
+          "endline": 1331,
+          "kind": "function",
+          "lineno": 1259,
+          "name": "_collect_params",
+          "path": "webbed_duck/server/app.py",
+          "rank": "D"
+        },
+        {
+          "classname": null,
+          "complexity": 24.0,
+          "endline": 251,
+          "kind": "function",
+          "lineno": 159,
+          "name": "_cmd_serve",
+          "path": "webbed_duck/cli.py",
+          "rank": "D"
+        },
+        {
+          "classname": null,
+          "complexity": 24.0,
+          "endline": 1164,
+          "kind": "function",
+          "lineno": 1116,
+          "name": "resolve_cache_settings",
+          "path": "webbed_duck/server/cache.py",
+          "rank": "D"
+        }
+      ],
+      "version": "0.37.4"
     }
   ]
 }
@@ -1700,5 +1973,71 @@ complexity-history:data-->
 
 - Average complexity changed by -0.020 (from B to B).
 - Grade distribution shifts: A +2.
+
+</details>
+
+## Version v0.37.4 (2025-11-06T18:07:34Z)
+
+### Summary
+
+- Blocks analysed: 446
+- Average cyclomatic complexity: 5.545 (B)
+
+### Grade distribution
+
+| Grade | Blocks | Share |
+| ----- | ------ | ----- |
+| A | 287 | 64.3% |
+| B | 94 | 21.1% |
+| C | 49 | 11.0% |
+| D | 13 | 2.9% |
+| E | 1 | 0.2% |
+| F | 2 | 0.4% |
+
+### Most complex blocks
+
+| Rank | Block | Complexity |
+| ---- | ----- | ---------- |
+| 1 | `_route_from_mapping` (webbed_duck/core/routes.py:169) | 44 (F) |
+| 2 | `render_params_form` (webbed_duck/server/ui/widgets/params.py:36) | 41 (F) |
+| 3 | `_coerce_constant_value` (webbed_duck/core/compiler.py:533) | 32 (E) |
+| 4 | `_ordered_union` (webbed_duck/server/ui/layout.py:260) | 27 (D) |
+| 5 | `load_config` (webbed_duck/config.py:317) | 26 (D) |
+| 6 | `_parse_server` (webbed_duck/config.py:434) | 26 (D) |
+| 7 | `render_cards_html_with_assets` (webbed_duck/server/postprocess.py:86) | 25 (D) |
+| 8 | `_collect_params` (webbed_duck/server/app.py:1259) | 25 (D) |
+| 9 | `_cmd_serve` (webbed_duck/cli.py:159) | 24 (D) |
+| 10 | `resolve_cache_settings` (webbed_duck/server/cache.py:1116) | 24 (D) |
+
+### `webbed_duck/server/ui/widgets/multi_select.py`
+
+| Block | Type | Line Range | Complexity | Grade |
+| ----- | ---- | ---------- | ---------- | ----- |
+| `render_multi_select` | function | 7-92 | 12 | C |
+| `_escape` | function | 95-101 | 1 | A |
+
+### `webbed_duck/server/ui/widgets/params.py`
+
+| Block | Type | Line Range | Complexity | Grade |
+| ----- | ---- | ---------- | ---------- | ----- |
+| `render_params_form` | function | 36-195 | 41 | F |
+| `_unique_invariant_options` | function | 328-381 | 18 | C |
+| `_resolve_select_options` | function | 244-286 | 14 | C |
+| `_unique_options_from_table` | function | 384-412 | 10 | B |
+| `_filter_options_by_table_values` | function | 415-432 | 10 | B |
+| `_parameter_from_invariant` | function | 198-226 | 9 | B |
+| `_normalize_options` | function | 303-325 | 9 | B |
+| `_resolve_option_column_name` | function | 435-447 | 8 | B |
+| `_normalize_selected_values` | function | 450-464 | 7 | B |
+| `_stringify_param_value` | function | 467-476 | 6 | B |
+| `_input_attrs_for_spec` | function | 230-241 | 6 | B |
+| `_merge_option_lists` | function | 289-300 | 4 | A |
+| `_default_ui_label` | function | 26-33 | 3 | A |
+
+<details>
+<summary>Changes since v0.37.3</summary>
+
+- Average complexity changed by +0.000 (from B to B).
+- No tracked complexity deltas for monitored blocks.
 
 </details>
