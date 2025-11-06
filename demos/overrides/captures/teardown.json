@@ -1,7 +1,0 @@
-{
-  "column": "note",
-  "removed": true,
-  "route_id": "hello_world",
-  "row_key": "{\"greeting\": \"Hello, Audit Demo!\"}",
-  "timestamp": "2025-11-04T02:51:29.939450Z"
-}

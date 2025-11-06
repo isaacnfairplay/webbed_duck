@@ -16,7 +16,7 @@ dependencies = [
   "pyzipper>=0.3.6",
   "keyring>=24.2",
   "markdown>=3.5",
-  "tzdata; platform_system == \"Windows\""
+  "tzdata; platform_system == \"Windows\"",
 ]
 
 [project.optional-dependencies]

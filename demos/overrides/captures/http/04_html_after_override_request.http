@@ -1,6 +1,0 @@
-GET /hello?format=html_t&name=Audit+Demo HTTP/1.1
-accept: text/html
-accept-encoding: gzip, deflate
-connection: keep-alive
-host: testserver
-user-agent: testclient

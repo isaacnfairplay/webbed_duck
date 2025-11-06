@@ -1,6 +1,0 @@
-GET /routes/hello_world/overrides HTTP/1.1
-accept: */*
-accept-encoding: gzip, deflate
-connection: keep-alive
-host: testserver
-user-agent: testclient

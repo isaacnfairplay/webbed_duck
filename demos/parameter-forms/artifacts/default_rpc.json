@@ -1,8 +1,0 @@
-{
-  "endpoint": "http://demo-server/hello?format=arrow_rpc",
-  "format": "arrow_rpc",
-  "limit": null,
-  "offset": 0,
-  "page_rows": 1,
-  "total_rows": 1
-}

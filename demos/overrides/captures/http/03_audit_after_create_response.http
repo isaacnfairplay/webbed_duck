@@ -1,5 +1,0 @@
-HTTP/1.1 200 OK
-content-length: 370
-content-type: application/json
-
-{"route_id":"hello_world","overrides":[{"route_id":"hello_world","row_key":"{\"greeting\": \"Hello, Audit Demo!\"}","column":"note","value":"Override note captured by generate_demo.py","reason":"Documenting manual note update","author_hash":"4c328170073b990ae3d2139a21dc3191035081ff08f4132d4abe01c72f5c2fef","author_user_id":"anonymous","created_ts":1762224689.928201}]}

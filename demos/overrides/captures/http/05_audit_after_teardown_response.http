@@ -1,5 +1,0 @@
-HTTP/1.1 200 OK
-content-length: 41
-content-type: application/json
-
-{"route_id":"hello_world","overrides":[]}
