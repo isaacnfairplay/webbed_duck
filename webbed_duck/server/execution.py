@@ -2,6 +2,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import datetime as _dt
+import decimal
+import math
+import re
 from typing import Callable, Mapping, MutableMapping, Sequence
 
 try:  # pragma: no cover - optional dependency for type checking
@@ -24,10 +28,171 @@ from .cache import (
 from .preprocess import run_preprocessors
 
 
+_IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
+
+_FILE_FUNCTION_NAMES = [
+    "read_csv",
+    "read_csv_auto",
+    "read_parquet",
+    "read_json",
+    "read_json_auto",
+    "read_avro",
+    "read_orc",
+    "read_ipc",
+    "read_arrow",
+    "read_feather",
+    "read_text",
+    "read_excel",
+    "read_delta",
+    "parquet_scan",
+    "csv_scan",
+    "json_scan",
+    "delta_scan",
+    "glob",
+    "list_files",
+]
+
+_FILE_FUNCTION_PATTERN = re.compile(
+    r"\b(?P<func>(" + "|".join(re.escape(name) for name in _FILE_FUNCTION_NAMES) + r"))\s*\((?P<args>[^)]*?)\)",
+    re.IGNORECASE,
+)
+
+
 class RouteExecutionError(RuntimeError):
     """Raised when a route or dependency cannot be executed."""
 
 
+def _filter_literal(value: object, spec: ParameterSpec, route_id: str) -> str:
+    if value is None:
+        raise RouteExecutionError(
+            f"Template parameter '{spec.name}' cannot be null in route '{route_id}'"
+        )
+    if isinstance(value, bool):
+        return "TRUE" if value else "FALSE"
+    if isinstance(value, (int, decimal.Decimal)):
+        return str(value)
+    if isinstance(value, float):
+        if not math.isfinite(value):
+            raise RouteExecutionError(
+                f"Template parameter '{spec.name}' must be a finite number in route '{route_id}'"
+            )
+        return repr(value)
+    if isinstance(value, _dt.datetime):
+        return f"'{value.isoformat()}'"
+    if isinstance(value, _dt.date):
+        return f"'{value.isoformat()}'"
+    text = str(value)
+    escaped = text.replace("'", "''")
+    return f"'{escaped}'"
+
+
+def _filter_identifier(value: object, spec: ParameterSpec, route_id: str) -> str:
+    if value is None:
+        raise RouteExecutionError(
+            f"Template parameter '{spec.name}' cannot be null in route '{route_id}'"
+        )
+    text = str(value)
+    if not _IDENTIFIER_PATTERN.match(text):
+        raise RouteExecutionError(
+            f"Template parameter '{spec.name}' must be an identifier in route '{route_id}'"
+        )
+    return text
+
+
+def _filter_raw(value: object, spec: ParameterSpec, route_id: str) -> str:
+    if value is None:
+        raise RouteExecutionError(
+            f"Template parameter '{spec.name}' cannot be null in route '{route_id}'"
+        )
+    return str(value)
+
+
+def _filter_lower(value: object, spec: ParameterSpec, route_id: str) -> str:
+    return _filter_raw(value, spec, route_id).lower()
+
+
+def _filter_upper(value: object, spec: ParameterSpec, route_id: str) -> str:
+    return _filter_raw(value, spec, route_id).upper()
+
+
+_TEMPLATE_FILTERS: Mapping[str, Callable[[object, ParameterSpec, str], str]] = {
+    "literal": _filter_literal,
+    "identifier": _filter_identifier,
+    "raw": _filter_raw,
+    "lower": _filter_lower,
+    "upper": _filter_upper,
+}
+
+
+def _apply_template_filters(
+    value: object, filters: Sequence[str], spec: ParameterSpec, route_id: str
+) -> str:
+    current: object = value
+    for name in filters:
+        handler = _TEMPLATE_FILTERS.get(name)
+        if handler is None:
+            raise RouteExecutionError(
+                f"Unsupported template filter '{name}' for parameter '{spec.name}' in route '{route_id}'"
+            )
+        current = handler(current, spec, route_id)
+    return str(current)
+
+
+def _evaluate_template_guard(spec: ParameterSpec, value: object, route_id: str) -> None:
+    guard = spec.guard or {}
+    mode_raw = guard.get("mode")
+    mode = str(mode_raw).lower() if mode_raw is not None else ""
+    if not mode:
+        if "pattern" in guard or "regex" in guard:
+            mode = "pattern"
+        elif "prefix" in guard:
+            mode = "prefix"
+        elif "choices" in guard:
+            mode = "choices"
+        elif "identifier" in guard:
+            mode = "identifier"
+    if not mode:
+        return
+    text = None if value is None else str(value)
+    if mode in {"pattern", "regex"}:
+        pattern = guard.get("pattern") or guard.get("regex")
+        if not isinstance(pattern, str) or not pattern:
+            raise RouteExecutionError(
+                f"Guard for parameter '{spec.name}' must define a regex pattern in route '{route_id}'"
+            )
+        if text is None or not re.fullmatch(pattern, text):
+            raise RouteExecutionError(
+                f"Parameter '{spec.name}' failed regex guard in route '{route_id}'"
+            )
+    elif mode == "prefix":
+        prefix = guard.get("prefix")
+        if not isinstance(prefix, str):
+            raise RouteExecutionError(
+                f"Guard for parameter '{spec.name}' must define a prefix string in route '{route_id}'"
+            )
+        if text is None or not text.startswith(prefix):
+            raise RouteExecutionError(
+                f"Parameter '{spec.name}' must start with '{prefix}' in route '{route_id}'"
+            )
+    elif mode == "choices":
+        choices = guard.get("choices")
+        if not isinstance(choices, Sequence) or not choices:
+            raise RouteExecutionError(
+                f"Guard for parameter '{spec.name}' must define a non-empty choices list in route '{route_id}'"
+            )
+        normalized = {str(choice) for choice in choices}
+        if text is None or text not in normalized:
+            raise RouteExecutionError(
+                f"Parameter '{spec.name}' must be one of {sorted(normalized)} in route '{route_id}'"
+            )
+    elif mode == "identifier":
+        if text is None or not _IDENTIFIER_PATTERN.match(text):
+            raise RouteExecutionError(
+                f"Parameter '{spec.name}' must be an identifier in route '{route_id}'"
+            )
+    else:
+        # Unknown guard types are ignored until supported explicitly.
+        return
 @dataclass(slots=True)
 class _PreparedRoute:
     params: Mapping[str, object]
@@ -51,6 +216,7 @@ class RouteExecutor:
         self._cache_config = config.cache
         self._stack: list[str] = []
         self._plugin_loader = plugin_loader
+        self._interpolation_config = config.interpolation
 
     def execute_relation(
         self,
@@ -216,6 +382,61 @@ class RouteExecutor:
 
         return bindings
 
+    def _render_sql(
+        self,
+        route: RouteDefinition,
+        prepared: _PreparedRoute,
+        *,
+        request: Request | None,
+    ) -> str:
+        sql = self._apply_template(route, prepared.params, request=request)
+        self._enforce_file_function_rules(sql, route)
+        return sql
+
+    def _apply_template(
+        self,
+        route: RouteDefinition,
+        params: Mapping[str, object],
+        *,
+        request: Request | None,
+    ) -> str:
+        sql = route.prepared_sql
+        slots = getattr(route, "template_slots", ())
+        if not slots:
+            return sql
+        rendered = sql
+        for slot in slots:
+            spec = route.find_param(slot.param)
+            if spec is None:
+                raise RouteExecutionError(
+                    f"Template references unknown parameter '{slot.param}' in route '{route.id}'"
+                )
+            value = params.get(slot.param)
+            if value is None:
+                raise RouteExecutionError(
+                    f"Template parameter '{slot.param}' was not provided for route '{route.id}'"
+                )
+            _evaluate_template_guard(spec, value, route.id)
+            rendered_value = _apply_template_filters(value, slot.filters, spec, route.id)
+            rendered = rendered.replace(slot.placeholder, rendered_value, 1)
+        return rendered
+
+    def _enforce_file_function_rules(self, sql: str, route: RouteDefinition) -> None:
+        if not getattr(
+            self._interpolation_config, "forbid_db_params_in_file_functions", False
+        ):
+            return
+        for match in _FILE_FUNCTION_PATTERN.finditer(sql):
+            args = match.group("args") or ""
+            names = re.findall(r"\$([A-Za-z_][A-Za-z0-9_]*)", args)
+            for name in names:
+                if name in route.constant_params:
+                    continue
+                func = match.group("func")
+                raise RouteExecutionError(
+                    f"DuckDB function '{func}' cannot bind parameter '${name}' in route '{route.id}'"
+                )
+
     def _make_reader_factory(
         self,
         route: RouteDefinition,
@@ -260,7 +481,8 @@ class RouteExecutor:
         con = duckdb.connect()
         try:
             self._register_dependencies(con, route, prepared.params, request=request)
-            cursor = con.execute(route.prepared_sql, prepared.bindings)
+            sql = self._render_sql(route, prepared, request=request)
+            cursor = con.execute(sql, prepared.bindings)
             return con, cursor
         except Exception:
             con.close()

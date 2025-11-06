@@ -136,6 +136,13 @@ class CacheConfig:
 
 
 @dataclass(slots=True)
+class InterpolationConfig:
+    """Template interpolation safety controls."""
+
+    forbid_db_params_in_file_functions: bool = True
+
+
+@dataclass(slots=True)
 class FeatureFlagsConfig:
     """Feature toggle configuration."""
 
@@ -156,6 +163,7 @@ class Config:
     email: EmailConfig = field(default_factory=EmailConfig)
     share: ShareConfig = field(default_factory=ShareConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
+    interpolation: InterpolationConfig = field(default_factory=InterpolationConfig)
     feature_flags: FeatureFlagsConfig = field(default_factory=FeatureFlagsConfig)
     runtime: RuntimeConfig = field(init=False)
 
@@ -336,6 +344,9 @@ def load_config(path: str | Path | None = None) -> Config:
     cache_data = data.get("cache")
     if isinstance(cache_data, Mapping):
         cfg.cache = _parse_cache(cache_data, base=cfg.cache)
+    interpolation_data = data.get("interpolation")
+    if isinstance(interpolation_data, Mapping):
+        cfg.interpolation = _parse_interpolation(interpolation_data, base=cfg.interpolation)
     feature_flag_data = data.get("feature_flags")
     if isinstance(feature_flag_data, Mapping):
         cfg.feature_flags = _parse_feature_flags(feature_flag_data, base=cfg.feature_flags)
@@ -515,6 +526,18 @@ def _parse_cache(data: Mapping[str, Any], base: CacheConfig) -> CacheConfig:
     return replace(base, **overrides)
 
 
+def _parse_interpolation(
+    data: Mapping[str, Any], base: InterpolationConfig
+) -> InterpolationConfig:
+    overrides: MutableMapping[str, Any] = {}
+    key = "forbid_db_params_in_file_functions"
+    if key in data:
+        overrides[key] = bool(data[key])
+    if not overrides:
+        return base
+    return replace(base, **overrides)
+
+
 def _parse_feature_flags(data: Mapping[str, Any], base: FeatureFlagsConfig) -> FeatureFlagsConfig:
     overrides: MutableMapping[str, Any] = {}
     for key in (
@@ -539,6 +562,7 @@ __all__ = [
     "EmailConfig",
     "ShareConfig",
     "CacheConfig",
+    "InterpolationConfig",
     "FeatureFlagsConfig",
     "load_config",
 ]

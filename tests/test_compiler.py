@@ -97,7 +97,7 @@ def test_compile_route(tmp_path: Path) -> None:
         "type = \"str\"\n"
         "required = true\n"
         "+++\n\n"
-        "```sql\nSELECT {{name}} as value\n```\n"
+        "```sql\nSELECT $name as value\n```\n"
     )
     route_path = write_route(tmp_path, route_text)
     definition = compile_route_file(route_path)
@@ -146,6 +146,59 @@ def test_compile_route_preserves_template_metadata(tmp_path: Path) -> None:
     assert loaded_spec.guard == {"mode": "role", "role": "admin"}
 
 
+def test_compile_requires_template_only_for_brace_placeholders(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"bad_tmpl\"\n"
+        "path = \"/bad\"\n"
+        "[params.value]\n"
+        "type = \"str\"\n"
+        "required = true\n"
+        "+++\n\n"
+        "```sql\nSELECT {{value}} AS value\n```\n"
+    )
+    with pytest.raises(RouteCompilationError, match="template_only"):
+        compile_route_file(write_route(tmp_path, route_text))
+
+
+def test_compile_rejects_template_param_in_binding(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"bad_binding\"\n"
+        "path = \"/bad_binding\"\n"
+        "[params.value]\n"
+        "type = \"str\"\n"
+        "template_only = true\n"
+        "+++\n\n"
+        "```sql\nSELECT $value AS value\n```\n"
+    )
+    with pytest.raises(RouteCompilationError, match="Template-only parameter 'value' cannot be used"):
+        compile_route_file(write_route(tmp_path, route_text))
+
+
+def test_compile_records_template_slots(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"templated_sql\"\n"
+        "path = \"/templated_sql\"\n"
+        "[params.schema]\n"
+        "type = \"str\"\n"
+        "template_only = true\n"
+        "[params.schema.template]\n"
+        "policy = \"identifier\"\n"
+        "filters = [\"identifier\"]\n"
+        "+++\n\n"
+        "```sql\nSELECT * FROM {{schema|identifier}}.metrics\n```\n"
+    )
+    definition = compile_route_file(write_route(tmp_path, route_text))
+    assert definition.param_order == []
+    assert len(definition.template_slots) == 1
+    slot = definition.template_slots[0]
+    assert slot.placeholder == "{{schema|identifier}}"
+    assert slot.param == "schema"
+    assert tuple(slot.filters) == ("identifier",)
+
+
 def test_compile_route_applies_constants(tmp_path: Path) -> None:
     route_text = (
         "+++\n"
@@ -158,7 +211,7 @@ def test_compile_route_applies_constants(tmp_path: Path) -> None:
         "type = \"identifier\"\n"
         "value = \"mart.customers\"\n"
         "+++\n\n"
-        "```sql\nSELECT * FROM {{const.customer_table}} WHERE id = {{user_id}}\n```\n"
+        "```sql\nSELECT * FROM {{const.customer_table}} WHERE id = $user_id\n```\n"
     )
     route_path = write_route(tmp_path, route_text)
     definition = compile_route_file(route_path)

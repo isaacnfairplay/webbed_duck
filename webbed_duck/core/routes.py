@@ -75,6 +75,13 @@ class ParameterSpec:
 
 
 @dataclass(slots=True)
+class TemplateSlot:
+    placeholder: str
+    param: str
+    filters: Sequence[str] = field(default_factory=tuple)
+
+
+@dataclass(slots=True)
 class RouteDirective:
     name: str
     args: Mapping[str, str]
@@ -116,6 +123,7 @@ class RouteDefinition:
     constant_params: Mapping[str, object] = field(default_factory=dict)
     constant_types: Mapping[str, str] = field(default_factory=dict)
     constant_param_types: Mapping[str, str] = field(default_factory=dict)
+    template_slots: Sequence[TemplateSlot] = ()
 
     def find_param(self, name: str) -> ParameterSpec | None:
         for param in self.params:
@@ -245,6 +253,33 @@ def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
         constant_params = {}
         constant_param_types = {}
 
+    template_slots_data = route.get("template_slots", [])
+    template_slots: list[TemplateSlot] = []
+    if isinstance(template_slots_data, Sequence) and not isinstance(
+        template_slots_data, (str, bytes)
+    ):
+        for item in template_slots_data:
+            if not isinstance(item, Mapping):
+                continue
+            placeholder = item.get("placeholder")
+            param_name = item.get("param")
+            if placeholder is None or param_name is None:
+                continue
+            filters_raw = item.get("filters")
+            if isinstance(filters_raw, str):
+                filters = [filters_raw]
+            elif isinstance(filters_raw, Sequence) and not isinstance(filters_raw, (str, bytes)):
+                filters = [str(value) for value in filters_raw]
+            else:
+                filters = []
+            template_slots.append(
+                TemplateSlot(
+                    placeholder=str(placeholder),
+                    param=str(param_name),
+                    filters=tuple(filters),
+                )
+            )
+
     return RouteDefinition(
         id=str(route["id"]),
         path=str(route["path"]),
@@ -271,6 +306,7 @@ def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
         constant_params=constant_params,
         constant_types=constant_types,
         constant_param_types=constant_param_types,
+        template_slots=template_slots,
     )
 
 
