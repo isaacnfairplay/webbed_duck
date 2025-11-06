@@ -315,6 +315,48 @@ def test_compile_route_detects_constant_conflicts(tmp_path: Path) -> None:
         )
 
 
+def test_compile_route_allows_server_constant_aliases(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"server_alias\"\n"
+        "path = \"/server_alias\"\n"
+        "+++\n\n"
+        "```sql\n"
+        "SELECT {{server.constants.data_root}} AS root,\n"
+        "       {{server.secrets.api_token}} AS token\n"
+        "```\n"
+    )
+    route_path = write_route(tmp_path, route_text)
+
+    class DummyKeyring:
+        @staticmethod
+        def get_password(service: str, username: str) -> str | None:
+            if (service, username) == ("ops", "svc"):
+                return "sekret"
+            return None
+
+    monkeypatch.setattr(compiler, "keyring", DummyKeyring())
+
+    definition = compile_route_file(
+        route_path,
+        server_constants={"data_root": "/srv/data"},
+        server_secrets={"api_token": {"service": "ops", "username": "svc"}},
+    )
+
+    assert definition.constants["data_root"] == "/srv/data"
+    assert definition.constants["api_token"] == "sekret"
+    assert definition.constant_params == {
+        "const_data_root": "/srv/data",
+        "const_api_token": "sekret",
+    }
+    assert definition.prepared_sql == (
+        "SELECT $const_data_root AS root,\n"
+        "       $const_api_token AS token"
+    )
+
+
 def test_identifier_constant_rejects_invalid(tmp_path: Path) -> None:
     route_text = (
         "+++\n"

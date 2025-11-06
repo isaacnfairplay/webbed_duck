@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Restored compiler support for `{{server.constants.*}}` and
+  `{{server.secrets.*}}` SQL placeholders so server-level configuration values
+  continue to bind without declaring per-route aliases. Added regression
+  coverage to lock the template guard against rejecting these expressions.
+
 - Locked preprocess plugins to a configured `server.plugins_dir` so every
   `[[preprocess]]` block references a single `.py` file via
   `callable_path`/`callable_name` and optional `kwargs`. The compiler now loads
