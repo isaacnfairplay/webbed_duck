@@ -90,7 +90,7 @@ pii_columns = ["note"]
 
 ```sql
 SELECT
-  'Hello, ' || {{name}} || '!' AS greeting,
+  'Hello, ' || $name || '!' AS greeting,
   'private-note' AS note,
   CURRENT_DATE AS created_at
 ```
@@ -108,7 +108,7 @@ order_by = ["day_value"]
 +++
 
 ```sql
-SELECT {{day}} AS day_value
+SELECT $day AS day_value
 ORDER BY day_value;
 ```
 """

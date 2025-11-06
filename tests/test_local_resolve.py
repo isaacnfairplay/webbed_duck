@@ -37,7 +37,7 @@ order_by = ["greeting"]
 
 ```sql
 SELECT
-  'Hello, ' || {{name}} || '!' AS greeting,
+  'Hello, ' || $name || '!' AS greeting,
   'classified' AS secret
 ```
 """

@@ -26,6 +26,14 @@ def _write_config(
         )
     body = content.strip()
     if body:
+        if "[server]" in body and "plugins_dir" not in body:
+            plugins_dir = (tmp_path / "plugins").resolve()
+            plugins_dir.mkdir(parents=True, exist_ok=True)
+            body = body.replace(
+                "[server]",
+                f"[server]\nplugins_dir = \"{plugins_dir.as_posix()}\"",
+                1,
+            )
         pieces.append(body)
     path.write_text("\n\n".join(pieces) + "\n", encoding="utf-8")
     return path
@@ -118,6 +126,20 @@ watermark = false
     assert config.share.zip_attachments is False
     assert config.share.zip_passphrase_required is True
     assert config.share.watermark is False
+
+
+def test_load_config_parses_interpolation_settings(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path,
+        """
+[interpolation]
+forbid_db_params_in_file_functions = false
+""".strip(),
+    )
+
+    config = load_config(path)
+
+    assert config.interpolation.forbid_db_params_in_file_functions is False
 
 
 def test_load_config_parses_ui_chartjs_source(tmp_path: Path) -> None:

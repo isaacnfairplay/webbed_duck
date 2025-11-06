@@ -190,26 +190,33 @@ def test_build_cache_normalizes_order_by(values):
     "sql, params, expected_order, expected_sql",
     [
         (
-            "SELECT * FROM items WHERE id = {{id}}",
+            "SELECT * FROM items WHERE id = $id",
             [ParameterSpec(name="id", type=ParameterType.INTEGER)],
             ["id"],
-            "SELECT * FROM items WHERE id = ?",
+            "SELECT * FROM items WHERE id = $id",
         ),
         (
-            "SELECT $name FROM dual WHERE id = {{id}}",
+            "SELECT $name FROM dual WHERE id = $id",
             [
                 ParameterSpec(name="id", type=ParameterType.INTEGER),
                 ParameterSpec(name="name"),
             ],
             ["name", "id"],
-            "SELECT ? FROM dual WHERE id = ?",
+            "SELECT $name FROM dual WHERE id = $id",
         ),
     ],
 )
 def test_prepare_sql_translates_placeholders(sql, params, expected_order, expected_sql):
-    order, prepared = _prepare_sql(sql, params)
+    order, prepared, used_constants, template_calls = _prepare_sql(
+        sql,
+        params,
+        {},
+        source_path=Path("test.sql"),
+    )
     assert order == expected_order
     assert prepared == expected_sql
+    assert not used_constants
+    assert template_calls == []
 
 
 @pytest.mark.parametrize(
@@ -221,7 +228,7 @@ def test_prepare_sql_translates_placeholders(sql, params, expected_order, expect
 )
 def test_prepare_sql_raises_for_unknown_params(sql, params):
     with pytest.raises(RouteCompilationError):
-        _prepare_sql(sql, params)
+        _prepare_sql(sql, params, {}, source_path=Path("fail.sql"))
 
 
 @st.composite
@@ -229,7 +236,7 @@ def sql_placeholder_strategy(draw):
     names = draw(st.lists(st.text(min_size=1, max_size=5), min_size=1, max_size=5))
     unique = {name for name in names}
     params = [ParameterSpec(name=name) for name in sorted(unique)]
-    sql = "SELECT " + " + ".join(f"{{{{{name}}}}}" for name in names)
+    sql = "SELECT " + " + ".join(f"${name}" for name in names)
     sql += " FROM dual"
     return sql, params, names
 
@@ -237,6 +244,50 @@ def sql_placeholder_strategy(draw):
 @given(sql_placeholder_strategy())
 def test_prepare_sql_tracks_placeholder_order(case):
     sql, params, names = case
-    order, prepared = _prepare_sql(sql, params)
+    order, prepared, used_constants, template_calls = _prepare_sql(
+        sql,
+        params,
+        {},
+        source_path=Path("order.sql"),
+    )
     assert order == names
-    assert prepared.count("?") == len(names)
+    assert template_calls == []
+
+
+def test_prepare_sql_records_template_calls() -> None:
+    params = [ParameterSpec(name="path", template_only=True)]
+    order, prepared, used_constants, template_calls = _prepare_sql(
+        "SELECT {{ path | identifier }} AS value",
+        params,
+        {},
+        source_path=Path("template.sql"),
+    )
+    assert order == []
+    assert prepared == "SELECT __wd_template_0__ AS value"
+    assert used_constants == set()
+    assert len(template_calls) == 1
+    call = template_calls[0]
+    assert call.param == "path"
+    assert call.filters == ("identifier",)
+
+
+def test_prepare_sql_rejects_binding_template_only_param() -> None:
+    params = [ParameterSpec(name="path", template_only=True)]
+    with pytest.raises(RouteCompilationError, match="binding phase"):
+        _prepare_sql(
+            "SELECT $path",
+            params,
+            {},
+            source_path=Path("binding.sql"),
+        )
+
+
+def test_prepare_sql_requires_template_only_flag_for_braces() -> None:
+    params = [ParameterSpec(name="limit")]
+    with pytest.raises(RouteCompilationError, match="template_only=true"):
+        _prepare_sql(
+            "SELECT {{ limit }}",
+            params,
+            {},
+            source_path=Path("template_fail.sql"),
+        )
