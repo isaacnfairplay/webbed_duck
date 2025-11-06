@@ -17,6 +17,7 @@ dependencies = [
   "pyzipper>=0.3.6",
   "keyring>=24.2",
   "markdown>=3.5",
+  "matplotlib>=3.9",
   "tzdata; platform_system == \"Windows\"",
 ]
 
