@@ -5,24 +5,9 @@ Do not edit manually—changes will be overwritten during the automated
 version bump workflow.
 
 
-```mermaid
-xyChart
-    title: Webbed Duck Cyclomatic Complexity
-    xType: category
-    xLabel: Version
-    yLabel: Average Cyclomatic Complexity
-    series:
-      - title: Average CC
-        data:
-          - x: v0.36.3
-            y: 5.565
-          - x: v0.37.0
-            y: 5.565
-          - x: v0.37.1
-            y: 5.565
-          - x: v0.37.2
-            y: 5.565
-```
+![Cyclomatic complexity history](complexity_history.svg)
+
+The underlying metrics are available as [`complexity_history.csv`](complexity_history.csv).
 
 <!--complexity-history:data
 {
@@ -1014,7 +999,7 @@ xyChart
           }
         ]
       },
-      "timestamp": "2025-11-06T17:24:56Z",
+      "timestamp": "2025-11-06T17:37:45Z",
       "top_blocks": [
         {
           "classname": null,
@@ -1313,7 +1298,7 @@ complexity-history:data-->
 
 </details>
 
-## Version v0.37.2 (2025-11-06T17:24:56Z)
+## Version v0.37.2 (2025-11-06T17:37:45Z)
 
 ### Summary
 
