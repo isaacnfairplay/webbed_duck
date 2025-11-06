@@ -22,6 +22,7 @@ from .cache import (
     materialize_parquet_artifacts,
 )
 from .preprocess import run_preprocessors
+from .interpolation import InterpolationError, render_interpolated_sql
 
 
 class RouteExecutionError(RuntimeError):
@@ -33,6 +34,7 @@ class _PreparedRoute:
     params: Mapping[str, object]
     ordered: Sequence[object]
     bindings: Mapping[str, object]
+    sql: str
 
 
 class RouteExecutor:
@@ -51,6 +53,7 @@ class RouteExecutor:
         self._cache_config = config.cache
         self._stack: list[str] = []
         self._plugin_loader = plugin_loader
+        self._config = config
 
     def execute_relation(
         self,
@@ -97,6 +100,7 @@ class RouteExecutor:
                 config=self._cache_config,
                 reader_factory=reader_factory,
                 execute_sql=execute_sql,
+                rendered_sql=prepared.sql,
             )
         except (duckdb.Error, RuntimeError) as exc:  # pragma: no cover - propagated from cache/duckdb
             raise RouteExecutionError(str(exc)) from exc
@@ -114,9 +118,21 @@ class RouteExecutor:
     ) -> _PreparedRoute:
         if preprocessed:
             processed = dict(params)
-            ordered_params = list(ordered) if ordered is not None else self._ordered_from_processed(route, processed)
-            bindings = self._build_bindings(route, processed)
-            return _PreparedRoute(params=processed, ordered=ordered_params, bindings=bindings)
+            rendered_sql, binding_names = self._render_sql(route, processed)
+            ordered_params = (
+                list(ordered)
+                if ordered is not None
+                else self._ordered_from_processed(route, processed)
+            )
+            bindings = self._filter_bindings(
+                self._build_bindings(route, processed), binding_names
+            )
+            return _PreparedRoute(
+                params=processed,
+                ordered=ordered_params,
+                bindings=bindings,
+                sql=rendered_sql,
+            )
 
         coerced = self._coerce_params(route, params)
         processed = run_preprocessors(
@@ -126,9 +142,17 @@ class RouteExecutor:
             request=request,
             loader=self._plugin_loader,
         )
+        rendered_sql, binding_names = self._render_sql(route, processed)
         ordered_params = self._ordered_from_processed(route, processed)
-        bindings = self._build_bindings(route, processed)
-        return _PreparedRoute(params=processed, ordered=ordered_params, bindings=bindings)
+        bindings = self._filter_bindings(
+            self._build_bindings(route, processed), binding_names
+        )
+        return _PreparedRoute(
+            params=processed,
+            ordered=ordered_params,
+            bindings=bindings,
+            sql=rendered_sql,
+        )
 
     def _coerce_params(
         self, route: RouteDefinition, provided: Mapping[str, object]
@@ -202,6 +226,8 @@ class RouteExecutor:
             if spec is None:
                 bindings[name] = processed.get(name)
                 continue
+            if spec.template_only:
+                continue
             if spec.default is not None:
                 bindings[name] = spec.default
             elif spec.required:
@@ -215,6 +241,29 @@ class RouteExecutor:
             bindings[name] = value
 
         return bindings
+
+    def _filter_bindings(
+        self, bindings: Mapping[str, object], binding_names: set[str]
+    ) -> Mapping[str, object]:
+        if not binding_names:
+            return {}
+        filtered: dict[str, object] = {}
+        for name, value in bindings.items():
+            if name in binding_names:
+                filtered[name] = value
+        return filtered
+
+    def _render_sql(
+        self, route: RouteDefinition, params: Mapping[str, object]
+    ) -> tuple[str, set[str]]:
+        try:
+            return render_interpolated_sql(
+                route,
+                params,
+                config=self._config.interpolation,
+            )
+        except InterpolationError as exc:
+            raise RouteExecutionError(str(exc)) from exc
 
     def _make_reader_factory(
         self,
@@ -260,7 +309,7 @@ class RouteExecutor:
         con = duckdb.connect()
         try:
             self._register_dependencies(con, route, prepared.params, request=request)
-            cursor = con.execute(route.prepared_sql, prepared.bindings)
+            cursor = con.execute(prepared.sql, prepared.bindings)
             return con, cursor
         except Exception:
             con.close()

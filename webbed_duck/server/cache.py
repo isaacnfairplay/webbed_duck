@@ -110,11 +110,13 @@ class CacheStore:
         route: RouteDefinition,
         params: Mapping[str, object],
         settings: CacheSettings,
+        *,
+        sql_override: str | None = None,
     ) -> CacheKey:
         payload = {
             "route": route.id,
             "version": route.version,
-            "sql": route.prepared_sql,
+            "sql": sql_override or route.prepared_sql,
             "rows_per_page": settings.rows_per_page,
             "order_by": list(settings.order_by),
             "params": _normalize_mapping(params),
@@ -1176,12 +1178,14 @@ def fetch_cached_table(
     config: CacheConfig,
     reader_factory: RecordBatchFactory | None = None,
     execute_sql: Callable[[], pa.Table] | None = None,
+    rendered_sql: str | None = None,
 ) -> CacheQueryResult:
     settings = resolve_cache_settings(route, config)
     effective_offset, effective_limit = _effective_window(offset, limit, settings)
     invariant_requests = _collect_invariant_requests(settings.invariant_filters, params)
-    reader_factory_fn = reader_factory or (lambda: _record_batch_reader(route.prepared_sql, bound_params))
-    execute_sql_fn = execute_sql or (lambda: _execute_sql(route.prepared_sql, bound_params))
+    sql_text = rendered_sql or route.prepared_sql
+    reader_factory_fn = reader_factory or (lambda: _record_batch_reader(sql_text, bound_params))
+    execute_sql_fn = execute_sql or (lambda: _execute_sql(sql_text, bound_params))
 
     if not store or not settings.enabled:
         table = execute_sql_fn()
@@ -1198,7 +1202,7 @@ def fetch_cached_table(
             cache_hit=False,
             meta=None,
         )
-    route_signature = _route_signature(route)
+    route_signature = _route_signature(route, sql_override=sql_text)
     cache_params = _prepare_cache_params(params, settings.invariant_filters)
 
     if settings.invariant_filters:
@@ -1214,11 +1218,12 @@ def fetch_cached_table(
             limit,
             invariant_requests,
             settings.order_by,
+            sql_override=sql_text,
         )
         if reuse is not None:
             return _sorted_query_result(reuse, settings.order_by)
 
-    key = store.compute_key(route, cache_params, settings)
+    key = store.compute_key(route, cache_params, settings, sql_override=sql_text)
     read = store.try_read(
         key,
         route_signature=route_signature,
@@ -1282,6 +1287,7 @@ def materialize_parquet_artifacts(
     store: CacheStore | None,
     config: CacheConfig,
     reader_factory: RecordBatchFactory | None = None,
+    rendered_sql: str | None = None,
 ) -> CacheArtifactResult:
     settings = resolve_cache_settings(route, config)
     if not store or not settings.enabled:
@@ -1297,10 +1303,11 @@ def materialize_parquet_artifacts(
         raise RuntimeError(
             f"Route '{route.id}' received invariant-filter overrides incompatible with parquet_path mode"
         )
-    reader_factory_fn = reader_factory or (lambda: _record_batch_reader(route.prepared_sql, bound_params))
+    sql_text = rendered_sql or route.prepared_sql
+    reader_factory_fn = reader_factory or (lambda: _record_batch_reader(sql_text, bound_params))
     cache_params = _prepare_cache_params(params, settings.invariant_filters)
-    key = store.compute_key(route, cache_params, settings)
-    route_signature = _route_signature(route)
+    key = store.compute_key(route, cache_params, settings, sql_override=sql_text)
+    route_signature = _route_signature(route, sql_override=sql_text)
     store.get_or_populate(
         key,
         route_signature=route_signature,
@@ -1332,12 +1339,14 @@ def _reuse_invariant_caches(
     client_limit: int | None,
     requested_invariants: Mapping[str, Sequence[object]],
     order_by: Sequence[str],
+    *,
+    sql_override: str | None = None,
 ) -> CacheQueryResult | None:
     if not requested_invariants:
         return None
 
     original_params = dict(params)
-    exact_key = store.compute_key(route, cache_params, settings)
+    exact_key = store.compute_key(route, cache_params, settings, sql_override=sql_override)
     exact_hit = store.try_read(
         exact_key,
         route_signature=route_signature,
@@ -1367,7 +1376,7 @@ def _reuse_invariant_caches(
 
     base_params = _drop_invariant_params(dict(cache_params), settings.invariant_filters)
     if base_params != dict(cache_params):
-        base_key = store.compute_key(route, base_params, settings)
+        base_key = store.compute_key(route, base_params, settings, sql_override=sql_override)
         superset_hit = store.try_read(
             base_key,
             route_signature=route_signature,
@@ -1407,7 +1416,7 @@ def _reuse_invariant_caches(
             combo_params[param] = value
             combo_requests[param] = (value,)
         combo_cache_params = _prepare_cache_params(combo_params, settings.invariant_filters)
-        combo_key = store.compute_key(route, combo_cache_params, settings)
+        combo_key = store.compute_key(route, combo_cache_params, settings, sql_override=sql_override)
         combo_hit = store.try_read(
             combo_key,
             route_signature=route_signature,
@@ -1598,11 +1607,11 @@ def _effective_window(
     return page_index * rows, rows
 
 
-def _route_signature(route: RouteDefinition) -> str:
+def _route_signature(route: RouteDefinition, *, sql_override: str | None = None) -> str:
     payload = {
         "id": route.id,
         "version": route.version,
-        "sql": route.prepared_sql,
+        "sql": sql_override or route.prepared_sql,
         "order": list(route.param_order),
         "constants": _constant_snapshot(route.constants, route.constant_types),
     }

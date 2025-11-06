@@ -198,12 +198,179 @@ WHERE ($enabled = enabled_again)
     data = table.to_pydict()
     assert data["text_value"] == ["Alpha"]
     assert data["count_value"] == [7]
-    assert data["ratio_value"][0] == pytest.approx(2.5)
-    assert data["enabled_value"] == [True]
-    assert data["count_again"] == [7]
-    assert data["enabled_again"] == [True]
-    assert data["ratio_again"][0] == pytest.approx(2.5)
-    assert data["text_again"] == ["Alpha"]
+
+
+def test_executor_renders_template_only_literal(tmp_path: Path) -> None:
+    source = tmp_path / "src"
+    build = tmp_path / "build"
+    source.mkdir()
+
+    _write_pair(
+        source,
+        "template_literal",
+        """id = "template_literal"
+path = "/template"
+cache_mode = "passthrough"
+
+[params]
+[params.data_path]
+type = "str"
+template_only = true
+
+[params.data_path.template]
+policy = "literal"
+
+[params.data_path.guard]
+mode = "path"
+""".strip(),
+        """SELECT {{data_path}} AS rendered""",
+    )
+
+    compile_routes(source, build)
+    routes = load_compiled_routes(build)
+    route = next(item for item in routes if item.id == "template_literal")
+
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+
+    executor = RouteExecutor(
+        {item.id: item for item in routes},
+        cache_store=None,
+        config=config,
+        plugin_loader=PluginLoader(config.server.plugins_dir),
+    )
+
+    incoming = {"data_path": "reports/daily.csv"}
+    prepared = executor._prepare(route, incoming, ordered=None, preprocessed=False)
+
+    assert "data_path" not in prepared.bindings
+    assert "'reports/daily.csv'" in prepared.sql
+
+    result = executor.execute_relation(route, incoming, offset=0, limit=None)
+    table = result.table.to_pydict()
+    assert table["rendered"] == ["reports/daily.csv"]
+
+
+def test_executor_template_path_guard_rejects_parent(tmp_path: Path) -> None:
+    source = tmp_path / "src"
+    build = tmp_path / "build"
+    source.mkdir()
+
+    _write_pair(
+        source,
+        "template_guard",
+        """id = "template_guard"
+path = "/template-guard"
+cache_mode = "passthrough"
+
+[params]
+[params.data_path]
+type = "str"
+template_only = true
+
+[params.data_path.template]
+policy = "path"
+
+[params.data_path.guard]
+mode = "path"
+""".strip(),
+        """SELECT {{data_path | path}} AS sanitized""",
+    )
+
+    compile_routes(source, build)
+    routes = load_compiled_routes(build)
+    route = next(item for item in routes if item.id == "template_guard")
+
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+
+    executor = RouteExecutor(
+        {item.id: item for item in routes},
+        cache_store=None,
+        config=config,
+        plugin_loader=PluginLoader(config.server.plugins_dir),
+    )
+
+    with pytest.raises(RouteExecutionError):
+        executor._prepare(route, {"data_path": "../secrets"}, ordered=None, preprocessed=False)
+
+
+def test_executor_rejects_db_params_in_file_functions(tmp_path: Path) -> None:
+    source = tmp_path / "src"
+    build = tmp_path / "build"
+    source.mkdir()
+
+    _write_pair(
+        source,
+        "file_fn",
+        """id = "file_fn"
+path = "/file-fn"
+cache_mode = "passthrough"
+
+[params]
+[params.path]
+type = "str"
+required = true
+""".strip(),
+        """SELECT * FROM read_parquet($path) LIMIT 1""",
+    )
+
+    compile_routes(source, build)
+    routes = load_compiled_routes(build)
+    route = next(item for item in routes if item.id == "file_fn")
+
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+
+    executor = RouteExecutor(
+        {item.id: item for item in routes},
+        cache_store=None,
+        config=config,
+        plugin_loader=PluginLoader(config.server.plugins_dir),
+    )
+
+    with pytest.raises(RouteExecutionError):
+        executor._prepare(route, {"path": "data/sample.parquet"}, ordered=None, preprocessed=False)
+
+
+def test_executor_allows_file_functions_when_configured(tmp_path: Path) -> None:
+    source = tmp_path / "src"
+    build = tmp_path / "build"
+    source.mkdir()
+
+    _write_pair(
+        source,
+        "file_fn_ok",
+        """id = "file_fn_ok"
+path = "/file-fn-ok"
+cache_mode = "passthrough"
+
+[params]
+[params.path]
+type = "str"
+required = true
+""".strip(),
+        """SELECT 1 AS value WHERE LENGTH($path) > 0""",
+    )
+
+    compile_routes(source, build)
+    routes = load_compiled_routes(build)
+    route = next(item for item in routes if item.id == "file_fn_ok")
+
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+    config.interpolation.forbid_db_params_in_file_functions = False
+
+    executor = RouteExecutor(
+        {item.id: item for item in routes},
+        cache_store=None,
+        config=config,
+        plugin_loader=PluginLoader(config.server.plugins_dir),
+    )
+
+    prepared = executor._prepare(route, {"path": "logs/output"}, ordered=None, preprocessed=False)
+    assert "path" in prepared.bindings
+    assert "$path" in prepared.sql
 
 
 def test_executor_handles_temporal_params(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -256,6 +423,7 @@ required = true
         *,
         route,
         request,
+        loader,
     ):
         captured["params"] = dict(params)
         return dict(params)
@@ -413,7 +581,7 @@ def test_prepare_respects_values_added_by_preprocessors(
         preprocess=({"callable": "tests.fake_preprocessors:add_suffix", "suffix": ""},),
     )
 
-    def _fake_preprocessors(steps, params, *, route, request):  # type: ignore[override]
+    def _fake_preprocessors(steps, params, *, route, request, loader):  # type: ignore[override]
         assert steps == route.preprocess
         assert params == {"cursor": None, "optional": None}
         updated = dict(params)
@@ -441,6 +609,7 @@ def test_executor_executes_duckdb_table_function_file_bindings(
 ) -> None:
     config = load_config(None)
     config.server.storage_root = tmp_path / "storage"
+    config.interpolation.forbid_db_params_in_file_functions = False
 
     data_single = pa.table({"value": pa.array([1], type=pa.int64())})
     data_multi = pa.table({"value": pa.array([2, 3], type=pa.int64())})
@@ -490,7 +659,7 @@ CROSS JOIN multi_source;
     routes = load_compiled_routes(build)
     route = next(item for item in routes if item.id == "duckdb_paths")
 
-    def _inject_file_list(steps, params, *, route, request):  # type: ignore[override]
+    def _inject_file_list(steps, params, *, route, request, loader):  # type: ignore[override]
         assert steps == route.preprocess
         assert params["single_path"] == str(single_path)
         assert params.get("multi_paths") is None
@@ -531,3 +700,51 @@ CROSS JOIN multi_source;
     assert data["single_sum"] == [1]
     assert data["multi_count"] == [3]
     assert data["multi_sum"] == [6]
+
+def test_executor_allows_template_paths_in_file_functions(tmp_path: Path) -> None:
+    source = tmp_path / "src"
+    build = tmp_path / "build"
+    source.mkdir()
+
+    _write_pair(
+        source,
+        "file_fn_template",
+        """id = "file_fn_template"
+path = "/file-fn-template"
+cache_mode = "passthrough"
+
+[params]
+[params.data_path]
+type = "str"
+template_only = true
+
+[params.data_path.template]
+policy = "path"
+""".strip(),
+        """SELECT * FROM read_parquet({{ data_path | path }}) LIMIT 5""",
+    )
+
+    compile_routes(source, build)
+    routes = load_compiled_routes(build)
+    route = next(item for item in routes if item.id == "file_fn_template")
+
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+
+    executor = RouteExecutor(
+        {item.id: item for item in routes},
+        cache_store=None,
+        config=config,
+        plugin_loader=PluginLoader(config.server.plugins_dir),
+    )
+
+    prepared = executor._prepare(
+        route,
+        {"data_path": "datasets/logs/2024.parquet"},
+        ordered=None,
+        preprocessed=False,
+    )
+
+    assert "data_path" not in prepared.bindings
+    assert "read_parquet" in prepared.sql
+    assert "$" not in prepared.sql

@@ -7,8 +7,13 @@ from pathlib import Path
 import pytest
 
 from webbed_duck.core import compiler
-from webbed_duck.core.compiler import RouteCompilationError, compile_route_file, compile_routes
-from webbed_duck.core.routes import load_compiled_routes
+from webbed_duck.core.compiler import (
+    RouteCompilationError,
+    _prepare_sql,
+    compile_route_file,
+    compile_routes,
+)
+from webbed_duck.core.routes import ParameterSpec, ParameterType, load_compiled_routes
 from webbed_duck.server.app import create_app
 from webbed_duck.config import load_config
 
@@ -97,7 +102,7 @@ def test_compile_route(tmp_path: Path) -> None:
         "type = \"str\"\n"
         "required = true\n"
         "+++\n\n"
-        "```sql\nSELECT {{name}} as value\n```\n"
+        "```sql\nSELECT $name as value\n```\n"
     )
     route_path = write_route(tmp_path, route_text)
     definition = compile_route_file(route_path)
@@ -158,7 +163,7 @@ def test_compile_route_applies_constants(tmp_path: Path) -> None:
         "type = \"identifier\"\n"
         "value = \"mart.customers\"\n"
         "+++\n\n"
-        "```sql\nSELECT * FROM {{const.customer_table}} WHERE id = {{user_id}}\n```\n"
+        "```sql\nSELECT * FROM {{const.customer_table}} WHERE id = $user_id\n```\n"
     )
     route_path = write_route(tmp_path, route_text)
     definition = compile_route_file(route_path)
@@ -172,6 +177,28 @@ def test_compile_route_applies_constants(tmp_path: Path) -> None:
     loaded = load_compiled_routes(build_dir)
     assert loaded[0].constant_params == {}
     assert loaded[0].prepared_sql == "SELECT * FROM mart.customers WHERE id = $user_id"
+
+
+def test_prepare_sql_requires_template_only_for_brace(tmp_path: Path) -> None:
+    spec = ParameterSpec(name="name", type=ParameterType.STRING, template_only=False)
+    with pytest.raises(RouteCompilationError, match="template_only=true"):
+        _prepare_sql(
+            "SELECT {{name}}",
+            [spec],
+            {},
+            source_path=tmp_path / "route.sql",
+        )
+
+
+def test_prepare_sql_rejects_template_param_as_binding(tmp_path: Path) -> None:
+    spec = ParameterSpec(name="slug", type=ParameterType.STRING, template_only=True)
+    with pytest.raises(RouteCompilationError, match="Template-only"):
+        _prepare_sql(
+            "SELECT $slug",
+            [spec],
+            {},
+            source_path=tmp_path / "route.sql",
+        )
 
 
 def test_compile_route_resolves_keyring_secret(
@@ -371,7 +398,6 @@ def test_compile_extracts_directive_sections(tmp_path: Path) -> None:
         "title_col = \"title\"\n"
         "+++\n\n"
         "<!-- @meta default_format=\"html_c\" allowed_formats=\"html_c json\" -->\n"
-        "<!-- @preprocess {\"callable\": \"tests.fake:noop\"} -->\n"
         "<!-- @postprocess {\"html_c\": {\"image_col\": \"photo\"}} -->\n"
         "<!-- @charts [{\"id\": \"chart1\", \"type\": \"line\"}] -->\n"
         "<!-- @assets {\"image_getter\": \"static_fallback\"} -->\n"
@@ -380,7 +406,7 @@ def test_compile_extracts_directive_sections(tmp_path: Path) -> None:
     definition = compile_route_file(write_route(tmp_path, route_text))
     assert definition.default_format == "html_c"
     assert set(definition.allowed_formats) == {"html_c", "json"}
-    assert definition.preprocess[0]["callable"] == "tests.fake:noop"
+    assert definition.preprocess == []
     assert definition.postprocess["html_c"]["image_col"] == "photo"
     assert definition.charts[0]["id"] == "chart1"
     assert definition.assets["image_getter"] == "static_fallback"
@@ -406,7 +432,7 @@ def test_server_returns_rows(tmp_path: Path) -> None:
         "[cache]\n"
         "order_by = [\"greeting\"]\n"
         "+++\n\n"
-        "```sql\nSELECT 'Hello, ' || {{name}} || '!' AS greeting ORDER BY greeting\n```\n"
+        "```sql\nSELECT 'Hello, ' || $name || '!' AS greeting ORDER BY greeting\n```\n"
     )
     src_dir = tmp_path / "routes"
     src_dir.mkdir()

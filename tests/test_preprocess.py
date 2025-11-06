@@ -161,7 +161,7 @@ def test_run_preprocessors_integrates_with_local_runner(
         "order_by = [\"result\"]\n"
         "+++\n\n"
         f"<!-- @preprocess {{\"callable_path\": \"{plugin_path}\", \"callable_name\": \"uppercase_value\", \"kwargs\": {{\"field\": \"name\"}}}} -->\n"
-        "```sql\nSELECT {{name}} AS result\n```\n"
+        "```sql\nSELECT $name AS result\n```\n"
     )
     src_dir = tmp_path / "src"
     build_dir = tmp_path / "build"

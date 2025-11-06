@@ -33,6 +33,7 @@ from .routes import (
     RouteDefinition,
     RouteDirective,
     RouteUse,
+    TemplateCall,
 )
 from ..plugins.loader import PluginLoader
 from ..server.preprocess import (
@@ -43,9 +44,9 @@ from ..server.preprocess import (
 
 FRONTMATTER_DELIMITER = "+++"
 SQL_BLOCK_PATTERN = re.compile(r"```sql\s*(?P<sql>.*?)```", re.DOTALL | re.IGNORECASE)
-PLACEHOLDER_PATTERN = re.compile(
-    r"\{\{\s*(?P<brace>[a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}|\$(?P<dollar>[a-zA-Z_][a-zA-Z0-9_]*)"
-)
+TEMPLATE_PLACEHOLDER_PATTERN = re.compile(r"\{\{\s*(?P<body>[^{}]+?)\s*\}\}")
+DOLLAR_PLACEHOLDER_PATTERN = re.compile(r"\$(?P<name>[A-Za-z_][A-Za-z0-9_]*)")
+_FILTER_NAME_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 DIRECTIVE_PATTERN = re.compile(r"<!--\s*@(?P<name>[a-zA-Z0-9_.:-]+)(?P<body>.*?)-->", re.DOTALL)
 CONSTANT_PATTERN = re.compile(
     r"\{\{\s*const(?:ant)?\.(?P<constant>[a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}",
@@ -249,7 +250,7 @@ def compile_route_text(
     )
     sql, constant_param_map = _inject_constant_placeholders(sql, constant_bindings, source_path)
     params = _parse_params(sections.params)
-    param_order, prepared_sql, used_constant_params = _prepare_sql(
+    param_order, prepared_sql, used_constant_params, template_calls = _prepare_sql(
         sql,
         params,
         constant_param_map,
@@ -315,6 +316,7 @@ def compile_route_text(
         constant_params=constant_param_values,
         constant_types=constant_types,
         constant_param_types=constant_param_types,
+        template_calls=tuple(template_calls),
     )
 
 
@@ -653,27 +655,83 @@ def _prepare_sql(
     constant_params: Mapping[str, str],
     *,
     source_path: Path,
-) -> tuple[List[str], str, set[str]]:
-    param_names = {p.name for p in params}
-    order: List[str] = []
+) -> tuple[List[str], str, set[str], list[TemplateCall]]:
+    param_map = {spec.name: spec for spec in params}
+    template_calls: list[TemplateCall] = []
     used_constants: set[str] = set()
+    order: List[str] = []
 
-    def replace(match: re.Match[str]) -> str:
-        name = match.group("brace") or match.group("dollar")
+    def render_template_phase(text: str) -> str:
+        rewritten_parts: list[str] = []
+        last_index = 0
+        for match in TEMPLATE_PLACEHOLDER_PATTERN.finditer(text):
+            rewritten_parts.append(text[last_index : match.start()])
+            body = match.group("body")
+            if body is None:
+                rewritten_parts.append(match.group(0))
+                last_index = match.end()
+                continue
+            param_name, filters = _parse_template_expression(body, source_path)
+            spec = param_map.get(param_name)
+            if spec is None:
+                raise RouteCompilationError(
+                    f"Template placeholder '{param_name}' is not declared in {source_path}"
+                )
+            if not spec.template_only:
+                raise RouteCompilationError(
+                    f"Parameter '{param_name}' must be declared with template_only=true to use '{{{{{body}}}}}' in {source_path}"
+                )
+            token = f"__wd_template_{len(template_calls)}__"
+            template_calls.append(TemplateCall(token=token, param=param_name, filters=filters))
+            rewritten_parts.append(token)
+            last_index = match.end()
+        rewritten_parts.append(text[last_index:])
+        return "".join(rewritten_parts)
+
+    rewritten = render_template_phase(sql)
+
+    for match in DOLLAR_PLACEHOLDER_PATTERN.finditer(rewritten):
+        name = match.group("name")
         if name is None:
-            return match.group(0)
+            continue
         if name in constant_params:
             used_constants.add(name)
-            return f"${name}"
-        if name in param_names:
-            order.append(name)
-            return f"${name}"
-        raise RouteCompilationError(
-            f"Placeholder '{name}' used in SQL but not declared or defined in {source_path}"
-        )
+            continue
+        spec = param_map.get(name)
+        if spec is None:
+            raise RouteCompilationError(
+                f"Placeholder '{name}' used in SQL but not declared or defined in {source_path}"
+            )
+        if spec.template_only:
+            raise RouteCompilationError(
+                f"Template-only parameter '{name}' cannot appear in the binding phase as '${name}' in {source_path}; use '{{{{{name}}}}}' instead"
+            )
+        order.append(name)
 
-    prepared_sql = PLACEHOLDER_PATTERN.sub(replace, sql)
-    return order, prepared_sql, used_constants
+    return order, rewritten, used_constants, template_calls
+
+
+def _parse_template_expression(body: str, source_path: Path) -> tuple[str, tuple[str, ...]]:
+    pieces = [segment.strip() for segment in body.split("|")]
+    if not pieces or not pieces[0]:
+        raise RouteCompilationError(
+            f"Template expression '{{{{{body}}}}}' is malformed in {source_path}"
+        )
+    name = pieces[0]
+    if not _IDENTIFIER_PATTERN.match(name):
+        raise RouteCompilationError(
+            f"Template expression '{{{{{body}}}}}' must begin with a parameter name in {source_path}"
+        )
+    filters: list[str] = []
+    for raw_filter in pieces[1:]:
+        if not raw_filter:
+            continue
+        if not _FILTER_NAME_PATTERN.match(raw_filter):
+            raise RouteCompilationError(
+                f"Filter '{raw_filter}' in '{{{{{body}}}}}' is not a valid identifier in {source_path}"
+            )
+        filters.append(raw_filter)
+    return name, tuple(filters)
 
 
 def _extract_metadata(metadata: Mapping[str, object]) -> Mapping[str, object]:
@@ -1193,6 +1251,14 @@ def _write_route_module(definition: RouteDefinition, source_path: Path, src_root
         "constant_params": _serialize_constant_table(
             definition.constant_params, definition.constant_param_types
         ),
+        "template_calls": [
+            {
+                "token": call.token,
+                "param": call.param,
+                "filters": list(call.filters),
+            }
+            for call in definition.template_calls
+        ],
     }
 
     module_content = (

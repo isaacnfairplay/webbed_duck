@@ -51,7 +51,7 @@ columns = ["greeting", "note", "created_at"]
 
 ```sql
 SELECT
-  'Hello, ' || {{name}} || '!' AS greeting,
+  'Hello, ' || $name || '!' AS greeting,
   'note from base' AS note,
   CURRENT_DATE AS created_at
 ORDER BY created_at;
@@ -248,7 +248,7 @@ order_by = ["day_value"]
 +++
 
 ```sql
-SELECT {{day}} AS day_value
+SELECT $day AS day_value
 ORDER BY day_value;
 ```
 """

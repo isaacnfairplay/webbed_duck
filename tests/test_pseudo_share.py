@@ -34,7 +34,7 @@ order_by = ["greeting"]
 +++
 
 ```sql
-SELECT 'Hello, ' || {{name}} || '!' AS greeting ORDER BY greeting;
+SELECT 'Hello, ' || $name || '!' AS greeting ORDER BY greeting;
 ```
 """
 
@@ -139,7 +139,7 @@ ROUTE_ATTACH_TEXT = (
     "+++\n\n"
     "```sql\n"
     "SELECT\n"
-    "  'Hello, ' || {{name}} || '!' AS greeting,\n"
+    "  'Hello, ' || $name || '!' AS greeting,\n"
     "  'sensitive@example.com' AS email,\n"
     "  'note' AS note\n"
     "UNION ALL\n"
