@@ -267,7 +267,7 @@ def test_invariant_filter_uses_superset_cache(tmp_path: Path, monkeypatch: pytes
         "    ('gadget', 2, 2),\n"
         "    ('widget', 3, 3)\n"
         ") AS inventory(product_code, quantity, seq)\n"
-        "WHERE product_code = COALESCE({{ product_code }}, product_code)\n"
+        "WHERE product_code = COALESCE($product_code, product_code)\n"
         "ORDER BY seq\n"
         "```\n"
     )
@@ -332,7 +332,7 @@ def test_invariant_filter_case_insensitive_values(
         "    ('gadget', 2, 2),\n"
         "    ('widget', 3, 3)\n"
         ") AS inventory(product_code, quantity, seq)\n"
-        "WHERE product_code = COALESCE({{ product_code }}, product_code)\n"
+        "WHERE product_code = COALESCE($product_code, product_code)\n"
         "ORDER BY seq\n"
         "```\n"
     )
@@ -429,7 +429,7 @@ def test_invariant_filter_supports_null_requests(
         "    (NULL, 2),\n"
         "    ('gadget', 3)\n"
         ") AS inventory(product_code, seq)\n"
-        "WHERE product_code IS NOT DISTINCT FROM COALESCE(NULLIF({{ product_code }}, ''), product_code)\n"
+        "WHERE product_code IS NOT DISTINCT FROM COALESCE(NULLIF($product_code, ''), product_code)\n"
         "ORDER BY seq\n"
         "```\n"
     )
@@ -508,7 +508,7 @@ def test_invariant_combines_filtered_caches(tmp_path: Path, monkeypatch: pytest.
         "    ('gadget', 2, 2),\n"
         "    ('widget', 3, 3)\n"
         ") AS inventory(product_code, quantity, seq)\n"
-        "WHERE product_code = COALESCE({{ product_code }}, product_code)\n"
+        "WHERE product_code = COALESCE($product_code, product_code)\n"
         "ORDER BY seq\n"
         "```\n"
     )
@@ -584,7 +584,7 @@ def test_invariant_partial_cache_triggers_query(tmp_path: Path, monkeypatch: pyt
         "    ('gadget', 2, 2),\n"
         "    ('widget', 3, 3)\n"
         ") AS inventory(product_code, quantity, seq)\n"
-        "WHERE product_code = COALESCE({{ product_code }}, product_code)\n"
+        "WHERE product_code = COALESCE($product_code, product_code)\n"
         "ORDER BY seq\n"
         "```\n"
     )
@@ -773,7 +773,7 @@ def test_invariant_select_defaults_to_unique_values(tmp_path: Path) -> None:
         "    ('FIN', 'Finance', 'Payroll'),\n"
         "    ('MFG', 'Manufacturing', 'Assembly')\n"
         ") AS t(Code, Division, Department)\n"
-        "WHERE {{ division }} = '' OR Division = {{ division }}\n"
+        "WHERE $division = '' OR Division = $division\n"
         "ORDER BY Division\n"
         "```\n"
     )
@@ -832,8 +832,8 @@ def test_invariant_html_form_filters_after_numeric_selection(tmp_path: Path) -> 
         "    (2024, 'Engineering', 'ENG-10'),\n"
         "    (2024, 'Operations', 'OPS-11')\n"
         ") AS t(Year, Division, Code)\n"
-        "WHERE ({{ year }} = '' OR Year = CAST({{ year }} AS INTEGER))\n"
-        "  AND ({{ division }} = '' OR Division = {{ division }})\n"
+        "WHERE ($year = '' OR Year = CAST($year AS INTEGER))\n"
+        "  AND ($division = '' OR Division = $division)\n"
         "ORDER BY Year, Division\n"
         "```\n"
     )
@@ -960,7 +960,7 @@ def test_invariant_unique_values_respect_filter_context(tmp_path: Path) -> None:
         "    ('Finance', 'Payroll'),\n"
         "    ('Manufacturing', 'Assembly Line 1')\n"
         ") AS t(Division, Department)\n"
-        "WHERE {{ division }} = '' OR Division = {{ division }}\n"
+        "WHERE $division = '' OR Division = $division\n"
         "ORDER BY Division, Department\n"
         "```\n"
     )
@@ -1210,7 +1210,7 @@ def test_invariant_unique_values_merge_with_static_options(tmp_path: Path) -> No
         "    ('ENG', 'Engineering'),\n"
         "    ('FIN', 'Finance')\n"
         ") AS t(Code, Division)\n"
-        "WHERE {{ division }} = '' OR Division = {{ division }}\n"
+        "WHERE $division = '' OR Division = $division\n"
         "ORDER BY Division\n"
         "```\n"
     )

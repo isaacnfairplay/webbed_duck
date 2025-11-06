@@ -25,7 +25,7 @@ order_by = ["greeting"]
 +++
 
 ```sql
-SELECT 'Hello, ' || {{name}} || '!' AS greeting
+SELECT 'Hello, ' || $name || '!' AS greeting
 ```
 """
 

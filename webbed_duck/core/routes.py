@@ -29,6 +29,13 @@ class ParameterType(str, Enum):
         except ValueError as exc:  # pragma: no cover - defensive programming
             raise ValueError(f"Unsupported parameter type: {value!r}") from exc
 
+@dataclass(slots=True)
+class TemplateSlot:
+    marker: str
+    param: str
+    filters: Sequence[str] = field(default_factory=tuple)
+    placeholder: str | None = None
+
 
 @dataclass(slots=True)
 class ParameterSpec:
@@ -102,6 +109,7 @@ class RouteDefinition:
     description: str | None = None
     metadata: Mapping[str, Any] | None = None
     directives: Sequence[RouteDirective] = ()
+    template_slots: Sequence[TemplateSlot] = ()
     version: str | None = None
     default_format: str | None = None
     allowed_formats: Sequence[str] = ()
@@ -232,6 +240,35 @@ def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
 
     constants, constant_types = _deserialize_constant_table(route.get("constants"))
 
+    slot_items = route.get("template_slots", [])
+    template_slots: list[TemplateSlot] = []
+    if isinstance(slot_items, Sequence):
+        for item in slot_items:
+            if not isinstance(item, Mapping):
+                continue
+            marker_raw = item.get("marker")
+            param_raw = item.get("param")
+            if marker_raw is None or param_raw is None:
+                continue
+            marker = str(marker_raw)
+            param = str(param_raw)
+            if not marker or not param:
+                continue
+            raw_filters = item.get("filters")
+            if isinstance(raw_filters, Sequence) and not isinstance(raw_filters, (str, bytes)):
+                filters = tuple(str(name) for name in raw_filters)
+            else:
+                filters = ()
+            placeholder = item.get("placeholder")
+            template_slots.append(
+                TemplateSlot(
+                    marker=marker,
+                    param=param,
+                    filters=filters,
+                    placeholder=str(placeholder) if placeholder is not None else None,
+                )
+            )
+
     constant_params_data = route.get("constant_params")
     if isinstance(constant_params_data, Mapping):
         constant_params: dict[str, object] = {}
@@ -267,6 +304,7 @@ def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
         cache_mode=str(route.get("cache_mode", "materialize")).lower(),
         returns=str(route.get("returns", "relation")).lower(),
         uses=uses,
+        template_slots=tuple(template_slots),
         constants=constants,
         constant_params=constant_params,
         constant_types=constant_types,
@@ -325,6 +363,7 @@ def _deserialize_constant_value(name: str, payload: object) -> tuple[object, str
 
 
 __all__ = [
+    "TemplateSlot",
     "ParameterSpec",
     "ParameterType",
     "RouteDefinition",

@@ -63,6 +63,12 @@ def _config_text(
         storage_root = (runtime_path or (tmp_path / "storage")).resolve()
         sections.append(f"[runtime]\nstorage = \"{storage_root.as_posix()}\"")
     content = body.strip()
+    if content and "[server]" in content and "plugins_dir" not in content:
+        content = content.replace(
+            "[server]",
+            "[server]\nplugins_dir = \"plugins\"",
+            1,
+        )
     if content:
         sections.append(content)
     return "\n\n".join(sections) + "\n"
@@ -229,6 +235,23 @@ def test_feature_flag_defaults(field: str, expected: Any) -> None:
     assert getattr(cfg.feature_flags, field) == expected
 
 
+INTERPOLATION_DEFAULTS = [
+    ("forbid_db_params_in_file_functions", True),
+]
+
+
+@pytest.mark.parametrize(
+    ("field", "expected"),
+    INTERPOLATION_DEFAULTS,
+    ids=[name for name, _ in INTERPOLATION_DEFAULTS],
+)
+def test_interpolation_defaults(field: str, expected: Any) -> None:
+    """Guard interpolation safeguard defaults."""
+
+    cfg = Config()
+    assert getattr(cfg.interpolation, field) == expected
+
+
 CONFIG_OVERRIDE_CASES = [
     ("server", "host", "0.0.0.0", "host", "0.0.0.0"),
     ("server", "host", "intranet.local", "host", "intranet.local"),
@@ -293,6 +316,20 @@ CONFIG_OVERRIDE_CASES = [
     ("feature_flags", "tasks_enabled", False, "tasks_enabled", False),
     ("feature_flags", "overrides_enabled", True, "overrides_enabled", True),
     ("feature_flags", "overrides_enabled", False, "overrides_enabled", False),
+    (
+        "interpolation",
+        "forbid_db_params_in_file_functions",
+        False,
+        "forbid_db_params_in_file_functions",
+        False,
+    ),
+    (
+        "interpolation",
+        "forbid_db_params_in_file_functions",
+        True,
+        "forbid_db_params_in_file_functions",
+        True,
+    ),
 ]
 
 
@@ -433,7 +470,7 @@ def test_parse_server_allows_none_source_dir() -> None:
     """Setting ``server.source_dir`` to ``None`` should disable compilation gracefully."""
 
     base = Config().server
-    result = _parse_server({"source_dir": None}, base)
+    result = _parse_server({"source_dir": None, "plugins_dir": "plugins"}, base)
     assert result.source_dir is None
 
 

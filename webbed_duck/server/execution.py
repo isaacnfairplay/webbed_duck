@@ -13,6 +13,7 @@ import duckdb
 import pyarrow as pa
 
 from ..config import Config
+from ..core.interpolation import TemplateInterpolationError, render_sql
 from ..core.routes import ParameterSpec, RouteDefinition, RouteUse
 from ..plugins.loader import PluginLoader
 from .cache import (
@@ -33,6 +34,7 @@ class _PreparedRoute:
     params: Mapping[str, object]
     ordered: Sequence[object]
     bindings: Mapping[str, object]
+    sql: str
 
 
 class RouteExecutor:
@@ -49,6 +51,7 @@ class RouteExecutor:
         self._routes = dict(routes_by_id)
         self._cache_store = cache_store
         self._cache_config = config.cache
+        self._config = config
         self._stack: list[str] = []
         self._plugin_loader = plugin_loader
 
@@ -114,21 +117,37 @@ class RouteExecutor:
     ) -> _PreparedRoute:
         if preprocessed:
             processed = dict(params)
-            ordered_params = list(ordered) if ordered is not None else self._ordered_from_processed(route, processed)
-            bindings = self._build_bindings(route, processed)
-            return _PreparedRoute(params=processed, ordered=ordered_params, bindings=bindings)
+        else:
+            coerced = self._coerce_params(route, params)
+            processed = run_preprocessors(
+                route.preprocess,
+                coerced,
+                route=route,
+                request=request,
+                loader=self._plugin_loader,
+            )
 
-        coerced = self._coerce_params(route, params)
-        processed = run_preprocessors(
-            route.preprocess,
-            coerced,
-            route=route,
-            request=request,
-            loader=self._plugin_loader,
-        )
-        ordered_params = self._ordered_from_processed(route, processed)
+        try:
+            sql = render_sql(
+                route,
+                processed,
+                config=self._config.interpolation,
+                request=request,
+            )
+        except TemplateInterpolationError as exc:
+            raise RouteExecutionError(str(exc)) from exc
+
+        if ordered is not None:
+            ordered_params = list(ordered)
+        else:
+            ordered_params = self._ordered_from_processed(route, processed)
         bindings = self._build_bindings(route, processed)
-        return _PreparedRoute(params=processed, ordered=ordered_params, bindings=bindings)
+        return _PreparedRoute(
+            params=processed,
+            ordered=ordered_params,
+            bindings=bindings,
+            sql=sql,
+        )
 
     def _coerce_params(
         self, route: RouteDefinition, provided: Mapping[str, object]
@@ -260,7 +279,7 @@ class RouteExecutor:
         con = duckdb.connect()
         try:
             self._register_dependencies(con, route, prepared.params, request=request)
-            cursor = con.execute(route.prepared_sql, prepared.bindings)
+            cursor = con.execute(prepared.sql, prepared.bindings)
             return con, cursor
         except Exception:
             con.close()

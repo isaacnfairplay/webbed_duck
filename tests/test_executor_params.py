@@ -61,6 +61,13 @@ def _write_pair(base: Path, stem: str, toml: str, sql: str) -> None:
     (base / f"{stem}.sql").write_text(sql, encoding="utf-8")
 
 
+def _compile_and_load_single_route(src: Path, build: Path) -> RouteDefinition:
+    compile_routes(src, build)
+    routes = load_compiled_routes(build)
+    assert len(routes) == 1
+    return routes[0]
+
+
 def test_executor_coerces_parameter_types_and_repeat_params(tmp_path: Path) -> None:
     source = tmp_path / "src"
     build = tmp_path / "build"
@@ -256,6 +263,7 @@ required = true
         *,
         route,
         request,
+        loader,
     ):
         captured["params"] = dict(params)
         return dict(params)
@@ -413,7 +421,7 @@ def test_prepare_respects_values_added_by_preprocessors(
         preprocess=({"callable": "tests.fake_preprocessors:add_suffix", "suffix": ""},),
     )
 
-    def _fake_preprocessors(steps, params, *, route, request):  # type: ignore[override]
+    def _fake_preprocessors(steps, params, *, route, request, loader):  # type: ignore[override]
         assert steps == route.preprocess
         assert params == {"cursor": None, "optional": None}
         updated = dict(params)
@@ -463,18 +471,24 @@ cache_mode = "passthrough"
 [params.single_path]
 type = "str"
 required = true
+template_only = true
+[params.single_path.template]
+policy = "literal"
 
 [params.multi_paths]
 type = "str"
 required = false
+template_only = true
+[params.multi_paths.template]
+policy = "raw"
 """.strip(),
         """WITH single_source AS (
     SELECT COUNT(*) AS single_count, SUM(value) AS single_sum
-    FROM read_parquet($single_path::TEXT)
+    FROM read_parquet({{ single_path }})
 ),
 multi_source AS (
     SELECT COUNT(*) AS multi_count, SUM(value) AS multi_sum
-    FROM read_parquet($multi_paths::TEXT[])
+    FROM read_parquet({{ multi_paths }})
 )
 SELECT
     single_source.single_count,
@@ -490,12 +504,14 @@ CROSS JOIN multi_source;
     routes = load_compiled_routes(build)
     route = next(item for item in routes if item.id == "duckdb_paths")
 
-    def _inject_file_list(steps, params, *, route, request):  # type: ignore[override]
+    array_literal = f"[{', '.join(repr(str(path)) for path in (single_path, second_path))}]"
+
+    def _inject_file_list(steps, params, *, route, request, loader):  # type: ignore[override]
         assert steps == route.preprocess
         assert params["single_path"] == str(single_path)
         assert params.get("multi_paths") is None
         updated = dict(params)
-        updated["multi_paths"] = [str(single_path), str(second_path)]
+        updated["multi_paths"] = array_literal
         return updated
 
     monkeypatch.setattr(execution_module, "run_preprocessors", _inject_file_list)
@@ -514,8 +530,8 @@ CROSS JOIN multi_source;
     )
 
     assert prepared.params["single_path"] == str(single_path)
-    assert prepared.params["multi_paths"] == [str(single_path), str(second_path)]
-    assert prepared.ordered == [str(single_path), [str(single_path), str(second_path)]]
+    assert prepared.params["multi_paths"] == array_literal
+    assert prepared.ordered == []
 
     result = executor.execute_relation(
         route,
@@ -531,3 +547,187 @@ CROSS JOIN multi_source;
     assert data["single_sum"] == [1]
     assert data["multi_count"] == [3]
     assert data["multi_sum"] == [6]
+
+
+def test_executor_renders_template_literal(tmp_path: Path) -> None:
+    source = tmp_path / "src"
+    build = tmp_path / "build"
+    source.mkdir()
+
+    _write_pair(
+        source,
+        "templated_literal",
+        """id = "templated_literal"
+path = "/templated_literal"
+cache_mode = "passthrough"
+
+[params.greeting]
+template_only = true
+[params.greeting.template]
+policy = "literal"
+""".strip(),
+        """SELECT {{ greeting }} AS message""".strip(),
+    )
+
+    route = _compile_and_load_single_route(source, build)
+
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+
+    executor = RouteExecutor(
+        {route.id: route},
+        cache_store=None,
+        config=config,
+        plugin_loader=PluginLoader(config.server.plugins_dir),
+    )
+
+    result = executor.execute_relation(route, {"greeting": "Hello"}, offset=0, limit=None)
+    table = result.table
+    assert table.to_pydict()["message"] == ["Hello"]
+
+
+def test_executor_rejects_invalid_identifier_template(tmp_path: Path) -> None:
+    source = tmp_path / "src"
+    build = tmp_path / "build"
+    source.mkdir()
+
+    _write_pair(
+        source,
+        "templated_identifier",
+        """id = "templated_identifier"
+path = "/templated_identifier"
+cache_mode = "passthrough"
+
+[params.alias]
+template_only = true
+[params.alias.template]
+policy = "identifier"
+""".strip(),
+        """SELECT 1 AS value FROM (SELECT 1) AS {{ alias }}""".strip(),
+    )
+
+    route = _compile_and_load_single_route(source, build)
+
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+
+    executor = RouteExecutor(
+        {route.id: route},
+        cache_store=None,
+        config=config,
+        plugin_loader=PluginLoader(config.server.plugins_dir),
+    )
+
+    ok = executor.execute_relation(route, {"alias": "valid_alias"}, offset=0, limit=None)
+    assert ok.table.to_pydict()["value"] == [1]
+
+    with pytest.raises(RouteExecutionError):
+        executor.execute_relation(route, {"alias": "invalid alias"}, offset=0, limit=None)
+
+
+def test_executor_template_guard_rejects_path_traversal(tmp_path: Path) -> None:
+    source = tmp_path / "src"
+    build = tmp_path / "build"
+    source.mkdir()
+
+    _write_pair(
+        source,
+        "templated_path",
+        """id = "templated_path"
+path = "/templated_path"
+cache_mode = "passthrough"
+
+[params.fragment]
+template_only = true
+[params.fragment.template]
+policy = "literal"
+[params.fragment.guard]
+mode = "path"
+""".strip(),
+        """SELECT {{ fragment }} AS fragment_value""".strip(),
+    )
+
+    route = _compile_and_load_single_route(source, build)
+
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+
+    executor = RouteExecutor(
+        {route.id: route},
+        cache_store=None,
+        config=config,
+        plugin_loader=PluginLoader(config.server.plugins_dir),
+    )
+
+    with pytest.raises(RouteExecutionError):
+        executor.execute_relation(route, {"fragment": "../secrets"}, offset=0, limit=None)
+
+
+def test_executor_forbids_db_params_in_file_functions(tmp_path: Path) -> None:
+    source = tmp_path / "src"
+    build = tmp_path / "build"
+    source.mkdir()
+
+    _write_pair(
+        source,
+        "forbidden_file_param",
+        """id = "forbidden_file_param"
+path = "/forbidden_file_param"
+cache_mode = "passthrough"
+
+[params.path]
+required = true
+""".strip(),
+        """SELECT * FROM read_parquet($path)""".strip(),
+    )
+
+    route = _compile_and_load_single_route(source, build)
+
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+
+    executor = RouteExecutor(
+        {route.id: route},
+        cache_store=None,
+        config=config,
+        plugin_loader=PluginLoader(config.server.plugins_dir),
+    )
+
+    with pytest.raises(RouteExecutionError):
+        executor.execute_relation(route, {"path": "data.parquet"}, offset=0, limit=None)
+
+
+def test_executor_allows_template_in_file_functions(tmp_path: Path) -> None:
+    source = tmp_path / "src"
+    build = tmp_path / "build"
+    source.mkdir()
+
+    _write_pair(
+        source,
+        "templated_file_param",
+        """id = "templated_file_param"
+path = "/templated_file_param"
+cache_mode = "passthrough"
+
+[params.path]
+template_only = true
+[params.path.template]
+policy = "literal"
+""".strip(),
+        """SELECT {{ path }} AS chosen_path""".strip(),
+    )
+
+    route = _compile_and_load_single_route(source, build)
+
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+
+    executor = RouteExecutor(
+        {route.id: route},
+        cache_store=None,
+        config=config,
+        plugin_loader=PluginLoader(config.server.plugins_dir),
+    )
+
+    result = executor.execute_relation(route, {"path": "folder/data.parquet"}, offset=0, limit=None)
+    assert result.table.to_pydict()["chosen_path"] == ["folder/data.parquet"]

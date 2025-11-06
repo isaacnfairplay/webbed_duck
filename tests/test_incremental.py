@@ -22,7 +22,7 @@ order_by = ["day_value"]
 +++
 
 ```sql
-SELECT {{day}} AS day_value
+SELECT $day AS day_value
 ORDER BY day_value;
 ```
 """

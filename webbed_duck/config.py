@@ -146,6 +146,13 @@ class FeatureFlagsConfig:
 
 
 @dataclass(slots=True)
+class InterpolationConfig:
+    """Template interpolation safeguards."""
+
+    forbid_db_params_in_file_functions: bool = True
+
+
+@dataclass(slots=True)
 class Config:
     """Top-level configuration container."""
 
@@ -157,6 +164,7 @@ class Config:
     share: ShareConfig = field(default_factory=ShareConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
     feature_flags: FeatureFlagsConfig = field(default_factory=FeatureFlagsConfig)
+    interpolation: InterpolationConfig = field(default_factory=InterpolationConfig)
     runtime: RuntimeConfig = field(init=False)
 
     def __post_init__(self) -> None:
@@ -339,6 +347,9 @@ def load_config(path: str | Path | None = None) -> Config:
     feature_flag_data = data.get("feature_flags")
     if isinstance(feature_flag_data, Mapping):
         cfg.feature_flags = _parse_feature_flags(feature_flag_data, base=cfg.feature_flags)
+    interpolation_data = data.get("interpolation")
+    if isinstance(interpolation_data, Mapping):
+        cfg.interpolation = _parse_interpolation(interpolation_data, base=cfg.interpolation)
     return cfg
 
 
@@ -530,6 +541,19 @@ def _parse_feature_flags(data: Mapping[str, Any], base: FeatureFlagsConfig) -> F
     return replace(base, **overrides)
 
 
+def _parse_interpolation(
+    data: Mapping[str, Any], base: InterpolationConfig
+) -> InterpolationConfig:
+    overrides: MutableMapping[str, Any] = {}
+    if "forbid_db_params_in_file_functions" in data:
+        overrides["forbid_db_params_in_file_functions"] = bool(
+            data["forbid_db_params_in_file_functions"]
+        )
+    if not overrides:
+        return base
+    return replace(base, **overrides)
+
+
 __all__ = [
     "AnalyticsConfig",
     "Config",
@@ -540,5 +564,6 @@ __all__ = [
     "ShareConfig",
     "CacheConfig",
     "FeatureFlagsConfig",
+    "InterpolationConfig",
     "load_config",
 ]

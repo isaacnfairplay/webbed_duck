@@ -86,7 +86,7 @@ webbed_duck/
 ### Parameter binding
 
 - Parameters are declared under `[params]` in the TOML file. Each entry can be a table (with `type`, `required`, `default`, `description`, and extra metadata) or a string shorthand when you only need to annotate the DuckDB type.
-- Within the SQL body, use `{{name}}` or `$name` placeholders. During compilation each placeholder becomes a bound parameter in the prepared statement, preserving type safety while keeping the SQL readable.
+- Within the SQL body, use `$name` placeholders to bind DuckDB parameters. Parameters declared with `template_only = true` render via `{{ name }}` before query execution, letting you safely interpolate identifiers and literals without exposing them to the database engine.
 - At request time the runtime reads query string values, validates types (including boolean coercion for `true`/`false`, `1`/`0`), applies defaults, and rejects missing required parameters. Ephemeral controls like pagination and sorting stay out of `[params]` and are applied after the core relation is resolved.
 - Additional runtime controls:
   - `?limit=` and `?offset=` apply post-query pagination without changing the SQL.
@@ -295,7 +295,7 @@ When the list needs to be composed dynamically (for example, calling another rou
 preprocessor that returns the file list so the executor binds the resolved values rather than string-concatenating paths.
 This keeps cache keys deterministic and avoids SQL injection hazards.
 
-Executors treat sequences returned by preprocessors as DuckDB arrays automatically, so returning `list[str]` values from a preprocessor works seamlessly with `read_parquet($files::TEXT[])` without additional string manipulation.
+Executors run template-only interpolation before binding parameters, so a preprocessor can emit a sanitized DuckDB array literal (for example `['shard-2024.parquet']`) and the query can reference it with `read_parquet({{ files }})` when the parameter is marked `template_only = true` and `policy = "raw"`. This keeps cache keys deterministic while honoring the guardrail that forbids `$` bindings inside file helpers by default.
 
 - Constants baked into the route definition are safe to inline because the compiler writes them, not the end user.
 
@@ -384,7 +384,7 @@ Common keys inside `<stem>.toml` include:
 ### SQL placeholders
 
 - Write DuckDB SQL in `<stem>.sql`.
-- Reference parameters registered in TOML using `{{param_name}}` or `$param_name`. The compiler validates every placeholder and replaces it with bound parameters in the generated Python.
+- Reference parameters registered in TOML using `$param_name`. Template-only parameters (`template_only = true`) render through `{{ param_name }}` before the statement reaches DuckDB, enforcing guard policies and filter rules at compile time.
 - Dependencies declared via `[[uses]]` are registered under their aliases before the SQL runs, so you can `SELECT * FROM upstream_alias` directly.
 
 ### Example route trio

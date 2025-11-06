@@ -13,5 +13,5 @@ SELECT
   event_route AS table_route,
   file_hint_route
 FROM mappings
-WHERE prefix = UPPER({{prefix}})
+WHERE prefix = UPPER($prefix)
 ORDER BY table_route;
