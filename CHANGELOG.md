@@ -34,6 +34,11 @@
   retained limitation where invariant filters still block `parquet_path`
   dependencies so downstream hardening work can reference the new regression
   harness.
+- Normalised preprocess callables with explicit `callable_name` +
+  `callable_module`/`callable_path` fields, compile-time validation for missing
+  files or attributes, runtime support for legacy `module:callable` strings, and
+  demo coverage illustrating both loading modes alongside refreshed README
+  guidance.
 - Exposed `offset`/`limit` pagination controls on
   `webbed_duck.core.local.LocalRouteRunner.run` (and the `run_route` wrapper) so
   batch jobs can request the same slices as HTTP clients, covered by local
