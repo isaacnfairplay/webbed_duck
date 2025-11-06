@@ -337,7 +337,7 @@ def test_compile_extracts_directive_sections(tmp_path: Path) -> None:
         "title_col = \"title\"\n"
         "+++\n\n"
         "<!-- @meta default_format=\"html_c\" allowed_formats=\"html_c json\" -->\n"
-        "<!-- @preprocess {\"callable\": \"tests.fake:noop\"} -->\n"
+        "<!-- @preprocess {\"callable_module\": \"tests.fake_preprocessors\", \"callable_name\": \"add_prefix\"} -->\n"
         "<!-- @postprocess {\"html_c\": {\"image_col\": \"photo\"}} -->\n"
         "<!-- @charts [{\"id\": \"chart1\", \"type\": \"line\"}] -->\n"
         "<!-- @assets {\"image_getter\": \"static_fallback\"} -->\n"
@@ -346,7 +346,8 @@ def test_compile_extracts_directive_sections(tmp_path: Path) -> None:
     definition = compile_route_file(write_route(tmp_path, route_text))
     assert definition.default_format == "html_c"
     assert set(definition.allowed_formats) == {"html_c", "json"}
-    assert definition.preprocess[0]["callable"] == "tests.fake:noop"
+    assert definition.preprocess[0]["callable_module"] == "tests.fake_preprocessors"
+    assert definition.preprocess[0]["callable_name"] == "add_prefix"
     assert definition.postprocess["html_c"]["image_col"] == "photo"
     assert definition.charts[0]["id"] == "chart1"
     assert definition.assets["image_getter"] == "static_fallback"
@@ -422,3 +423,81 @@ def test_server_returns_rows(tmp_path: Path) -> None:
     assert analytics.status_code == 200
     payload = analytics.json()
     assert payload["routes"][0]["id"] == "hello"
+def test_compile_preprocess_accepts_callable_path(tmp_path: Path) -> None:
+    plugin_dir = tmp_path / "plugins"
+    plugin_dir.mkdir()
+    plugin_file = plugin_dir / "custom.py"
+    plugin_file.write_text(
+        "from __future__ import annotations\n\n"
+        "from typing import Mapping\n\n"
+        "def plug(params: Mapping[str, object], *, context) -> Mapping[str, object]:\n"
+        "    return params\n",
+        encoding="utf-8",
+    )
+    plugin_path = plugin_file.as_posix()
+    route_text = (
+        "+++\n"
+        "id = \"path_demo\"\n"
+        "path = \"/path_demo\"\n"
+        "[[preprocess]]\n"
+        f"callable_path = \"{plugin_path}\"\n"
+        "callable_name = \"plug\"\n"
+        "+++\n\n"
+        "```sql\nSELECT 1\n```\n"
+    )
+    definition = compile_route_file(write_route(tmp_path, route_text))
+    step = definition.preprocess[0]
+    assert step["callable_path"] == plugin_path
+    assert step["callable_name"] == "plug"
+
+
+def test_compile_preprocess_missing_callable_raises(tmp_path: Path) -> None:
+    plugin_dir = tmp_path / "plugins"
+    plugin_dir.mkdir()
+    plugin_file = plugin_dir / "custom.py"
+    plugin_file.write_text(
+        "from __future__ import annotations\n\n"
+        "def plug(params, *, context):\n"
+        "    return params\n",
+        encoding="utf-8",
+    )
+    plugin_path = plugin_file.as_posix()
+    route_text = (
+        "+++\n"
+        "id = \"path_missing\"\n"
+        "path = \"/path_missing\"\n"
+        "[[preprocess]]\n"
+        f"callable_path = \"{plugin_path}\"\n"
+        "callable_name = \"absent\"\n"
+        "+++\n\n"
+        "```sql\nSELECT 1\n```\n"
+    )
+    with pytest.raises(RouteCompilationError) as exc:
+        compile_route_file(write_route(tmp_path, route_text))
+    assert "failed to load preprocess callable" in str(exc.value)
+
+
+def test_compile_preprocess_validates_callable_module(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    package_dir = tmp_path / "demo_pkg"
+    package_dir.mkdir()
+    (package_dir / "__init__.py").write_text(
+        "from __future__ import annotations\n\n"
+        "def plug(params, *, context):\n"
+        "    return params\n",
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    route_text = (
+        "+++\n"
+        "id = \"module_demo\"\n"
+        "path = \"/module_demo\"\n"
+        "[[preprocess]]\n"
+        "callable_module = \"demo_pkg\"\n"
+        "callable_name = \"plug\"\n"
+        "+++\n\n"
+        "```sql\nSELECT 1\n```\n"
+    )
+    definition = compile_route_file(write_route(tmp_path, route_text))
+    step = definition.preprocess[0]
+    assert step["callable_module"] == "demo_pkg"
+    assert step["callable_name"] == "plug"

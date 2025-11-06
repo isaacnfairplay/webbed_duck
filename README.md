@@ -376,7 +376,13 @@ Common keys inside `<stem>.toml` include:
 - `returns`: Default return style for internal callers (`relation`, `parquet`, or `error_frame`).
 - `[[uses]]`: Declarative route dependencies with optional `[uses.args]` tables that map or override parameters when invoking the upstream route.
 - Presentation metadata (`[html_t]`, `[html_c]`, `[feed]`, `[overrides]`, `[append]`, `[charts]`, `[assets]`) configuring built-in renderers and workflows.
-- `[[preprocess]]` entries that call into trusted Python helpers before SQL execution.
+- `[[preprocess]]` entries that call into trusted Python helpers before SQL execution. Declare
+  either `callable_module` + `callable_name` (for modules discoverable on
+  `PYTHONPATH`) or `callable_path` + `callable_name` (for explicit Python files or
+  packages). The compiler resolves each reference during `webbed-duck compile`
+  and surfaces a detailed error when the module cannot be imported or the target
+  attribute is missing. Legacy `callable = "module.attr"` strings remain
+  supported but are normalised through the same validation pipeline.
 - Unexpected keys trigger compile-time warnings so you can catch typos early.
 
 > Legacy HTML comment directives (e.g., `<!-- @postprocess ... -->`) still parse for backwards compatibility, but new routes should express the same metadata directly in TOML. Mixing the styles makes diffs harder to audit and can hide typos that TOML validation would otherwise catch.
@@ -552,7 +558,14 @@ MVP 0.4 is the first release we expect to hand to an ops lead with no extra scaf
 
 ## Extending webbed_duck
 
-- **Preprocessors:** Register callables (e.g., `myapp.preprocess.resolve_shift_window`) and reference them in TOML metadata to derive or validate parameters before the SQL runs.
+- **Preprocessors:** Register callables (e.g., `myapp.preprocess.resolve_shift_window`) and
+  reference them in TOML metadata to derive or validate parameters before the SQL runs.
+  Prefer the explicit fields `callable_module`/`callable_name` or
+  `callable_path`/`callable_name` so the compiler can resolve the helper during
+  `webbed-duck compile`. Routes fail fast with descriptive errors when a module
+  cannot be located, when the Python file is missing, or when the attribute is
+  not callable. Keep file paths POSIX-style (`Path(...).as_posix()`) to avoid
+  double-escaping backslashes inside TOML strings.
 - **Postprocessors and presentation:** Use `[html_t]`, `[html_c]`, `[feed]`, and `[[charts]]` to pass configuration into the built-in renderers. Custom renderers can be registered via the plugin registries in `webbed_duck.plugins.*`.
 - **Assets and overlays:** `[assets]` metadata controls how related images are resolved; use `base_path = "media"` (or similar) to prefix relative card thumbnails before they flow through the configured `image_getter`. `[overrides]` enables per-cell overrides with audit trails managed by the overlay store.
 - **Local execution:** `webbed_duck.core.local.LocalRouteRunner` reuses the cache and overlay stores to execute compiled routes in-process. Call `runner.run("route_id", params={...}, format="arrow", offset=0, limit=None)` for repeated jobs, or keep using the convenience `run_route` wrapper for one-off invocations. The helper accepts the same pagination knobs as the HTTP surface and refreshes overlay snapshots on every execution so overrides written by other processes are picked up without rebuilding the helper.

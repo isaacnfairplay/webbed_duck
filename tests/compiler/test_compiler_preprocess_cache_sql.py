@@ -27,11 +27,23 @@ from webbed_duck.core.routes import ParameterSpec, ParameterType
     [
         (
             {"loader": {"callable": "pkg.fn", "arg": 1}},
-            [{"callable": "pkg.fn", "arg": 1}],
+            [
+                {
+                    "callable_module": "pkg",
+                    "callable_name": "fn",
+                    "arg": 1,
+                }
+            ],
         ),
         (
             {"pkg.fn": {"arg": 1}},
-            [{"callable": "pkg.fn", "arg": 1}],
+            [
+                {
+                    "callable_module": "pkg",
+                    "callable_name": "fn",
+                    "arg": 1,
+                }
+            ],
         ),
         (
             [
@@ -39,8 +51,15 @@ from webbed_duck.core.routes import ParameterSpec, ParameterType
                 {"path": "pkg.alt", "param": "value"},
             ],
             [
-                {"callable": "pkg.fn"},
-                {"callable": "pkg.alt", "param": "value"},
+                {
+                    "callable_module": "pkg",
+                    "callable_name": "fn",
+                },
+                {
+                    "callable_module": "pkg",
+                    "callable_name": "alt",
+                    "param": "value",
+                },
             ],
         ),
     ],
@@ -61,17 +80,27 @@ def test_normalize_preprocess_entries_rejects_missing_callable(bad_input):
         _normalize_preprocess_entries(bad_input)
 
 
+identifier = st.text(alphabet=st.characters(min_codepoint=97, max_codepoint=122), min_size=1, max_size=5)
+
+
 @st.composite
 def preprocess_strategy(draw) -> Any:
-    callable_name = draw(st.text(min_size=1, max_size=6))
-    entry = {"callable": callable_name}
+    module = draw(identifier)
+    attribute = draw(identifier)
     extra = draw(
         st.dictionaries(
-            keys=st.text(min_size=1, max_size=5),
+            keys=identifier,
             values=st.one_of(st.integers(-3, 3), st.text(min_size=0, max_size=5), st.booleans()),
             max_size=3,
         )
     )
+    mode = draw(st.sampled_from(["module", "path", "legacy"]))
+    if mode == "module":
+        entry = {"callable_module": module, "callable_name": attribute}
+    elif mode == "path":
+        entry = {"callable_path": f"./{module}.py", "callable_name": attribute}
+    else:
+        entry = {"callable": f"{module}.{attribute}"}
     entry.update(extra)
     if draw(st.booleans()):
         return entry
@@ -83,7 +112,12 @@ def test_normalize_preprocess_entries_property(chunks):
     flattened: list[dict[str, object]] = []
     for chunk in chunks:
         flattened.extend(_normalize_preprocess_entries(chunk))
-    assert all("callable" in entry and isinstance(entry["callable"], str) for entry in flattened)
+    for entry in flattened:
+        assert entry["callable_name"]
+        assert (
+            "callable_module" in entry
+            or "callable_path" in entry
+        )
 
 
 @pytest.mark.parametrize(

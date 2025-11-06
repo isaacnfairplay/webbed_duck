@@ -1,0 +1,29 @@
+id = "module_preprocess_demo"
+path = "/demo/preprocess/module"
+title = "Module-based preprocess demo"
+description = "Demonstrates callable_module + callable_name validation and execution."
+default_format = "json"
+allowed_formats = ["json"]
+
+[cache]
+order_by = ["name"]
+
+[params.name]
+type = "str"
+required = false
+default = "duck"
+
+[params.greeting]
+type = "str"
+required = false
+description = "Derived greeting set by the module preprocessor."
+
+[params.generated_at]
+type = "str"
+required = false
+description = "UTC timestamp captured by the module preprocessor."
+
+[[preprocess]]
+callable_module = "demo_module.preprocessors"
+callable_name = "module_greeting"
+prefix = "module-demo"

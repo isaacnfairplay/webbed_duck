@@ -1,0 +1,29 @@
+id = "path_preprocess_demo"
+path = "/demo/preprocess/path"
+title = "Path-based preprocess demo"
+description = "Uses callable_path + callable_name to resolve a local plugin file."
+default_format = "json"
+allowed_formats = ["json"]
+
+[cache]
+order_by = ["name"]
+
+[params.name]
+type = "str"
+required = false
+default = "duck"
+
+[params.greeting]
+type = "str"
+required = false
+description = "Derived greeting from the file-backed preprocessor."
+
+[params.run_date]
+type = "str"
+required = false
+description = "Processing date injected by the preprocessor."
+
+[[preprocess]]
+callable_path = "demos/preprocess-path-callable/plugins/path_preprocessor.py"
+callable_name = "path_greeting"
+salutation = "hi"
