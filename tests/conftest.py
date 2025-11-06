@@ -1,3 +1,4 @@
+# TODO[todo-tests-s8-i0j1]: Build comprehensive engine regression tests, perf harness, and CI guards per Step 8 before relying on the new stack.
 from __future__ import annotations
 
 import contextlib

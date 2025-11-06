@@ -1,4 +1,6 @@
 """Utilities for executing compiled routes with dependency resolution."""
+# TODO[todo-server-exec-s5-o6p7]: Replace legacy execution logic with the Step 5 DuckDB executor once the engine stack is ready.
+
 from __future__ import annotations
 
 from dataclasses import dataclass

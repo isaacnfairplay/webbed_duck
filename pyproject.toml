@@ -1,3 +1,4 @@
+# TODO[todo-pyproject-s8-q8r9]: Update tooling configuration to enforce ruff, mypy --strict, pytest, and forbidden-token scans for Step 8's CI guardrails.
 [project]
 name = "webbed-duck"
 version = "0.35.2"
