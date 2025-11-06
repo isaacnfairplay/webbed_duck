@@ -1,3 +1,4 @@
+# TODO[todo-server-pre-s3-p7q8]: Replace legacy preprocessors with the Step 3 registry and builtin helpers when available.
 from __future__ import annotations
 
 from dataclasses import dataclass
