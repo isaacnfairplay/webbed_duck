@@ -3,4 +3,5 @@
 3.  Please write documentation with functions
 4.  Please follow SOLID design principles and use good design patterns
 5.  Please ensure that we work towards a better but less complex code base under webbed_duck
-6.  Check code complexity and ensure it decreases with each PR
+6.  Check code complexity with relevant tools and ensure it decreases with each PR, describing the complexity delta and explaining it in the PR
+7.  Use UV for environment management
