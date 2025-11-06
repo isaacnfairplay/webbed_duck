@@ -16,33 +16,30 @@ jobs:
     env:
       MAX_FILES_FOR_PATCH: "8"
       MAX_LINES_FOR_PATCH: "200"
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.x'
-
       - name: Install uv
         uses: astral-sh/setup-uv@v2
+
+      - name: Sync dependencies
+        run: uv sync --frozen --all-extras --dev
 
       - name: Bump project version
         id: bump
         run: |
           python - <<'PY'
-          import os
-          import pathlib
-          import re
-          import subprocess
+          import os, pathlib, re, subprocess
 
           max_files = int(os.environ.get('MAX_FILES_FOR_PATCH', '0'))
           max_lines = int(os.environ.get('MAX_LINES_FOR_PATCH', '0'))
           base_commit = subprocess.check_output(['git', 'rev-parse', 'HEAD^']).decode().strip()
           diff = subprocess.check_output(['git', 'diff', '--shortstat', base_commit, 'HEAD']).decode()
+
           files_changed = 0
           lines_changed = 0
           for part in diff.split(','):
@@ -55,12 +52,14 @@ jobs:
                   lines_changed += int(part.split()[0])
 
           bump_minor = files_changed > max_files or lines_changed > max_lines
+
           pyproject = pathlib.Path('pyproject.toml')
           text = pyproject.read_text(encoding='utf-8')
           match = re.search(r'^version\s*=\s*"(\d+)\.(\d+)\.(\d+)"', text, re.MULTILINE)
           if not match:
               raise SystemExit('Version line not found in pyproject.toml')
           major, minor, patch = map(int, match.groups())
+
           if bump_minor:
               minor += 1
               patch = 0
@@ -68,6 +67,7 @@ jobs:
           else:
               patch += 1
               level = 'patch'
+
           new_version = f'{major}.{minor}.{patch}'
           new_line = f'version = "{new_version}"'
           text = re.sub(r'^version\s*=\s*"\d+\.\d+\.\d+"', new_line, text, flags=re.MULTILINE)
@@ -77,13 +77,13 @@ jobs:
           init_text = package_init.read_text(encoding='utf-8')
           init_replacement = re.sub(
               r'(__version__\s*=\s*")([^"\n]+)(")',
-              lambda match: f"{match.group(1)}{new_version}{match.group(3)}",
-              init_text,
-              count=1,
+              lambda m: f"{m.group(1)}{new_version}{m.group(3)}",
+              init_text, count=1,
           )
           if init_text == init_replacement:
               raise SystemExit('Unable to locate __version__ assignment in webbed_duck/__init__.py')
           package_init.write_text(init_replacement, encoding='utf-8')
+
           print('Updated webbed_duck/__init__.py __version__ assignment')
           print(f'Version bumped to {new_version} ({level})')
           print(f'files_changed={files_changed}')
@@ -96,8 +96,11 @@ jobs:
       - name: Update complexity history
         env:
           NEW_VERSION: ${{ steps.bump.outputs.version }}
-        run: |
-          python scripts/update_complexity_history.py --version "${NEW_VERSION}"
+        run: >
+          uv run python scripts/update_complexity_history.py
+          --version "${NEW_VERSION}"
+          --chart-format svg
+          --chart-format png
 
       - name: Commit version bump
         id: commit
@@ -108,7 +111,7 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml webbed_duck/__init__.py docs/complexity_history.md
+          git add pyproject.toml webbed_duck/__init__.py docs/complexity_history.md docs/complexity_history.csv docs/complexity_history.svg docs/complexity_history.png
           git commit -m "chore: bump version after merge"
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
@@ -118,9 +121,7 @@ jobs:
           VERSION: ${{ steps.bump.outputs.version }}
         run: |
           python - <<'PY'
-          import os
-          import pathlib
-          import subprocess
+          import os, pathlib, subprocess
 
           version = os.environ["VERSION"]
           tag = f"v{version}"
@@ -134,44 +135,23 @@ jobs:
               previous_tag = ""
 
           notes = []
-
           if previous_tag:
-              diff_cmd = [
-                  "git",
-                  "diff",
-                  "--unified=0",
-                  previous_tag,
-                  "HEAD",
-                  "--",
-                  "CHANGELOG.md",
-              ]
+              diff_cmd = ["git","diff","--unified=0",previous_tag,"HEAD","--","CHANGELOG.md"]
               diff_output = subprocess.check_output(diff_cmd, text=True)
               for line in diff_output.splitlines():
-                  if line.startswith("+++") or line.startswith("---") or line.startswith("@@"):
+                  if line.startswith(("+++","---","@@")):
                       continue
                   if line.startswith("+"):
                       notes.append(line[1:].rstrip())
           else:
-              changelog = subprocess.check_output(
-                  ["git", "show", "HEAD:CHANGELOG.md"], text=True
-              )
+              changelog = subprocess.check_output(["git","show","HEAD:CHANGELOG.md"], text=True)
               notes = [line.rstrip() for line in changelog.splitlines()]
 
-          header = [f"Release {tag}"]
-          if previous_tag:
-              header.append("")
-              header.append(f"Changes since {previous_tag}:")
-          else:
-              header.append("")
-              header.append("Initial tagged release for automated versioning.")
+          header = [f"Release {tag}",""]
+          header.append(f"Changes since {previous_tag}:" if previous_tag else "Initial tagged release for automated versioning.")
+          body = ["", *(notes or ["No CHANGELOG updates detected in this release."])]
 
-          if notes:
-              body = ["", *notes]
-          else:
-              body = ["", "No CHANGELOG updates detected in this release."]
-
-          message = "\n".join(header + body)
-          pathlib.Path("tag_message.txt").write_text(f"{message}\n", encoding="utf-8")
+          pathlib.Path("tag_message.txt").write_text("\n".join(header + body) + "\n", encoding="utf-8")
           print("Generated tag_message.txt")
           PY
 
