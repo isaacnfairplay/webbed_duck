@@ -15,6 +15,7 @@ from webbed_duck.core.routes import (
     RouteDefinition,
     load_compiled_routes,
 )
+from webbed_duck.plugins.loader import PluginLoader
 from webbed_duck.server.execution import RouteExecutionError, RouteExecutor
 
 
@@ -134,7 +135,12 @@ WHERE ($enabled = enabled_again)
     config = load_config(None)
     config.server.storage_root = tmp_path / "storage"
 
-    executor = RouteExecutor({item.id: item for item in routes}, cache_store=None, config=config)
+    executor = RouteExecutor(
+        {item.id: item for item in routes},
+        cache_store=None,
+        config=config,
+        plugin_loader=PluginLoader(config.server.plugins_dir),
+    )
 
     incoming = {
         "text": "Alpha",
@@ -235,7 +241,12 @@ required = true
     config = load_config(None)
     config.server.storage_root = tmp_path / "storage"
 
-    executor = RouteExecutor({item.id: item for item in routes}, cache_store=None, config=config)
+    executor = RouteExecutor(
+        {item.id: item for item in routes},
+        cache_store=None,
+        config=config,
+        plugin_loader=PluginLoader(config.server.plugins_dir),
+    )
 
     captured: dict[str, object] = {}
 
@@ -331,7 +342,12 @@ required = true
     config = load_config(None)
     config.server.storage_root = tmp_path / "storage"
 
-    executor = RouteExecutor({item.id: item for item in routes}, cache_store=None, config=config)
+    executor = RouteExecutor(
+        {item.id: item for item in routes},
+        cache_store=None,
+        config=config,
+        plugin_loader=PluginLoader(config.server.plugins_dir),
+    )
 
     with pytest.raises(RouteExecutionError) as excinfo:
         executor.execute_relation(route, params={"value": "not-an-int"}, offset=0, limit=None)
@@ -364,7 +380,12 @@ def test_prepare_skips_preprocessors_when_marked(monkeypatch: pytest.MonkeyPatch
 
     monkeypatch.setattr(execution_module, "run_preprocessors", _fail)
 
-    executor = RouteExecutor({route.id: route}, cache_store=None, config=config)
+    executor = RouteExecutor(
+        {route.id: route},
+        cache_store=None,
+        config=config,
+        plugin_loader=PluginLoader(config.server.plugins_dir),
+    )
     prepared = executor._prepare(route, {"name": "duck"}, ordered=["sentinel"], preprocessed=True)
 
     assert prepared.params == {"name": "duck"}
@@ -402,7 +423,12 @@ def test_prepare_respects_values_added_by_preprocessors(
 
     monkeypatch.setattr(execution_module, "run_preprocessors", _fake_preprocessors)
 
-    executor = RouteExecutor({route.id: route}, cache_store=None, config=config)
+    executor = RouteExecutor(
+        {route.id: route},
+        cache_store=None,
+        config=config,
+        plugin_loader=PluginLoader(config.server.plugins_dir),
+    )
     prepared = executor._prepare(route, {}, ordered=None, preprocessed=False)
 
     assert prepared.params["cursor"] == "2024-01-01"
@@ -474,7 +500,12 @@ CROSS JOIN multi_source;
 
     monkeypatch.setattr(execution_module, "run_preprocessors", _inject_file_list)
 
-    executor = RouteExecutor({route.id: route}, cache_store=None, config=config)
+    executor = RouteExecutor(
+        {route.id: route},
+        cache_store=None,
+        config=config,
+        plugin_loader=PluginLoader(config.server.plugins_dir),
+    )
     prepared = executor._prepare(
         route,
         {"single_path": str(single_path)},

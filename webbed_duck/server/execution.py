@@ -14,6 +14,7 @@ import pyarrow as pa
 
 from ..config import Config
 from ..core.routes import ParameterSpec, RouteDefinition, RouteUse
+from ..plugins.loader import PluginLoader
 from .cache import (
     CacheQueryResult,
     CacheStore,
@@ -43,11 +44,13 @@ class RouteExecutor:
         *,
         cache_store: CacheStore | None,
         config: Config,
+        plugin_loader: PluginLoader,
     ) -> None:
         self._routes = dict(routes_by_id)
         self._cache_store = cache_store
         self._cache_config = config.cache
         self._stack: list[str] = []
+        self._plugin_loader = plugin_loader
 
     def execute_relation(
         self,
@@ -116,7 +119,13 @@ class RouteExecutor:
             return _PreparedRoute(params=processed, ordered=ordered_params, bindings=bindings)
 
         coerced = self._coerce_params(route, params)
-        processed = run_preprocessors(route.preprocess, coerced, route=route, request=request)
+        processed = run_preprocessors(
+            route.preprocess,
+            coerced,
+            route=route,
+            request=request,
+            loader=self._plugin_loader,
+        )
         ordered_params = self._ordered_from_processed(route, processed)
         bindings = self._build_bindings(route, processed)
         return _PreparedRoute(params=processed, ordered=ordered_params, bindings=bindings)

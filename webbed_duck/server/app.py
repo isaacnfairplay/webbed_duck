@@ -22,6 +22,7 @@ from ..runtime.paths import get_storage
 from ..static.chartjs import CHARTJS_VERSION
 from ..core.routes import ParameterSpec, ParameterType, RouteDefinition
 from ..plugins.charts import render_route_charts
+from ..plugins.loader import PluginLoadError, PluginLoader
 from .analytics import AnalyticsStore, ExecutionMetrics
 from .auth import resolve_auth_adapter
 from .cache import CacheStore, parse_invariant_filters
@@ -128,9 +129,16 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
 
     storage_root = get_storage(config)
 
+    try:
+        plugin_loader = PluginLoader(config.server.plugins_dir)
+    except PluginLoadError as exc:
+        raise RuntimeError(f"Failed to initialise plugins: {exc}") from exc
+
     app = FastAPI(title="webbed_duck", version=PACKAGE_VERSION)
     app.state.config = config
     app.state.storage_root = storage_root
+    app.state.plugin_loader = plugin_loader
+    app.state.plugins_dir = plugin_loader.root
     app.state.analytics = AnalyticsStore(
         weight=config.analytics.weight_interactions,
         enabled=config.analytics.enabled,
@@ -723,7 +731,14 @@ def _execute_route(
     offset: int | None,
     limit: int | None,
 ) -> RouteExecutionResult:
-    processed = run_preprocessors(route.preprocess, params, route=route, request=request)
+    plugin_loader: PluginLoader = getattr(request.app.state, "plugin_loader")
+    processed = run_preprocessors(
+        route.preprocess,
+        params,
+        route=route,
+        request=request,
+        loader=plugin_loader,
+    )
     ordered = [_value_for_name(processed, name, route) for name in route.param_order]
     sanitized_offset = max(0, offset or 0)
     sanitized_limit = None if limit is None else max(0, int(limit))
@@ -732,6 +747,7 @@ def _execute_route(
         getattr(request.app.state, "route_index", {}),
         cache_store=cache_store,
         config=request.app.state.config,
+        plugin_loader=plugin_loader,
     )
     start = time.perf_counter()
     try:

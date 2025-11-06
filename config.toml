@@ -8,6 +8,7 @@ source_dir = "routes_src"
 build_dir = "routes_build"
 auto_compile = true
 watch = false
+plugins_dir = "plugins"
 
 [server.constants]
 data_root = "./data"

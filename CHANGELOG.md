@@ -2,12 +2,11 @@
 
 ## Unreleased
 
-- Normalised preprocess configuration so routes declare `callable_module` or
-  `callable_path` alongside `callable_name`; the compiler now resolves the
-  callable during `webbed-duck compile` and raises a descriptive
-  `RouteCompilationError` if the module, file, or attribute is missing. Added
-  module- and filesystem-based demos plus example plugins under
-  `webbed_duck/demos` to document the new workflow.
+- Locked preprocess plugins to a configured `server.plugins_dir` so every
+  `[[preprocess]]` block references a single `.py` file via
+  `callable_path`/`callable_name` and optional `kwargs`. The compiler now loads
+  plugins with a filesystem sandbox, errors on legacy module-based fields, and
+  hot-reload invalidates plugin caches instead of re-importing modules.
 
 - Allow routes to interpolate `{{const.NAME}}` tokens with values sourced from
   TOML `[constants]`, server-level constants, or keyring-backed `[secrets]`

@@ -21,125 +21,111 @@ from webbed_duck.core.compiler import (
     _prepare_sql,
 )
 from webbed_duck.core.routes import ParameterSpec, ParameterType
-
-
-_FAKE_PREPROCESSOR_PATH = str(Path(__file__).resolve().parents[1] / "fake_preprocessors.py")
+from webbed_duck.plugins.loader import PluginLoader
 
 
 @pytest.mark.parametrize(
     "input_data, expected",
     [
         (
-            {
-                "loader": {
-                    "callable_module": "tests.fake_preprocessors",
-                    "callable_name": "add_prefix",
-                    "arg": 1,
-                }
-            },
+            {"callable_path": "fake_preprocessors.py", "callable_name": "add_prefix", "prefix": "pre-"},
             [
                 {
-                    "callable": "tests.fake_preprocessors:add_prefix",
-                    "callable_module": "tests.fake_preprocessors",
+                    "callable_path": "fake_preprocessors.py",
                     "callable_name": "add_prefix",
-                    "arg": 1,
-                }
-            ],
-        ),
-        (
-            {"tests.fake_preprocessors.add_suffix": {"suffix": "!"}},
-            [
-                {
-                    "callable": "tests.fake_preprocessors:add_suffix",
-                    "callable_module": "tests.fake_preprocessors",
-                    "callable_name": "add_suffix",
-                    "suffix": "!",
+                    "kwargs": {"prefix": "pre-"},
                 }
             ],
         ),
         (
             [
-                {"name": "tests.fake_preprocessors:return_none"},
                 {
-                    "callable_path": _FAKE_PREPROCESSOR_PATH,
-                    "callable_name": "add_prefix",
-                    "param": "value",
-                },
-            ],
-            [
-                {
-                    "callable": "tests.fake_preprocessors:return_none",
-                    "callable_module": "tests.fake_preprocessors",
+                    "callable_path": "fake_preprocessors.py",
                     "callable_name": "return_none",
                 },
                 {
-                    "callable": f"{_FAKE_PREPROCESSOR_PATH}:add_prefix",
-                    "callable_path": _FAKE_PREPROCESSOR_PATH,
-                    "callable_name": "add_prefix",
-                    "param": "value",
+                    "callable_path": "fake_preprocessors.py",
+                    "callable_name": "add_suffix",
+                    "note": "value",
+                },
+            ],
+            [
+                {
+                    "callable_path": "fake_preprocessors.py",
+                    "callable_name": "return_none",
+                },
+                {
+                    "callable_path": "fake_preprocessors.py",
+                    "callable_name": "add_suffix",
+                    "kwargs": {"note": "value"},
                 },
             ],
         ),
     ],
 )
-def test_normalize_preprocess_entries_success(input_data, expected):
-    assert _normalize_preprocess_entries(input_data) == expected
+def test_normalize_preprocess_entries_success(
+    plugins_dir: Path, input_data, expected
+) -> None:
+    source = Path(__file__).resolve().parents[1] / "fake_preprocessors.py"
+    (plugins_dir / "fake_preprocessors.py").write_text(source.read_text())
+    loader = PluginLoader(plugins_dir)
+    assert _normalize_preprocess_entries(input_data, loader=loader) == expected
 
 
 @pytest.mark.parametrize(
     "bad_input",
     [
-        {"loader": {}},
-        [{"param": "value"}],
+        {"callable_name": "add_prefix"},
+        {"callable_path": "fake_preprocessors.py"},
+        {"callable_path": "fake_preprocessors.py", "callable_name": "missing", "kwargs": []},
+        {"callable_module": "tests.fake_preprocessors", "callable_name": "add_prefix"},
     ],
 )
-def test_normalize_preprocess_entries_rejects_missing_callable(bad_input):
+def test_normalize_preprocess_entries_rejects_missing_callable(
+    plugins_dir: Path, bad_input
+) -> None:
+    source = Path(__file__).resolve().parents[1] / "fake_preprocessors.py"
+    (plugins_dir / "fake_preprocessors.py").write_text(source.read_text())
+    loader = PluginLoader(plugins_dir)
     with pytest.raises(RouteCompilationError):
-        _normalize_preprocess_entries(bad_input)
+        _normalize_preprocess_entries(bad_input, loader=loader)
 
 
 @st.composite
 def preprocess_strategy(draw) -> Any:
-    variant = draw(st.sampled_from(["module", "path", "legacy"]))
     function_name = draw(st.sampled_from(["add_prefix", "add_suffix", "return_none"]))
-    if variant == "module":
-        entry = {
-            "callable_module": "tests.fake_preprocessors",
-            "callable_name": function_name,
-        }
-    elif variant == "path":
-        entry = {
-            "callable_path": _FAKE_PREPROCESSOR_PATH,
-            "callable_name": function_name,
-        }
-    else:
-        entry = {"callable": f"tests.fake_preprocessors:{function_name}"}
-    extra = draw(
-        st.dictionaries(
-            keys=st.text(min_size=1, max_size=5),
-            values=st.one_of(st.integers(-3, 3), st.text(min_size=0, max_size=5), st.booleans()),
-            max_size=3,
+    entry = {
+        "callable_path": "fake_preprocessors.py",
+        "callable_name": function_name,
+    }
+    if draw(st.booleans()):
+        extra_kwargs = draw(
+            st.dictionaries(
+                keys=st.text(min_size=1, max_size=5),
+                values=st.one_of(
+                    st.integers(-3, 3), st.text(min_size=0, max_size=5), st.booleans()
+                ),
+                max_size=2,
+            )
         )
-    )
-    for reserved in ("callable", "callable_module", "callable_name", "callable_path"):
-        extra.pop(reserved, None)
-    entry.update(extra)
+        entry["kwargs"] = extra_kwargs
     if draw(st.booleans()):
         return entry
     return [entry]
 
 
 @given(st.lists(preprocess_strategy(), max_size=4))
-def test_normalize_preprocess_entries_property(chunks):
+def test_normalize_preprocess_entries_property(plugins_dir: Path, chunks):
+    source = Path(__file__).resolve().parents[1] / "fake_preprocessors.py"
+    (plugins_dir / "fake_preprocessors.py").write_text(source.read_text())
+    loader = PluginLoader(plugins_dir)
     flattened: list[dict[str, object]] = []
     for chunk in chunks:
-        flattened.extend(_normalize_preprocess_entries(chunk))
-    assert all(
-        "callable" in entry and isinstance(entry["callable"], str) for entry in flattened
-    )
+        flattened.extend(_normalize_preprocess_entries(chunk, loader=loader))
+    assert all(entry["callable_path"] == "fake_preprocessors.py" for entry in flattened)
     assert all("callable_name" in entry for entry in flattened)
     assert all(
-        ("callable_module" in entry) ^ ("callable_path" in entry) for entry in flattened
+        "kwargs" not in entry or isinstance(entry["kwargs"], dict) for entry in flattened
     )
 
 

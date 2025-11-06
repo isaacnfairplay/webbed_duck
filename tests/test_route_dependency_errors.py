@@ -9,6 +9,7 @@ from webbed_duck.config import load_config
 from webbed_duck.core.compiler import compile_routes
 from webbed_duck.core.routes import RouteDefinition, load_compiled_routes
 from webbed_duck.server.cache import CacheStore
+from webbed_duck.plugins.loader import PluginLoader
 from webbed_duck.server.execution import RouteExecutionError, RouteExecutor
 
 
@@ -23,7 +24,13 @@ def _make_executor(routes: list[RouteDefinition], storage_root: Path) -> RouteEx
     config = load_config(None)
     config.server.storage_root = storage_root
     store = CacheStore(storage_root)
-    return RouteExecutor({route.id: route for route in routes}, cache_store=store, config=config)
+    loader = PluginLoader(config.server.plugins_dir)
+    return RouteExecutor(
+        {route.id: route for route in routes},
+        cache_store=store,
+        config=config,
+        plugin_loader=loader,
+    )
 
 
 def test_dependency_missing_route_raises(tmp_path: Path) -> None:

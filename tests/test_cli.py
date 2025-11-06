@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime as dt
 from pathlib import Path
 
+import os
 import sys
 import types
 
@@ -11,40 +12,41 @@ import pytest
 from webbed_duck import cli
 
 
-def test_build_source_fingerprint_missing_directory(tmp_path: Path) -> None:
+def test_build_watch_snapshot_missing_directory(tmp_path: Path) -> None:
     missing = tmp_path / "not_there"
-    fingerprint = cli.build_source_fingerprint(missing)
-    assert isinstance(fingerprint, cli.SourceFingerprint)
-    assert dict(fingerprint.files) == {}
+    snapshot = cli.build_watch_snapshot(missing, None)
+    assert isinstance(snapshot, cli.WatchSnapshot)
+    assert dict(snapshot.routes) == {}
+    assert dict(snapshot.plugins) == {}
 
 
-def test_build_source_fingerprint_detects_changes(tmp_path: Path) -> None:
+def test_build_watch_snapshot_detects_changes(tmp_path: Path) -> None:
     src = tmp_path / "src"
     src.mkdir()
     (src / "demo.toml").write_text("id='demo'\n", encoding="utf-8")
     sql_path = src / "demo.sql"
     sql_path.write_text("SELECT 1;\n", encoding="utf-8")
 
-    initial = cli.build_source_fingerprint(src)
-    assert "demo.toml" in initial.files
-    assert "demo.sql" in initial.files
+    initial = cli.build_watch_snapshot(src, None)
+    assert "demo.toml" in initial.routes
+    assert "demo.sql" in initial.routes
 
     sql_path.write_text("SELECT 2; -- changed\n", encoding="utf-8")
-    updated = cli.build_source_fingerprint(src)
-    assert initial.has_changed(updated)
-    assert updated.has_changed(initial)
+    updated = cli.build_watch_snapshot(src, None)
+    assert initial.routes_changed(updated)
+    assert updated.routes_changed(initial)
 
 
-def test_build_source_fingerprint_custom_patterns(tmp_path: Path) -> None:
+def test_build_watch_snapshot_custom_patterns(tmp_path: Path) -> None:
     src = tmp_path / "src"
     src.mkdir()
     (src / "include.md").write_text("docs", encoding="utf-8")
 
-    default = cli.build_source_fingerprint(src)
-    assert "include.md" in default.files
+    default = cli.build_watch_snapshot(src, None)
+    assert "include.md" in default.routes
 
-    custom = cli.build_source_fingerprint(src, patterns=("*.md",))
-    assert set(custom.files) == {"include.md"}
+    custom = cli.build_watch_snapshot(src, None, route_patterns=("*.md",))
+    assert set(custom.routes) == {"include.md"}
 
 
 def test_parse_param_assignments_handles_invalid_pairs() -> None:
@@ -81,18 +83,21 @@ def test_start_watcher_clamps_interval(
 
     monkeypatch.setattr(cli.threading, "Thread", fake_thread)
 
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir(exist_ok=True)
     app = types.SimpleNamespace(state=types.SimpleNamespace())
-    stop_event, thread = cli._start_watcher(app, tmp_path, tmp_path, 0.05)
+    stop_event, thread = cli._start_watcher(app, tmp_path, tmp_path, plugins_dir, 0.05)
 
     assert isinstance(stop_event, cli.threading.Event)
     assert isinstance(thread, _FakeThread)
     assert captured["name"] == "webbed-duck-watch"
     assert captured["daemon"] is True
     args = captured["args"]
-    assert isinstance(args, tuple) and len(args) == 6
+    assert isinstance(args, tuple) and len(args) == 7
     assert args[1] == tmp_path and args[2] == tmp_path
-    assert args[3] == pytest.approx(0.2)
-    assert args[5] is cli.compile_routes
+    assert args[3] == plugins_dir
+    assert args[4] == pytest.approx(0.2)
+    assert args[6] is cli.compile_routes
     out = capsys.readouterr().out
     assert "[webbed-duck] Watching" in out
     assert "interval=0.20s" in out
@@ -106,7 +111,7 @@ def test_watch_iteration_skips_when_fingerprint_unchanged(tmp_path: Path) -> Non
     (src / "demo.toml").write_text("id='demo'\n", encoding="utf-8")
     (src / "demo.sql").write_text("SELECT 1;\n", encoding="utf-8")
 
-    snapshot = cli.build_source_fingerprint(src)
+    snapshot = cli.build_watch_snapshot(src, None)
     app = object()
     called: dict[str, object] = {}
 
@@ -118,12 +123,14 @@ def test_watch_iteration_skips_when_fingerprint_unchanged(tmp_path: Path) -> Non
         app,
         src,
         build,
-        snapshot,
+        plugins_dir=None,
+        snapshot=snapshot,
         compile_and_reload=fake_reload,
     )
 
     assert count == 0
-    assert updated is snapshot
+    assert updated.routes == snapshot.routes
+    assert updated.plugins == snapshot.plugins
     assert called == {}
 
 
@@ -137,7 +144,7 @@ def test_watch_iteration_triggers_reload_on_change(tmp_path: Path) -> None:
     toml_path.write_text("id='demo'\n", encoding="utf-8")
     sql_path.write_text("SELECT 1;\n", encoding="utf-8")
 
-    snapshot = cli.build_source_fingerprint(src)
+    snapshot = cli.build_watch_snapshot(src, None)
     sql_path.write_text("SELECT 2; -- change\n", encoding="utf-8")
 
     app = object()
@@ -153,12 +160,13 @@ def test_watch_iteration_triggers_reload_on_change(tmp_path: Path) -> None:
         app,
         src,
         build,
-        snapshot,
+        plugins_dir=None,
+        snapshot=snapshot,
         compile_and_reload=fake_reload,
     )
 
     assert count == 2
-    assert updated.has_changed(snapshot)
+    assert updated.routes_changed(snapshot)
     assert calls == {"app": app, "source": src, "build": build}
 
 
@@ -219,11 +227,12 @@ def test_cmd_compile_reports_count(monkeypatch: pytest.MonkeyPatch, capsys: pyte
 
     code = cli._cmd_compile("src", "build", None)
     assert code == 0
-    assert captured == {
-        "source": "src",
-        "build": "build",
-        "kwargs": {"server_constants": None, "server_secrets": None},
-    }
+    assert captured["source"] == "src"
+    assert captured["build"] == "build"
+    kwargs = captured["kwargs"]
+    assert kwargs["server_constants"] == {}
+    assert kwargs["server_secrets"] == {}
+    assert Path(kwargs["plugins_dir"]) == Path(os.environ["WEBBED_DUCK_PLUGINS_DIR"])
     out = capsys.readouterr().out.strip()
     assert out == "Compiled 3 route(s) to build"
 
@@ -292,6 +301,8 @@ def test_cmd_serve_auto_compile_and_watch(
     build_dir = tmp_path / "build"
     build_dir.mkdir()
 
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir(exist_ok=True)
     server_config = types.SimpleNamespace(
         build_dir=build_dir,
         source_dir=None,
@@ -302,6 +313,7 @@ def test_cmd_serve_auto_compile_and_watch(
         port=8000,
         constants={},
         secrets={},
+        plugins_dir=plugins_dir,
     )
     storage_root = tmp_path / "storage"
     storage_root.mkdir()
@@ -317,7 +329,11 @@ def test_cmd_serve_auto_compile_and_watch(
     def fake_compile(source: Path, build: Path, **kwargs: object) -> list[str]:
         compiled_routes.append(source)
         assert build == build_dir
-        assert kwargs == {"server_constants": {}, "server_secrets": {}}
+        assert kwargs == {
+            "plugins_dir": plugins_dir,
+            "server_constants": {},
+            "server_secrets": {},
+        }
         return ["route"]
 
     monkeypatch.setattr(cli, "compile_routes", fake_compile)
@@ -348,6 +364,7 @@ def test_cmd_serve_auto_compile_and_watch(
         app,
         source: Path,
         build: Path,
+        plugins: Path | None,
         interval: float,
         *,
         compile_fn=cli.compile_routes,
@@ -355,6 +372,7 @@ def test_cmd_serve_auto_compile_and_watch(
         watcher_calls["app"] = app
         watcher_calls["source"] = source
         watcher_calls["build"] = build
+        watcher_calls["plugins"] = plugins
         watcher_calls["interval"] = interval
         watcher_calls["compile_fn"] = compile_fn
         stop = _Stop()
@@ -401,6 +419,7 @@ def test_cmd_serve_auto_compile_and_watch(
     assert compiled_routes == [source_dir]
     assert watcher_calls["source"] == source_dir
     assert watcher_calls["build"] == build_dir
+    assert watcher_calls["plugins"] == plugins_dir
     assert watcher_calls["interval"] == 1.5
     assert watcher_calls["stop"].set_called is True
     assert watcher_calls["thread"].join_timeout == 2
@@ -422,6 +441,8 @@ def test_cmd_serve_watch_interval_clamp(
     build_dir = tmp_path / "build"
     build_dir.mkdir()
 
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir(exist_ok=True)
     server_config = types.SimpleNamespace(
         build_dir=build_dir,
         source_dir=source_dir,
@@ -432,6 +453,7 @@ def test_cmd_serve_watch_interval_clamp(
         port=8000,
         constants={},
         secrets={},
+        plugins_dir=plugins_dir,
     )
     storage_root = tmp_path / "storage"
     storage_root.mkdir()
@@ -466,10 +488,12 @@ def test_cmd_serve_watch_interval_clamp(
         app,
         source: Path,
         build: Path,
+        plugins: Path | None,
         interval: float,
         *,
         compile_fn=cli.compile_routes,
     ):  # type: ignore[no-untyped-def]
+        recorded["plugins"] = plugins
         recorded["interval"] = interval
         recorded["compile_fn"] = compile_fn
         stop = _Stop()
@@ -510,6 +534,7 @@ def test_cmd_serve_watch_interval_clamp(
 
     code = cli._cmd_serve(args)
     assert code == 0
+    assert recorded["plugins"] == plugins_dir
     assert recorded["interval"] == pytest.approx(cli.WATCH_INTERVAL_MIN)
     assert recorded["stop"].called is True
     assert recorded["thread"].join_timeout == 2
@@ -523,6 +548,8 @@ def test_cmd_serve_forces_h11_on_windows_py313(
     build_dir = tmp_path / "build"
     build_dir.mkdir()
 
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir(exist_ok=True)
     server_config = types.SimpleNamespace(
         build_dir=build_dir,
         source_dir=source_dir,
@@ -533,6 +560,7 @@ def test_cmd_serve_forces_h11_on_windows_py313(
         port=8000,
         constants={},
         secrets={},
+        plugins_dir=plugins_dir,
     )
     storage_root = tmp_path / "storage"
     storage_root.mkdir()
@@ -598,6 +626,8 @@ def test_cmd_serve_config_watch_interval_clamped(
     build_dir = tmp_path / "build"
     build_dir.mkdir()
 
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir(exist_ok=True)
     server_config = types.SimpleNamespace(
         build_dir=build_dir,
         source_dir=source_dir,
@@ -608,6 +638,7 @@ def test_cmd_serve_config_watch_interval_clamped(
         port=8000,
         constants={},
         secrets={},
+        plugins_dir=plugins_dir,
     )
     storage_root = tmp_path / "storage"
     storage_root.mkdir()
@@ -642,10 +673,12 @@ def test_cmd_serve_config_watch_interval_clamped(
         app,
         source: Path,
         build: Path,
+        plugins: Path | None,
         interval: float,
         *,
         compile_fn=cli.compile_routes,
     ):  # type: ignore[no-untyped-def]
+        recorded["plugins"] = plugins
         recorded["interval"] = interval
         recorded["compile_fn"] = compile_fn
         stop = _Stop()
@@ -686,6 +719,7 @@ def test_cmd_serve_config_watch_interval_clamped(
 
     code = cli._cmd_serve(args)
     assert code == 0
+    assert recorded["plugins"] == plugins_dir
     assert recorded["interval"] == pytest.approx(cli.WATCH_INTERVAL_MIN)
     assert recorded["stop"].called is True
     assert recorded["thread"].join_timeout == 2
@@ -698,6 +732,8 @@ def test_cmd_serve_auto_compile_failure_reports_error(
     build_dir = tmp_path / "build"
     build_dir.mkdir()
 
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir(exist_ok=True)
     server_config = types.SimpleNamespace(
         build_dir=build_dir,
         source_dir=source_dir,
@@ -708,6 +744,7 @@ def test_cmd_serve_auto_compile_failure_reports_error(
         port=8000,
         constants={},
         secrets={},
+        plugins_dir=plugins_dir,
     )
     storage_root = tmp_path / "storage"
     storage_root.mkdir()

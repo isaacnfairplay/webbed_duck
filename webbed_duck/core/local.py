@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Mapping, Sequence
 
 from ..config import Config, load_config
+from ..plugins.loader import PluginLoader
 from ..runtime.paths import get_storage
 from ..server.cache import CacheStore
 from ..server.execution import RouteExecutionError, RouteExecutor
@@ -35,6 +36,7 @@ class LocalRouteRunner:
         storage_root = get_storage(self._config)
         self._cache_store = CacheStore(storage_root)
         self._overlay_store = OverlayStore(storage_root)
+        self._plugin_loader = PluginLoader(self._config.server.plugins_dir)
 
     def run(
         self,
@@ -62,6 +64,7 @@ class LocalRouteRunner:
             self._routes,
             cache_store=self._cache_store,
             config=self._config,
+            plugin_loader=self._plugin_loader,
         )
 
         try:

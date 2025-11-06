@@ -10,6 +10,7 @@ from webbed_duck.config import Config
 from webbed_duck.core.compiler import compile_routes
 from webbed_duck.core.routes import RouteDefinition, load_compiled_routes
 from webbed_duck.server.cache import CacheStore
+from webbed_duck.plugins.loader import PluginLoader
 from webbed_duck.server.execution import RouteExecutor
 
 
@@ -85,7 +86,12 @@ def _make_executor(route: RouteDefinition, storage_root: Path) -> RouteExecutor:
     config.server.storage_root = storage_root
     storage_root.mkdir(parents=True, exist_ok=True)
     store = CacheStore(storage_root)
-    return RouteExecutor({route.id: route}, cache_store=store, config=config)
+    return RouteExecutor(
+        {route.id: route},
+        cache_store=store,
+        config=config,
+        plugin_loader=PluginLoader(config.server.plugins_dir),
+    )
 
 
 def test_nyc_taxi_route_scales_with_load(tmp_path: Path) -> None:

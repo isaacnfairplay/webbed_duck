@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import textwrap
 from pathlib import Path
 
@@ -10,6 +9,7 @@ from tests.conftest import write_sidecar_route
 from webbed_duck.core.compiler import compile_routes
 from webbed_duck.core.routes import RouteDefinition, load_compiled_routes
 from webbed_duck.core.local import run_route
+from webbed_duck.plugins.loader import PluginLoader
 from webbed_duck.server.preprocess import run_preprocessors
 
 
@@ -26,31 +26,48 @@ def _make_route_definition() -> RouteDefinition:
     )
 
 
-def test_run_preprocessors_supports_varied_signatures() -> None:
+def _write_fake_plugin(plugins_dir: Path) -> str:
+    source = Path(__file__).resolve().parent / "fake_preprocessors.py"
+    target = plugins_dir / "fake_preprocessors.py"
+    target.write_text(source.read_text())
+    return "fake_preprocessors.py"
+
+
+def test_run_preprocessors_supports_varied_signatures(plugins_dir: Path) -> None:
     route = _make_route_definition()
+    plugin_path = _write_fake_plugin(plugins_dir)
+    loader = PluginLoader(plugins_dir)
     steps = [
         {
-            "callable_module": "tests.fake_preprocessors",
+            "callable_path": plugin_path,
             "callable_name": "add_prefix",
-            "prefix": "pre-",
-            "options": {"prefix": "pre-", "note": "memo"},
+            "kwargs": {"prefix": "pre-", "note": "memo"},
         },
         {
-            "callable_module": "tests.fake_preprocessors",
+            "callable_path": plugin_path,
             "callable_name": "add_suffix",
-            "suffix": "-post",
+            "kwargs": {"suffix": "-post"},
         },
-        {"callable": "tests.fake_preprocessors:return_none"},
+        {
+            "callable_path": plugin_path,
+            "callable_name": "return_none",
+        },
     ]
-    result = run_preprocessors(steps, {"name": "value"}, route=route, request=None)
+    result = run_preprocessors(
+        steps,
+        {"name": "value"},
+        route=route,
+        request=None,
+        loader=loader,
+    )
     assert result["name"] == "pre-value-post"
     # note merged from options payload
     assert result["note"] == "memo"
 
 
-def test_run_preprocessors_supports_file_references(tmp_path: Path) -> None:
+def test_run_preprocessors_supports_file_references(plugins_dir: Path) -> None:
     route = _make_route_definition()
-    script = tmp_path / "custom_preprocessor.py"
+    script = plugins_dir / "custom_preprocessor.py"
     script.write_text(
         textwrap.dedent(
             """
@@ -69,25 +86,31 @@ def test_run_preprocessors_supports_file_references(tmp_path: Path) -> None:
         ).strip()
         + "\n"
     )
+    loader = PluginLoader(plugins_dir)
     steps = [
         {
-            "callable_path": os.path.relpath(script),
+            "callable_path": "custom_preprocessor.py",
             "callable_name": "append_suffix",
-            "suffix": "!",
+            "kwargs": {"suffix": "!"},
         }
     ]
 
-    result = run_preprocessors(steps, {"name": "duck"}, route=route, request=None)
+    result = run_preprocessors(
+        steps,
+        {"name": "duck"},
+        route=route,
+        request=None,
+        loader=loader,
+    )
 
     assert result["name"] == "duck!"
 
 
-def test_run_preprocessors_discovers_package_modules(tmp_path: Path) -> None:
+def test_run_preprocessors_supports_subdirectories(plugins_dir: Path) -> None:
     route = _make_route_definition()
-    package_dir = tmp_path / "plugins_pkg"
-    package_dir.mkdir()
-    (package_dir / "__init__.py").write_text("\n")
-    (package_dir / "decorate.py").write_text(
+    subdir = plugins_dir / "time_math"
+    subdir.mkdir()
+    (subdir / "decorate.py").write_text(
         textwrap.dedent(
             """
             from __future__ import annotations
@@ -103,21 +126,30 @@ def test_run_preprocessors_discovers_package_modules(tmp_path: Path) -> None:
         ).strip()
         + "\n"
     )
-
+    loader = PluginLoader(plugins_dir)
     steps = [
         {
-            "callable_path": str(package_dir),
+            "callable_path": "time_math/decorate.py",
             "callable_name": "decorate",
-            "suffix": "?",
+            "kwargs": {"suffix": "?"},
         }
     ]
 
-    result = run_preprocessors(steps, {"name": "duck"}, route=route, request=None)
+    result = run_preprocessors(
+        steps,
+        {"name": "duck"},
+        route=route,
+        request=None,
+        loader=loader,
+    )
 
     assert result["name"] == "duck?"
 
 
-def test_run_preprocessors_integrates_with_local_runner(tmp_path: Path) -> None:
+def test_run_preprocessors_integrates_with_local_runner(
+    tmp_path: Path, plugins_dir: Path
+) -> None:
+    plugin_path = _write_fake_plugin(plugins_dir)
     route_text = (
         "+++\n"
         "id = \"pre_route\"\n"
@@ -128,14 +160,14 @@ def test_run_preprocessors_integrates_with_local_runner(tmp_path: Path) -> None:
         "[cache]\n"
         "order_by = [\"result\"]\n"
         "+++\n\n"
-        "<!-- @preprocess {\"callable_module\": \"tests.fake_preprocessors\", \"callable_name\": \"uppercase_value\", \"field\": \"name\"} -->\n"
+        f"<!-- @preprocess {{\"callable_path\": \"{plugin_path}\", \"callable_name\": \"uppercase_value\", \"kwargs\": {{\"field\": \"name\"}}}} -->\n"
         "```sql\nSELECT {{name}} AS result\n```\n"
     )
     src_dir = tmp_path / "src"
     build_dir = tmp_path / "build"
     src_dir.mkdir()
     write_sidecar_route(src_dir, "pre", route_text)
-    compile_routes(src_dir, build_dir)
+    compile_routes(src_dir, build_dir, plugins_dir=plugins_dir)
     routes = load_compiled_routes(build_dir)
 
     table = run_route("pre_route", params={"name": "duck"}, routes=routes, build_dir=build_dir)

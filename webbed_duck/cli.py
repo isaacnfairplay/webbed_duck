@@ -22,15 +22,26 @@ WATCH_INTERVAL_MIN = 0.2
 
 
 @dataclass(frozen=True)
-class SourceFingerprint:
-    """Filesystem fingerprint for a route source directory."""
+class WatchSnapshot:
+    """Filesystem fingerprint for route sources and plugin directories."""
 
-    files: Mapping[str, tuple[float, int]]
+    routes: Mapping[str, tuple[float, int]]
+    plugins: Mapping[str, tuple[float, int]]
 
-    def has_changed(self, other: "SourceFingerprint") -> bool:
-        """Return ``True`` when ``other`` differs from this snapshot."""
+    def routes_changed(self, other: "WatchSnapshot") -> bool:
+        return dict(self.routes) != dict(other.routes)
 
-        return dict(self.files) != dict(other.files)
+    def plugin_changes(self, other: "WatchSnapshot") -> set[str]:
+        current = dict(self.plugins)
+        updated = dict(other.plugins)
+        changed: set[str] = set()
+        for key, value in updated.items():
+            if key not in current or current[key] != value:
+                changed.add(key)
+        for key in current:
+            if key not in updated:
+                changed.add(key)
+        return changed
 
 
 @dataclass(frozen=True)
@@ -126,22 +137,18 @@ def main(argv: Sequence[str] | None = None) -> int:
 
 
 def _cmd_compile(source: str, build: str, config_path: str | None) -> int:
-    server_constants: Mapping[str, object] | None = None
-    server_secrets: Mapping[str, Mapping[str, str]] | None = None
-    if config_path:
-        try:
-            config = load_config(Path(config_path))
-        except ConfigError as exc:
-            print(f"[webbed-duck] ERROR: {exc}", file=sys.stderr)
-            return 2
-        server_constants = config.server.constants
-        server_secrets = config.server.secrets
+    try:
+        config = load_config(Path(config_path)) if config_path else load_config(None)
+    except ConfigError as exc:
+        print(f"[webbed-duck] ERROR: {exc}", file=sys.stderr)
+        return 2
 
     compiled = compile_routes(
         source,
         build,
-        server_constants=server_constants,
-        server_secrets=server_secrets,
+        plugins_dir=config.server.plugins_dir,
+        server_constants=config.server.constants,
+        server_secrets=config.server.secrets,
     )
     print(f"Compiled {len(compiled)} route(s) to {build}")
     return 0
@@ -182,6 +189,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
 
     compile_fn = functools.partial(
         compile_routes,
+        plugins_dir=config.server.plugins_dir,
         server_constants=config.server.constants,
         server_secrets=config.server.secrets,
     )
@@ -212,6 +220,7 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             app,
             source_dir,
             build_dir,
+            Path(config.server.plugins_dir),
             watch_interval,
             compile_fn=compile_fn,
         )
@@ -292,6 +301,7 @@ def _start_watcher(
     app,
     source_dir: Path,
     build_dir: Path,
+    plugins_dir: Path | None,
     interval: float,
     *,
     compile_fn=compile_routes,
@@ -300,7 +310,15 @@ def _start_watcher(
     effective_interval = max(WATCH_INTERVAL_MIN, float(interval))
     thread = threading.Thread(
         target=_watch_source,
-        args=(app, source_dir, build_dir, effective_interval, stop_event, compile_fn),
+        args=(
+            app,
+            source_dir,
+            build_dir,
+            plugins_dir,
+            effective_interval,
+            stop_event,
+            compile_fn,
+        ),
         daemon=True,
         name="webbed-duck-watch",
     )
@@ -315,17 +333,19 @@ def _watch_source(
     app,
     source_dir: Path,
     build_dir: Path,
+    plugins_dir: Path | None,
     interval: float,
     stop_event: threading.Event,
     compile_fn=compile_routes,
 ) -> None:
-    snapshot = build_source_fingerprint(source_dir)
+    snapshot = build_watch_snapshot(source_dir, plugins_dir)
     while not stop_event.wait(interval):
         try:
             snapshot, count = _watch_iteration(
                 app,
                 source_dir,
                 build_dir,
+                plugins_dir,
                 snapshot,
                 compile_fn=compile_fn,
             )
@@ -360,37 +380,67 @@ def _watch_iteration(
     app,
     source_dir: Path,
     build_dir: Path,
-    snapshot: SourceFingerprint,
+    plugins_dir: Path | None,
+    snapshot: WatchSnapshot,
     *,
     compile_fn=compile_routes,
     compile_and_reload=_compile_and_reload,
-) -> tuple[SourceFingerprint, int]:
+) -> tuple[WatchSnapshot, int]:
     """Perform a single watch iteration and return the updated snapshot and reload count."""
 
-    current = build_source_fingerprint(source_dir)
-    if not snapshot.has_changed(current):
-        return snapshot, 0
+    current = build_watch_snapshot(source_dir, plugins_dir)
+    plugin_changes = snapshot.plugin_changes(current)
+    if plugin_changes:
+        loader = getattr(app.state, "plugin_loader", None)
+        if loader is not None:
+            for path in sorted(plugin_changes):
+                loader.invalidate(path)
+        if plugin_changes:
+            joined = ", ".join(sorted(plugin_changes))
+            print(f"[webbed-duck] Detected plugin updates: {joined}")
+
+    if not snapshot.routes_changed(current):
+        return current, 0
     count = compile_and_reload(app, source_dir, build_dir, compile_fn=compile_fn)
     return current, count
 
 
-def build_source_fingerprint(
-    source_dir: Path, *, patterns: Sequence[str] = ("*.toml", "*.sql", "*.md")
-) -> SourceFingerprint:
-    files: dict[str, tuple[float, int]] = {}
+def build_watch_snapshot(
+    source_dir: Path,
+    plugins_dir: Path | None,
+    *,
+    route_patterns: Sequence[str] = ("*.toml", "*.sql", "*.md"),
+) -> WatchSnapshot:
+    routes: dict[str, tuple[float, int]] = {}
     root = Path(source_dir)
-    if not root.exists():
-        return SourceFingerprint(files)
-    for pattern in patterns:
-        for path in sorted(root.rglob(pattern)):
-            if not path.is_file():
-                continue
-            try:
-                stat = path.stat()
-            except FileNotFoundError:  # pragma: no cover - filesystem race
-                continue
-            files[str(path.relative_to(root))] = (stat.st_mtime, stat.st_size)
-    return SourceFingerprint(files)
+    if root.exists():
+        for pattern in route_patterns:
+            for path in sorted(root.rglob(pattern)):
+                if not path.is_file():
+                    continue
+                try:
+                    stat = path.stat()
+                except FileNotFoundError:  # pragma: no cover - filesystem race
+                    continue
+                routes[str(path.relative_to(root))] = (stat.st_mtime, stat.st_size)
+
+    plugins: dict[str, tuple[float, int]] = {}
+    if plugins_dir is not None:
+        plugin_root = Path(plugins_dir)
+        if plugin_root.exists():
+            for path in sorted(plugin_root.rglob("*.py")):
+                if not path.is_file():
+                    continue
+                try:
+                    stat = path.stat()
+                except FileNotFoundError:  # pragma: no cover - filesystem race
+                    continue
+                plugins[str(path.relative_to(plugin_root).as_posix())] = (
+                    stat.st_mtime,
+                    stat.st_size,
+                )
+
+    return WatchSnapshot(routes=routes, plugins=plugins)
 
 
 def _parse_param_assignments(pairs: Sequence[str]) -> Mapping[str, str]:
