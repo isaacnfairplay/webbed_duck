@@ -34,6 +34,10 @@ from .routes import (
     RouteDirective,
     RouteUse,
 )
+from ..server.preprocess_loader import (
+    normalize_callable_reference,
+    validate_callable_reference,
+)
 
 FRONTMATTER_DELIMITER = "+++"
 SQL_BLOCK_PATTERN = re.compile(r"```sql\s*(?P<sql>.*?)```", re.DOTALL | re.IGNORECASE)
@@ -202,6 +206,7 @@ def compile_route_text(
     directives = _extract_directives(body)
     metadata = _extract_metadata(metadata_raw)
     sections = _interpret_sections(metadata_raw, directives, metadata)
+    _validate_preprocess_steps(sections.preprocess, source_path=source_path)
 
     sql = _extract_sql(body)
     requested_constants = {
@@ -833,44 +838,111 @@ def _build_preprocess(
 
 def _normalize_preprocess_entries(data: object) -> list[Mapping[str, object]]:
     entries: list[Mapping[str, object]] = []
+
+    def _coerce_mapping(raw: Mapping[str, object]) -> dict[str, object]:
+        mapping = {str(k): v for k, v in raw.items()}
+        if any(key in mapping for key in ("callable_name", "callable_module", "callable_path")):
+            result = {
+                k: v
+                for k, v in mapping.items()
+                if k not in {"callable", "name", "path"}
+            }
+            name_value = _coerce_preprocess_string(mapping.get("callable_name"))
+            if not name_value:
+                raise RouteCompilationError(
+                    "Preprocess directives must include 'callable_name'."
+                )
+            result["callable_name"] = name_value
+            module_value = _coerce_preprocess_string(mapping.get("callable_module"))
+            path_value = _coerce_preprocess_string(mapping.get("callable_path"))
+            if module_value:
+                result["callable_module"] = module_value
+            if path_value:
+                result["callable_path"] = path_value
+            if result.get("callable_module") and result.get("callable_path"):
+                raise RouteCompilationError(
+                    "Preprocess directives may specify only one of 'callable_module' or 'callable_path'."
+                )
+            if "callable_module" not in result and "callable_path" not in result:
+                raise RouteCompilationError(
+                    "Preprocess directives must include 'callable_module' or 'callable_path'."
+                )
+            return result
+
+        reference_value = _coerce_preprocess_string(
+            mapping.get("callable") or mapping.get("name") or mapping.get("path")
+        )
+        if not reference_value:
+            raise RouteCompilationError("Preprocess directives must specify a callable reference")
+        result = {
+            k: v
+            for k, v in mapping.items()
+            if k not in {"callable", "name", "path"}
+        }
+        try:
+            reference = normalize_callable_reference({"callable": reference_value})
+        except ValueError as exc:
+            raise RouteCompilationError(str(exc)) from exc
+        result["callable_name"] = reference.callable_name
+        if reference.kind == "module":
+            result["callable_module"] = reference.display
+        else:
+            result["callable_path"] = reference.display
+        return result
+
     if isinstance(data, Mapping):
-        if any(key in data for key in ("callable", "path", "name")):
-            normalized = dict(data)
-            if "callable" not in normalized:
-                if "name" in normalized:
-                    normalized["callable"] = str(normalized.pop("name"))
-                elif "path" in normalized:
-                    normalized["callable"] = str(normalized.pop("path"))
-            if "callable" not in normalized:
-                raise RouteCompilationError("Preprocess directives must specify a callable name")
-            normalized["callable"] = str(normalized["callable"])
-            entries.append(normalized)
+        if any(
+            key in data
+            for key in (
+                "callable",
+                "name",
+                "path",
+                "callable_name",
+                "callable_module",
+                "callable_path",
+            )
+        ):
+            entries.append(_coerce_mapping(data))
         else:
             for name, options in data.items():
                 entry: dict[str, object] = {"callable": str(name)}
                 if isinstance(options, Mapping):
                     entry.update(options)
-                entries.append(entry)
+                entries.append(_coerce_mapping(entry))
     elif isinstance(data, Sequence) and not isinstance(data, (str, bytes)):
         for item in data:
             if isinstance(item, Mapping):
-                normalized = dict(item)
-                if "callable" not in normalized:
-                    if "name" in normalized:
-                        normalized["callable"] = str(normalized.pop("name"))
-                    elif "path" in normalized:
-                        normalized["callable"] = str(normalized.pop("path"))
-                if "callable" not in normalized:
-                    raise RouteCompilationError(
-                        "Preprocess directives must specify a callable name"
-                    )
-                normalized["callable"] = str(normalized["callable"])
-                entries.append(normalized)
+                entries.append(_coerce_mapping(item))
             else:
-                entries.append({"callable": str(item)})
+                entries.append(_coerce_mapping({"callable": str(item)}))
     elif isinstance(data, str):
-        entries.append({"callable": data})
+        entries.append(_coerce_mapping({"callable": data}))
     return entries
+
+
+def _coerce_preprocess_string(value: object | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _validate_preprocess_steps(
+    steps: Sequence[Mapping[str, object]], *, source_path: Path
+) -> None:
+    for index, step in enumerate(steps, start=1):
+        try:
+            reference = normalize_callable_reference(step)
+        except ValueError as exc:
+            raise RouteCompilationError(
+                f"{source_path}: preprocess step {index} is misconfigured: {exc}"
+            ) from exc
+        try:
+            validate_callable_reference(reference)
+        except (ModuleNotFoundError, AttributeError, TypeError) as exc:
+            raise RouteCompilationError(
+                f"{source_path}: failed to load preprocess callable '{reference.describe()}': {exc}"
+            ) from exc
 
 
 def _build_postprocess(

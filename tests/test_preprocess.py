@@ -4,12 +4,16 @@ import os
 import textwrap
 from pathlib import Path
 
+import os
+import textwrap
+from pathlib import Path
+
 import pyarrow as pa
 
 from tests.conftest import write_sidecar_route
 from webbed_duck.core.compiler import compile_routes
-from webbed_duck.core.routes import RouteDefinition, load_compiled_routes
 from webbed_duck.core.local import run_route
+from webbed_duck.core.routes import RouteDefinition, load_compiled_routes
 from webbed_duck.server.preprocess import run_preprocessors
 
 
@@ -30,12 +34,20 @@ def test_run_preprocessors_supports_varied_signatures() -> None:
     route = _make_route_definition()
     steps = [
         {
-            "callable": "tests.fake_preprocessors:add_prefix",
+            "callable_module": "tests.fake_preprocessors",
+            "callable_name": "add_prefix",
             "prefix": "pre-",
             "options": {"prefix": "pre-", "note": "memo"},
         },
-        {"callable": "tests.fake_preprocessors:add_suffix", "suffix": "-post"},
-        {"callable": "tests.fake_preprocessors:return_none"},
+        {
+            "callable_module": "tests.fake_preprocessors",
+            "callable_name": "add_suffix",
+            "suffix": "-post",
+        },
+        {
+            "callable_module": "tests.fake_preprocessors",
+            "callable_name": "return_none",
+        },
     ]
     result = run_preprocessors(steps, {"name": "value"}, route=route, request=None)
     assert result["name"] == "pre-value-post"
@@ -64,8 +76,13 @@ def test_run_preprocessors_supports_file_references(tmp_path: Path) -> None:
         ).strip()
         + "\n"
     )
-    callable_path = f"{os.path.relpath(script)}:append_suffix"
-    steps = [{"callable": callable_path, "suffix": "!"}]
+    steps = [
+        {
+            "callable_path": os.fspath(script),
+            "callable_name": "append_suffix",
+            "suffix": "!",
+        }
+    ]
 
     result = run_preprocessors(steps, {"name": "duck"}, route=route, request=None)
 
@@ -94,8 +111,13 @@ def test_run_preprocessors_discovers_package_modules(tmp_path: Path) -> None:
         + "\n"
     )
 
-    callable_path = f"{package_dir}:decorate"
-    steps = [{"callable": callable_path, "suffix": "?"}]
+    steps = [
+        {
+            "callable_path": os.fspath(package_dir),
+            "callable_name": "decorate",
+            "suffix": "?",
+        }
+    ]
 
     result = run_preprocessors(steps, {"name": "duck"}, route=route, request=None)
 
@@ -113,7 +135,7 @@ def test_run_preprocessors_integrates_with_local_runner(tmp_path: Path) -> None:
         "[cache]\n"
         "order_by = [\"result\"]\n"
         "+++\n\n"
-        "<!-- @preprocess {\"callable\": \"tests.fake_preprocessors:uppercase_value\", \"field\": \"name\"} -->\n"
+        "<!-- @preprocess {\"callable_module\": \"tests.fake_preprocessors\", \"callable_name\": \"uppercase_value\", \"field\": \"name\"} -->\n"
         "```sql\nSELECT {{name}} AS result\n```\n"
     )
     src_dir = tmp_path / "src"
@@ -126,3 +148,12 @@ def test_run_preprocessors_integrates_with_local_runner(tmp_path: Path) -> None:
     table = run_route("pre_route", params={"name": "duck"}, routes=routes, build_dir=build_dir)
     assert isinstance(table, pa.Table)
     assert table.column("result")[0].as_py() == "DUCK"
+
+
+def test_run_preprocessors_accepts_legacy_callable_string() -> None:
+    route = _make_route_definition()
+    steps = [
+        {"callable": "tests.fake_preprocessors:add_prefix", "prefix": "legacy-"}
+    ]
+    result = run_preprocessors(steps, {"name": "duck"}, route=route, request=None)
+    assert result["name"] == "legacy-duck"

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added explicit preprocess configuration fields (`callable_module` /
+  `callable_path` + `callable_name`) validated at compile time, refreshed the
+  loader to support module and file references without installation, shipped
+  regression tests, README guidance, and new demos proving both workflows.
 - Allow routes to interpolate `{{const.NAME}}` tokens with values sourced from
   TOML `[constants]`, server-level constants, or keyring-backed `[secrets]`
   entries. Constants now bind as DuckDB named parameters (with identifier
