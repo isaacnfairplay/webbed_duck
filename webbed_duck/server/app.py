@@ -20,6 +20,7 @@ from .. import __version__ as PACKAGE_VERSION
 from ..config import Config
 from ..runtime.paths import get_storage
 from ..static.chartjs import CHARTJS_VERSION
+from ..core.interpolation import TemplateInterpolationError, render_sql
 from ..core.routes import ParameterSpec, ParameterType, RouteDefinition
 from ..plugins.charts import render_route_charts
 from ..plugins.loader import PluginLoadError, PluginLoader
@@ -266,7 +267,19 @@ def create_app(routes: Sequence[RouteDefinition], config: Config) -> FastAPI:
             bindings[name] = value
         for name, value in route.constant_params.items():
             bindings[name] = value
-        table = _execute_sql(_limit_zero(route.prepared_sql), bindings)
+        try:
+            rendered_sql = render_sql(
+                route,
+                params,
+                config=request.app.state.config.interpolation,
+                request=request,
+            )
+        except TemplateInterpolationError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "invalid_template", "message": str(exc)},
+            ) from exc
+        table = _execute_sql(_limit_zero(rendered_sql), bindings)
         schema = [
             {"name": field.name, "type": str(field.type)}
             for field in table.schema

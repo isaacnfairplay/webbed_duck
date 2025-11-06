@@ -922,7 +922,7 @@ SELECT
   work_center,
   'traceability_module_events' AS source_route
 FROM events
-WHERE barcode = {{barcode}} OR barcode LIKE {{barcode}} || '%'
+WHERE barcode = $barcode OR barcode LIKE $barcode || '%'
 ORDER BY event_time;
 ```
 
@@ -964,8 +964,8 @@ SELECT
   barcode_root,
   file_hint
 FROM hints
-WHERE barcode_root = SPLIT_PART({{barcode}}, '-', 1)
-   OR {{barcode}} LIKE barcode_root || '%'
+WHERE barcode_root = SPLIT_PART($barcode, '-', 1)
+   OR $barcode LIKE barcode_root || '%'
 ORDER BY file_hint;
 ```
 
@@ -1012,7 +1012,7 @@ SELECT
   work_center,
   'traceability_panel_events' AS source_route
 FROM events
-WHERE barcode = {{barcode}} OR barcode LIKE {{barcode}} || '%'
+WHERE barcode = $barcode OR barcode LIKE $barcode || '%'
 ORDER BY event_time;
 ```
 
@@ -1054,8 +1054,8 @@ SELECT
   barcode_root,
   file_hint
 FROM hints
-WHERE barcode_root = SPLIT_PART({{barcode}}, '-', 1)
-   OR {{barcode}} LIKE barcode_root || '%'
+WHERE barcode_root = SPLIT_PART($barcode, '-', 1)
+   OR $barcode LIKE barcode_root || '%'
 ORDER BY file_hint;
 ```
 
@@ -1099,6 +1099,6 @@ SELECT
   event_route AS table_route,
   file_hint_route
 FROM mappings
-WHERE prefix = UPPER({{prefix}})
+WHERE prefix = UPPER($prefix)
 ORDER BY table_route;
 ```

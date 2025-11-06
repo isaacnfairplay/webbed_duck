@@ -187,41 +187,43 @@ def test_build_cache_normalizes_order_by(values):
 
 
 @pytest.mark.parametrize(
-    "sql, params, expected_order, expected_sql",
+    "sql, params, expected_order",
     [
         (
-            "SELECT * FROM items WHERE id = {{id}}",
+            "SELECT * FROM items WHERE id = $id",
             [ParameterSpec(name="id", type=ParameterType.INTEGER)],
             ["id"],
-            "SELECT * FROM items WHERE id = ?",
         ),
         (
-            "SELECT $name FROM dual WHERE id = {{id}}",
+            "SELECT $name FROM dual WHERE id = $id",
             [
                 ParameterSpec(name="id", type=ParameterType.INTEGER),
                 ParameterSpec(name="name"),
             ],
             ["name", "id"],
-            "SELECT ? FROM dual WHERE id = ?",
         ),
     ],
 )
-def test_prepare_sql_translates_placeholders(sql, params, expected_order, expected_sql):
-    order, prepared = _prepare_sql(sql, params)
+def test_prepare_sql_tracks_bindings(sql, params, expected_order, tmp_path: Path):
+    order, prepared, used_constants, slots = _prepare_sql(
+        sql, params, {}, source_path=tmp_path / "route.sql"
+    )
     assert order == expected_order
-    assert prepared == expected_sql
+    assert prepared == sql
+    assert used_constants == set()
+    assert slots == []
 
 
 @pytest.mark.parametrize(
     "sql, params",
     [
-        ("SELECT {{missing}}", []),
+        ("SELECT $missing", []),
         ("SELECT $unknown", [ParameterSpec(name="known")]),
     ],
 )
-def test_prepare_sql_raises_for_unknown_params(sql, params):
+def test_prepare_sql_raises_for_unknown_params(sql, params, tmp_path: Path):
     with pytest.raises(RouteCompilationError):
-        _prepare_sql(sql, params)
+        _prepare_sql(sql, params, {}, source_path=tmp_path / "route.sql")
 
 
 @st.composite
@@ -229,14 +231,17 @@ def sql_placeholder_strategy(draw):
     names = draw(st.lists(st.text(min_size=1, max_size=5), min_size=1, max_size=5))
     unique = {name for name in names}
     params = [ParameterSpec(name=name) for name in sorted(unique)]
-    sql = "SELECT " + " + ".join(f"{{{{{name}}}}}" for name in names)
+    sql = "SELECT " + " + ".join(f"${name}" for name in names)
     sql += " FROM dual"
     return sql, params, names
 
 
 @given(sql_placeholder_strategy())
-def test_prepare_sql_tracks_placeholder_order(case):
+def test_prepare_sql_tracks_placeholder_order(case, tmp_path: Path):
     sql, params, names = case
-    order, prepared = _prepare_sql(sql, params)
+    order, prepared, _, slots = _prepare_sql(
+        sql, params, {}, source_path=tmp_path / "route.sql"
+    )
     assert order == names
-    assert prepared.count("?") == len(names)
+    assert prepared == sql
+    assert slots == []

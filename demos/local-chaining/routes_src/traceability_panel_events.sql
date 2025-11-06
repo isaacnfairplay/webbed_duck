@@ -16,5 +16,5 @@ SELECT
   work_center,
   'traceability_panel_events' AS source_route
 FROM events
-WHERE barcode = {{barcode}} OR barcode LIKE {{barcode}} || '%'
+WHERE barcode = $barcode OR barcode LIKE $barcode || '%'
 ORDER BY event_time;

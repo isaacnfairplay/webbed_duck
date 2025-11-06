@@ -30,7 +30,12 @@ from webbed_duck.core.compiler import (
     compile_routes,
 )
 from webbed_duck.core.incremental import run_incremental
-from webbed_duck.core.routes import ParameterSpec, RouteDefinition, load_compiled_routes
+from webbed_duck.core.routes import (
+    ParameterSpec,
+    RouteDefinition,
+    TemplateSlot,
+    load_compiled_routes,
+)
 from webbed_duck.plugins import assets as assets_plugins
 from webbed_duck.plugins import charts as charts_plugins
 from webbed_duck.server.app import create_app
@@ -90,7 +95,7 @@ pii_columns = ["note"]
 
 ```sql
 SELECT
-  'Hello, ' || {{name}} || '!' AS greeting,
+  'Hello, ' || $name || '!' AS greeting,
   'private-note' AS note,
   CURRENT_DATE AS created_at
 ```
@@ -108,7 +113,7 @@ order_by = ["day_value"]
 +++
 
 ```sql
-SELECT {{day}} AS day_value
+SELECT $day AS day_value
 ORDER BY day_value;
 ```
 """
@@ -191,7 +196,7 @@ SELECT product_code, quantity, seq
 FROM (
     VALUES ('widget', 4, 1), ('gadget', 2, 2), (NULL, 3, 3), ('widget', 5, 4)
 ) AS inventory(product_code, quantity, seq)
-WHERE product_code IS NOT DISTINCT FROM COALESCE(NULLIF({{ product_code }}, ''), product_code)
+WHERE product_code IS NOT DISTINCT FROM COALESCE(NULLIF($product_code, ''), product_code)
 ORDER BY seq;
 ```
 """
@@ -217,7 +222,7 @@ SELECT product_code, quantity, seq
 FROM (
     VALUES ('widget', 4, 1), ('gadget', 2, 2), (NULL, 3, 3), ('widget', 5, 4)
 ) AS inventory(product_code, quantity, seq)
-WHERE product_code IS NOT DISTINCT FROM COALESCE(NULLIF({{ product_code }}, ''), product_code)
+WHERE product_code IS NOT DISTINCT FROM COALESCE(NULLIF($product_code, ''), product_code)
 ORDER BY seq;
 ```
 """
@@ -445,7 +450,8 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
                 params: Mapping[str, object], *, context: PreprocessContext, files: list[str]
             ) -> Mapping[str, object]:
                 updated = dict(params)
-                updated["files"] = list(files)
+                entries = ", ".join(repr(item) for item in files)
+                updated["files"] = f"[{entries}]" if entries else "[]"
                 return updated
             """
         ).strip()
@@ -785,10 +791,26 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
                 id="doc_duckdb_preprocessor",
                 path="/doc_duckdb_preprocessor",
                 methods=["GET"],
-                raw_sql="SELECT COUNT(*) AS row_count FROM read_parquet({{files}}::TEXT[])",
-                prepared_sql="SELECT COUNT(*) AS row_count FROM read_parquet($files::TEXT[])",
-                param_order=["files"],
-                params=(ParameterSpec(name="files", required=False, default=None),),
+                raw_sql="SELECT COUNT(*) AS row_count FROM read_parquet({{ files }})",
+                prepared_sql="SELECT COUNT(*) AS row_count FROM read_parquet(__tmpl_0__)",
+                param_order=(),
+                params=(
+                    ParameterSpec(
+                        name="files",
+                        required=False,
+                        default=None,
+                        template_only=True,
+                        template={"policy": "raw"},
+                    ),
+                ),
+                template_slots=(
+                    TemplateSlot(
+                        marker="__tmpl_0__",
+                        param="files",
+                        filters=(),
+                        placeholder="{{ files }}",
+                    ),
+                ),
                 metadata={},
                 preprocess=(
                     {
@@ -797,8 +819,8 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
                         "kwargs": {"files": [str(sample_path)]},
                     },
                 ),
-            cache_mode="passthrough",
-        )
+                cache_mode="passthrough",
+            )
         executor = RouteExecutor(
             {preprocessed_route.id: preprocessed_route},
             cache_store=None,
@@ -1707,7 +1729,7 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
         (lambda s: s.startswith("This keeps cache keys deterministic"), lambda s: _ensure(
             ctx.duckdb_binding_checks.get("multi", False), s
         )),
-        (lambda s: s.startswith("Executors treat sequences returned by preprocessors"), lambda s: _ensure(
+        (lambda s: s.startswith("Executors run template-only interpolation before binding parameters"), lambda s: _ensure(
             ctx.duckdb_binding_checks.get("preprocessed_multi", False), s
         )),
         (lambda s: s.startswith("- Constants baked into the route definition"), lambda s: _ensure(

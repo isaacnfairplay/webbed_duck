@@ -97,7 +97,7 @@ def test_compile_route(tmp_path: Path) -> None:
         "type = \"str\"\n"
         "required = true\n"
         "+++\n\n"
-        "```sql\nSELECT {{name}} as value\n```\n"
+        "```sql\nSELECT $name as value\n```\n"
     )
     route_path = write_route(tmp_path, route_text)
     definition = compile_route_file(route_path)
@@ -146,6 +146,70 @@ def test_compile_route_preserves_template_metadata(tmp_path: Path) -> None:
     assert loaded_spec.guard == {"mode": "role", "role": "admin"}
 
 
+def test_compile_route_registers_template_slots(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"templated_slots\"\n"
+        "path = \"/templated_slots\"\n"
+        "[params.table]\n"
+        "type = \"str\"\n"
+        "template_only = true\n"
+        "[params.table.template]\n"
+        "policy = \"identifier\"\n"
+        "[params.suffix]\n"
+        "type = \"str\"\n"
+        "template_only = true\n"
+        "[params.suffix.template]\n"
+        "policy = \"literal\"\n"
+        "+++\n\n"
+        "```sql\nSELECT * FROM {{ table }} WHERE label = {{ suffix }}\n```\n"
+    )
+    route_path = write_route(tmp_path, route_text)
+    definition = compile_route_file(route_path)
+    assert definition.template_slots
+    assert len(definition.template_slots) == 2
+    markers = [slot.marker for slot in definition.template_slots]
+    assert definition.prepared_sql == "SELECT * FROM " + markers[0] + " WHERE label = " + markers[1]
+    assert {slot.param for slot in definition.template_slots} == {"table", "suffix"}
+
+    build_dir = tmp_path / "build"
+    compile_routes(tmp_path, build_dir)
+    loaded = load_compiled_routes(build_dir)
+    assert loaded[0].template_slots
+    assert len(loaded[0].template_slots) == 2
+    assert {slot.param for slot in loaded[0].template_slots} == {"table", "suffix"}
+
+
+def test_compile_route_rejects_non_template_brace_usage(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"invalid_template\"\n"
+        "path = \"/invalid_template\"\n"
+        "[params.label]\n"
+        "type = \"str\"\n"
+        "+++\n\n"
+        "```sql\nSELECT {{ label }}\n```\n"
+    )
+    route_path = write_route(tmp_path, route_text)
+    with pytest.raises(RouteCompilationError):
+        compile_route_file(route_path)
+
+
+def test_compile_route_rejects_template_param_in_db_binding(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"invalid_binding\"\n"
+        "path = \"/invalid_binding\"\n"
+        "[params.table]\n"
+        "template_only = true\n"
+        "+++\n\n"
+        "```sql\nSELECT * FROM $table\n```\n"
+    )
+    route_path = write_route(tmp_path, route_text)
+    with pytest.raises(RouteCompilationError):
+        compile_route_file(route_path)
+
+
 def test_compile_route_applies_constants(tmp_path: Path) -> None:
     route_text = (
         "+++\n"
@@ -158,7 +222,7 @@ def test_compile_route_applies_constants(tmp_path: Path) -> None:
         "type = \"identifier\"\n"
         "value = \"mart.customers\"\n"
         "+++\n\n"
-        "```sql\nSELECT * FROM {{const.customer_table}} WHERE id = {{user_id}}\n```\n"
+        "```sql\nSELECT * FROM {{const.customer_table}} WHERE id = $user_id\n```\n"
     )
     route_path = write_route(tmp_path, route_text)
     definition = compile_route_file(route_path)
@@ -363,6 +427,18 @@ def test_compile_imports_legacy_markdown(tmp_path: Path) -> None:
     assert sql_path.exists()
 
 def test_compile_extracts_directive_sections(tmp_path: Path) -> None:
+    plugins_dir = tmp_path / "plugins"
+    plugins_dir.mkdir(exist_ok=True)
+    (plugins_dir / "fake_preprocessors.py").write_text(
+        (
+            "def add_suffix(params, *, context=None, suffix=\"\"):\n"
+            "    updated = dict(params)\n"
+            "    updated['note'] = suffix\n"
+            "    return updated\n"
+        ),
+        encoding="utf-8",
+    )
+
     route_text = (
         "+++\n"
         "id = \"directive\"\n"
@@ -371,19 +447,31 @@ def test_compile_extracts_directive_sections(tmp_path: Path) -> None:
         "title_col = \"title\"\n"
         "+++\n\n"
         "<!-- @meta default_format=\"html_c\" allowed_formats=\"html_c json\" -->\n"
-        "<!-- @preprocess {\"callable\": \"tests.fake:noop\"} -->\n"
+        "<!-- @preprocess {\"callable_path\": \"fake_preprocessors.py\", \"callable_name\": \"add_suffix\", \"note\": \"ok\"} -->\n"
         "<!-- @postprocess {\"html_c\": {\"image_col\": \"photo\"}} -->\n"
         "<!-- @charts [{\"id\": \"chart1\", \"type\": \"line\"}] -->\n"
         "<!-- @assets {\"image_getter\": \"static_fallback\"} -->\n"
         "```sql\nSELECT 'value' AS col\n```\n"
     )
-    definition = compile_route_file(write_route(tmp_path, route_text))
+    route_path = write_route(tmp_path, route_text)
+    definition = compile_route_file(route_path, plugins_dir=plugins_dir)
     assert definition.default_format == "html_c"
     assert set(definition.allowed_formats) == {"html_c", "json"}
-    assert definition.preprocess[0]["callable"] == "tests.fake:noop"
+    step = definition.preprocess[0]
+    assert step["callable_path"] == "fake_preprocessors.py"
+    assert step["callable_name"] == "add_suffix"
+    assert step["kwargs"] == {"note": "ok"}
     assert definition.postprocess["html_c"]["image_col"] == "photo"
     assert definition.charts[0]["id"] == "chart1"
     assert definition.assets["image_getter"] == "static_fallback"
+
+    build_dir = tmp_path / "build"
+    compile_routes(tmp_path, build_dir, plugins_dir=plugins_dir)
+    loaded = load_compiled_routes(build_dir)
+    persisted = loaded[0].preprocess[0]
+    assert persisted["callable_path"] == "fake_preprocessors.py"
+    assert persisted["callable_name"] == "add_suffix"
+    assert persisted["kwargs"] == {"note": "ok"}
 
 
 def test_compile_fails_without_sql(tmp_path: Path) -> None:
@@ -406,7 +494,7 @@ def test_server_returns_rows(tmp_path: Path) -> None:
         "[cache]\n"
         "order_by = [\"greeting\"]\n"
         "+++\n\n"
-        "```sql\nSELECT 'Hello, ' || {{name}} || '!' AS greeting ORDER BY greeting\n```\n"
+        "```sql\nSELECT 'Hello, ' || $name || '!' AS greeting ORDER BY greeting\n```\n"
     )
     src_dir = tmp_path / "routes"
     src_dir.mkdir()

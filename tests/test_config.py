@@ -25,6 +25,12 @@ def _write_config(
             f"[runtime]\nstorage = \"{storage_root.as_posix()}\""
         )
     body = content.strip()
+    if body and "[server]" in body and "plugins_dir" not in body:
+        body = body.replace(
+            "[server]",
+            "[server]\nplugins_dir = \"plugins\"",
+            1,
+        )
     if body:
         pieces.append(body)
     path.write_text("\n\n".join(pieces) + "\n", encoding="utf-8")

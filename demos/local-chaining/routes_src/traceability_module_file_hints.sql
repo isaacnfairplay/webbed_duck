@@ -11,6 +11,6 @@ SELECT
   barcode_root,
   file_hint
 FROM hints
-WHERE barcode_root = SPLIT_PART({{barcode}}, '-', 1)
-   OR {{barcode}} LIKE barcode_root || '%'
+WHERE barcode_root = SPLIT_PART($barcode, '-', 1)
+   OR $barcode LIKE barcode_root || '%'
 ORDER BY file_hint;

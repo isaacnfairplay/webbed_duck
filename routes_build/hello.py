@@ -54,9 +54,9 @@ ROUTE = {'allowed_formats': [],
                  '  CURRENT_TIMESTAMP AS created_at;',
  'preprocess': [],
  'raw_sql': 'SELECT\n'
-            "  'Hello, ' || {{name}} || '!' AS greeting,\n"
+            "  'Hello, ' || $name || '!' AS greeting,\n"
             "  'Personalized greeting rendered by DuckDB' AS note,\n"
-            "  LENGTH('Hello, ' || {{name}} || '!')::INT AS greeting_length,\n"
+            "  LENGTH('Hello, ' || $name || '!')::INT AS greeting_length,\n"
             '  CURRENT_TIMESTAMP AS created_at;',
  'returns': 'relation',
  'title': 'Hello world',
