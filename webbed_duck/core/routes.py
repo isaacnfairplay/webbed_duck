@@ -38,6 +38,9 @@ class ParameterSpec:
     default: Any | None = None
     description: str | None = None
     extra: Mapping[str, Any] = field(default_factory=dict)
+    template_only: bool = False
+    template: Mapping[str, Any] | None = None
+    guard: Mapping[str, Any] | None = None
 
     def convert(self, raw: str) -> Any:
         if self.type is ParameterType.STRING:
@@ -155,6 +158,16 @@ def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
         if not isinstance(item, Mapping):
             continue
         extra = item.get("extra") if isinstance(item.get("extra"), Mapping) else {}
+        template_block = item.get("template")
+        if isinstance(template_block, Mapping):
+            template_block = dict(template_block)
+        else:
+            template_block = None
+        guard_block = item.get("guard")
+        if isinstance(guard_block, Mapping):
+            guard_block = dict(guard_block)
+        else:
+            guard_block = None
         params.append(
             ParameterSpec(
                 name=str(item.get("name")),
@@ -163,6 +176,9 @@ def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
                 default=item.get("default"),
                 description=item.get("description"),
                 extra=dict(extra),
+                template_only=bool(item.get("template_only", False)),
+                template=template_block,
+                guard=guard_block,
             )
         )
     metadata = route.get("metadata")
