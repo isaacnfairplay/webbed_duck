@@ -187,29 +187,29 @@ def test_build_cache_normalizes_order_by(values):
 
 
 @pytest.mark.parametrize(
-    "sql, params, expected_order, expected_sql",
+    "sql, params, expected_order, expected_template",
     [
         (
             "SELECT * FROM items WHERE id = {{id}}",
-            [ParameterSpec(name="id", type=ParameterType.INTEGER)],
-            ["id"],
-            "SELECT * FROM items WHERE id = ?",
+            [ParameterSpec(name="id", type=ParameterType.INTEGER, template_only=True)],
+            [],
+            "SELECT * FROM items WHERE id = __wd_slot_0__",
         ),
         (
-            "SELECT $name FROM dual WHERE id = {{id}}",
+            "SELECT $name FROM dual WHERE id = $id",
             [
                 ParameterSpec(name="id", type=ParameterType.INTEGER),
                 ParameterSpec(name="name"),
             ],
             ["name", "id"],
-            "SELECT ? FROM dual WHERE id = ?",
+            "SELECT $name FROM dual WHERE id = $id",
         ),
     ],
 )
-def test_prepare_sql_translates_placeholders(sql, params, expected_order, expected_sql):
-    order, prepared = _prepare_sql(sql, params)
+def test_prepare_sql_builds_program(sql, params, expected_order, expected_template):
+    program, order, _ = _prepare_sql(sql, params, {}, source_path=Path("test.sql"))
     assert order == expected_order
-    assert prepared == expected_sql
+    assert program.template_sql == expected_template
 
 
 @pytest.mark.parametrize(
@@ -221,7 +221,7 @@ def test_prepare_sql_translates_placeholders(sql, params, expected_order, expect
 )
 def test_prepare_sql_raises_for_unknown_params(sql, params):
     with pytest.raises(RouteCompilationError):
-        _prepare_sql(sql, params)
+        _prepare_sql(sql, params, {}, source_path=Path("test.sql"))
 
 
 @st.composite
@@ -237,6 +237,6 @@ def sql_placeholder_strategy(draw):
 @given(sql_placeholder_strategy())
 def test_prepare_sql_tracks_placeholder_order(case):
     sql, params, names = case
-    order, prepared = _prepare_sql(sql, params)
+    program, order, _ = _prepare_sql(sql, params, {}, source_path=Path("test.sql"))
     assert order == names
-    assert prepared.count("?") == len(names)
+    assert program.template_sql.count("$") == len(names)

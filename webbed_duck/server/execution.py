@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Callable, Mapping, MutableMapping, Sequence
 
 try:  # pragma: no cover - optional dependency for type checking
@@ -13,6 +14,11 @@ import duckdb
 import pyarrow as pa
 
 from ..config import Config
+from ..core.interpolation import (
+    InterpolationError,
+    InterpolationProgram,
+    render_interpolated_sql,
+)
 from ..core.routes import ParameterSpec, RouteDefinition, RouteUse
 from ..plugins.loader import PluginLoader
 from .cache import (
@@ -28,11 +34,15 @@ class RouteExecutionError(RuntimeError):
     """Raised when a route or dependency cannot be executed."""
 
 
+_DB_PARAM_PATTERN = re.compile(r"\$(?P<name>[A-Za-z_][A-Za-z0-9_]*)")
+
+
 @dataclass(slots=True)
 class _PreparedRoute:
     params: Mapping[str, object]
     ordered: Sequence[object]
     bindings: Mapping[str, object]
+    sql: str
 
 
 class RouteExecutor:
@@ -49,6 +59,7 @@ class RouteExecutor:
         self._routes = dict(routes_by_id)
         self._cache_store = cache_store
         self._cache_config = config.cache
+        self._interpolation_config = config.interpolation
         self._stack: list[str] = []
         self._plugin_loader = plugin_loader
 
@@ -91,6 +102,7 @@ class RouteExecutor:
                 route,
                 prepared.params,
                 prepared.bindings,
+                sql=prepared.sql,
                 offset=offset,
                 limit=limit,
                 store=self._cache_store,
@@ -114,9 +126,16 @@ class RouteExecutor:
     ) -> _PreparedRoute:
         if preprocessed:
             processed = dict(params)
-            ordered_params = list(ordered) if ordered is not None else self._ordered_from_processed(route, processed)
-            bindings = self._build_bindings(route, processed)
-            return _PreparedRoute(params=processed, ordered=ordered_params, bindings=bindings)
+            ordered_params = (
+                list(ordered)
+                if ordered is not None
+                else self._ordered_from_processed(route, processed)
+            )
+            sql = self._render_sql(route, processed)
+            bindings = self._build_bindings(route, processed, sql)
+            return _PreparedRoute(
+                params=processed, ordered=ordered_params, bindings=bindings, sql=sql
+            )
 
         coerced = self._coerce_params(route, params)
         processed = run_preprocessors(
@@ -127,8 +146,32 @@ class RouteExecutor:
             loader=self._plugin_loader,
         )
         ordered_params = self._ordered_from_processed(route, processed)
-        bindings = self._build_bindings(route, processed)
-        return _PreparedRoute(params=processed, ordered=ordered_params, bindings=bindings)
+        sql = self._render_sql(route, processed)
+        bindings = self._build_bindings(route, processed, sql)
+        return _PreparedRoute(
+            params=processed, ordered=ordered_params, bindings=bindings, sql=sql
+        )
+
+    def _render_sql(
+        self, route: RouteDefinition, params: Mapping[str, object]
+    ) -> str:
+        program = route.interpolation
+        if program is None:
+            program = InterpolationProgram(
+                segments=(route.prepared_sql,),
+                slots=(),
+                template_sql=route.prepared_sql,
+            )
+        try:
+            return render_interpolated_sql(
+                program,
+                params,
+                param_specs=route.params,
+                config=self._interpolation_config,
+                route_id=route.id,
+            )
+        except InterpolationError as exc:
+            raise RouteExecutionError(str(exc)) from exc
 
     def _coerce_params(
         self, route: RouteDefinition, provided: Mapping[str, object]
@@ -187,11 +230,17 @@ class RouteExecutor:
         return ordered
 
     def _build_bindings(
-        self, route: RouteDefinition, processed: Mapping[str, object]
+        self, route: RouteDefinition, processed: Mapping[str, object], sql: str
     ) -> Mapping[str, object]:
+        present = {
+            match.group("name")
+            for match in _DB_PARAM_PATTERN.finditer(sql)
+        }
         bindings: dict[str, object] = {}
         seen: set[str] = set()
         for name in route.param_order:
+            if name not in present:
+                continue
             if name in seen:
                 continue
             seen.add(name)
@@ -212,7 +261,8 @@ class RouteExecutor:
                 bindings[name] = None
 
         for name, value in route.constant_params.items():
-            bindings[name] = value
+            if name in present:
+                bindings[name] = value
 
         return bindings
 
@@ -260,7 +310,7 @@ class RouteExecutor:
         con = duckdb.connect()
         try:
             self._register_dependencies(con, route, prepared.params, request=request)
-            cursor = con.execute(route.prepared_sql, prepared.bindings)
+            cursor = con.execute(prepared.sql, prepared.bindings)
             return con, cursor
         except Exception:
             con.close()
@@ -375,6 +425,7 @@ class RouteExecutor:
                 target,
                 prepared.params,
                 prepared.bindings,
+                sql=prepared.sql,
                 store=self._cache_store,
                 config=self._cache_config,
                 reader_factory=self._make_reader_factory(target, prepared, request=request),

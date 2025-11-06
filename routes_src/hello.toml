@@ -9,6 +9,7 @@ methods = ["GET"]
 type = "str"
 required = false
 default = "world"
+template_only = true
 description = "Name to greet"
 ui_control = "input"
 ui_label = "Name"
