@@ -8,7 +8,10 @@ import sys
 import textwrap
 from datetime import timedelta
 from pathlib import Path
-from typing import Callable, Iterator
+from typing import TYPE_CHECKING, Callable, Iterator
+
+if TYPE_CHECKING:
+    from starlette.testclient import TestClient
 
 import pytest
 

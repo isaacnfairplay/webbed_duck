@@ -5,7 +5,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Iterable, Mapping, MutableMapping, Sequence, cast
+from typing import Any, Mapping, MutableMapping, Sequence, cast
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import duckdb

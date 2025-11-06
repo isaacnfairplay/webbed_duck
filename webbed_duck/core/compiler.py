@@ -10,17 +10,7 @@ import shlex
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import (
-    Any,
-    Callable,
-    Dict,
-    Iterable,
-    List,
-    Mapping,
-    MutableMapping,
-    Sequence,
-    Tuple,
-)
+from typing import Any, Callable, Dict, Iterable, List, Mapping, MutableMapping, Sequence
 
 try:  # pragma: no cover - module import guard
     import keyring
