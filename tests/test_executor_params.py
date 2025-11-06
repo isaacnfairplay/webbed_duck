@@ -303,11 +303,11 @@ def test_constant_binding_handles_quotes(tmp_path: Path) -> None:
     _write_pair(
         source,
         "quoted",
-        """id = "quoted"
+"""id = "quoted"
 path = "/quoted"
 cache_mode = "passthrough"
 
-[constants]
+[const]
 dangerous = "O'Brian"
 """.strip(),
         "SELECT {{const.dangerous}} AS value",

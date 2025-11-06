@@ -9,7 +9,7 @@
   hot-reload invalidates plugin caches instead of re-importing modules.
 
 - Allow routes to interpolate `{{const.NAME}}` tokens with values sourced from
-  TOML `[constants]`, server-level constants, or keyring-backed `[secrets]`
+  TOML `[const]`, server-level constants, or keyring-backed `[secrets]`
   entries. Constants now bind as DuckDB named parameters (with identifier
   constants validated and inlined via `type = "identifier"`), compilation still
   fails on conflicting names, and secrets resolve via `keyring.get_password`

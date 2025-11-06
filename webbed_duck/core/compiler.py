@@ -48,16 +48,18 @@ TEMPLATE_PATTERN = re.compile(r"\{\{\s*(?P<body>[^{}]+?)\s*\}\}")
 BINDING_PATTERN = re.compile(r"\$(?P<name>[A-Za-z_][A-Za-z0-9_]*)")
 _FILTER_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 DIRECTIVE_PATTERN = re.compile(r"<!--\s*@(?P<name>[a-zA-Z0-9_.:-]+)(?P<body>.*?)-->", re.DOTALL)
-CONSTANT_PATTERN = re.compile(
-    r"\{\{\s*(?:"
-    r"const(?:ant)?|"
-    r"constants|"
-    r"server\.constants|"
-    r"server\.secrets|"
-    r"route\.constants|"
-    r"route\.secrets|"
+_CONSTANT_PREFIX_PATTERN = (
+    r"(?:"
+    r"const(?:ant)?s?|"  # const / constant / constants / consts
+    r"(?:server|route)\.(?:const(?:ant)?s?|secrets)|"  # server.const / route.const / *.secrets
     r"secrets"
-    r")\.(?P<constant>[a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}",
+    r")"
+)
+
+CONSTANT_PATTERN = re.compile(
+    r"\{\{\s*"
+    + _CONSTANT_PREFIX_PATTERN
+    + r"\.(?P<constant>[a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}",
     re.IGNORECASE,
 )
 
@@ -67,7 +69,7 @@ _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
 _KNOWN_FRONTMATTER_KEYS = {
     "append",
     "assets",
-    "cache", 
+    "cache",
     "charts",
     "cache-mode",
     "cache_mode",
@@ -94,6 +96,7 @@ _KNOWN_FRONTMATTER_KEYS = {
     "allowed_formats",
     "allowed-formats",
     "uses",
+    "const",
     "constants",
     "secrets",
 }
@@ -406,20 +409,27 @@ def _resolve_constants(
 
     if server_constants:
         for name, value in server_constants.items():
-            register_value(name, f"server.constants.{name}", value)
+            register_value(name, f"config.const.{name}", value)
 
     if server_secrets:
         for name, spec in server_secrets.items():
-            register_secret(name, f"server.secrets.{name}", spec)
+            register_secret(name, f"config.secrets.{name}", spec)
+
+    def _register_constant_block(block: Mapping[str, object], label: str) -> None:
+        if not isinstance(block, Mapping):
+            raise RouteCompilationError(
+                f"[{label}] must be a table of assignments in {source_path}"
+            )
+        for name, value in block.items():
+            register_value(name, f"{label}.{name}", value)
+
+    route_const = metadata_raw.get("const")
+    if route_const is not None:
+        _register_constant_block(route_const, "const")
 
     route_constants = metadata_raw.get("constants")
     if route_constants is not None:
-        if not isinstance(route_constants, Mapping):
-            raise RouteCompilationError(
-                f"[constants] must be a table of assignments in {source_path}"
-            )
-        for name, value in route_constants.items():
-            register_value(name, f"constants.{name}", value)
+        _register_constant_block(route_constants, "constants")
 
     route_secrets = metadata_raw.get("secrets")
     if route_secrets is not None:
@@ -677,6 +687,9 @@ def _prepare_sql(
             raise RouteCompilationError(
                 f"Empty template expression {placeholder!r} in {source_path}"
             )
+        if CONSTANT_PATTERN.fullmatch(placeholder):
+            # Constants and secrets are handled separately before template rendering
+            return placeholder
         parts = [segment.strip() for segment in body.split("|") if segment.strip()]
         if not parts:
             raise RouteCompilationError(

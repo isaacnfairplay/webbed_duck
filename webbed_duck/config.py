@@ -261,6 +261,59 @@ def _load_toml(path: Path) -> Mapping[str, Any]:
         return tomllib.load(fh)
 
 
+def _parse_config_constant_table(
+    raw: Mapping[str, Any] | object,
+    *,
+    context: str,
+    error_type: type[Exception] = ConfigError,
+) -> dict[str, object]:
+    if not isinstance(raw, Mapping):
+        raise error_type(f"{context} must be a table of constant assignments")
+    normalized: dict[str, object] = {}
+    for key, value in raw.items():
+        name = str(key)
+        if name in normalized:
+            raise error_type(
+                f"Constant '{name}' defined multiple times in {context}"
+            )
+        if isinstance(value, Mapping):
+            normalized[name] = {
+                str(inner_key): inner_value for inner_key, inner_value in value.items()
+            }
+        else:
+            normalized[name] = value
+    return normalized
+
+
+def _parse_config_secret_table(
+    raw: Mapping[str, Any] | object,
+    *,
+    context: str,
+    error_type: type[Exception] = ConfigError,
+) -> dict[str, Mapping[str, str]]:
+    if not isinstance(raw, Mapping):
+        raise error_type(f"{context} must be a table of secret references")
+    secrets: dict[str, Mapping[str, str]] = {}
+    for name, spec in raw.items():
+        if not isinstance(spec, Mapping):
+            raise error_type(
+                f"{context}.{name} must be a table with 'service' and 'username'"
+            )
+        service = spec.get("service")
+        username = spec.get("username")
+        if service is None or username is None:
+            raise error_type(
+                f"{context}.{name} must define both 'service' and 'username'"
+            )
+        key = str(name)
+        if key in secrets:
+            raise error_type(
+                f"Secret '{key}' defined multiple times in {context}"
+            )
+        secrets[key] = {"service": str(service), "username": str(username)}
+    return secrets
+
+
 def load_config(path: str | Path | None = None) -> Config:
     """Load configuration from ``path`` if provided, otherwise defaults.
 
@@ -326,6 +379,31 @@ def load_config(path: str | Path | None = None) -> Config:
         cfg._install_server(cfg.server)
 
     cfg.server.storage_root = storage_path
+
+    root_constants = data.get("const")
+    if root_constants is not None:
+        parsed_constants = _parse_config_constant_table(root_constants, context="[const]")
+        merged_constants = dict(cfg.server.constants)
+        for name, value in parsed_constants.items():
+            if name in merged_constants:
+                raise ConfigError(
+                    f"Constant '{name}' defined multiple times across configuration"
+                )
+            merged_constants[name] = value
+        cfg.server.constants = merged_constants
+
+    root_secrets = data.get("secrets")
+    if root_secrets is not None:
+        parsed_secrets = _parse_config_secret_table(root_secrets, context="[secrets]")
+        merged_secrets = dict(cfg.server.secrets)
+        for name, spec in parsed_secrets.items():
+            if name in merged_secrets:
+                raise ConfigError(
+                    f"Secret '{name}' defined multiple times across configuration"
+                )
+            merged_secrets[name] = spec
+        cfg.server.secrets = merged_secrets
+
     ui_data = data.get("ui")
     if isinstance(ui_data, Mapping):
         cfg.ui = _parse_ui(ui_data, base=cfg.ui)
@@ -393,34 +471,62 @@ def _parse_server(
         if interval <= 0:
             raise ValueError("server.watch_interval must be greater than zero")
         overrides["watch_interval"] = interval
+    constant_sections: list[tuple[str, dict[str, object]]] = []
     if "constants" in data:
-        raw_constants = data["constants"]
-        if not isinstance(raw_constants, Mapping):
-            raise ValueError("server.constants must be a table of constant assignments")
-        constants: dict[str, object] = {}
-        for key, value in raw_constants.items():
-            name = str(key)
-            if isinstance(value, Mapping):
-                constants[name] = {str(inner_key): inner_value for inner_key, inner_value in value.items()}
-            else:
-                constants[name] = value
-        overrides["constants"] = constants
+        constant_sections.append(
+            (
+                "[server.constants]",
+                _parse_config_constant_table(
+                    data["constants"],
+                    context="[server.constants]",
+                    error_type=ValueError,
+                ),
+            )
+        )
+    if "const" in data:
+        constant_sections.append(
+            (
+                "[server.const]",
+                _parse_config_constant_table(
+                    data["const"],
+                    context="[server.const]",
+                    error_type=ValueError,
+                ),
+            )
+        )
+    if constant_sections:
+        merged_constants = dict(base.constants)
+        for _, constants in constant_sections:
+            for name, value in constants.items():
+                if name in merged_constants:
+                    raise ValueError(
+                        f"Constant '{name}' defined multiple times across server constant blocks"
+                    )
+                merged_constants[name] = value
+        overrides["constants"] = merged_constants
+
+    secret_sections: list[tuple[str, dict[str, Mapping[str, str]]]] = []
     if "secrets" in data:
-        raw_secrets = data["secrets"]
-        if not isinstance(raw_secrets, Mapping):
-            raise ValueError("server.secrets must be a table of secret references")
-        secrets: dict[str, Mapping[str, str]] = {}
-        for name, spec in raw_secrets.items():
-            if not isinstance(spec, Mapping):
-                raise ValueError(f"server.secrets.{name} must be a table with service and username")
-            service = spec.get("service")
-            username = spec.get("username")
-            if service is None or username is None:
-                raise ValueError(
-                    f"server.secrets.{name} must define both 'service' and 'username'"
-                )
-            secrets[str(name)] = {"service": str(service), "username": str(username)}
-        overrides["secrets"] = secrets
+        secret_sections.append(
+            (
+                "[server.secrets]",
+                _parse_config_secret_table(
+                    data["secrets"],
+                    context="[server.secrets]",
+                    error_type=ValueError,
+                ),
+            )
+        )
+    if secret_sections:
+        merged_secrets = dict(base.secrets)
+        for _, secrets in secret_sections:
+            for name, spec in secrets.items():
+                if name in merged_secrets:
+                    raise ValueError(
+                        f"Secret '{name}' defined multiple times across server secret blocks"
+                    )
+                merged_secrets[name] = spec
+        overrides["secrets"] = merged_secrets
     if not overrides:
         return base
     return replace(base, **overrides)

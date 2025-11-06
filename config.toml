@@ -10,5 +10,5 @@ auto_compile = true
 watch = false
 plugins_dir = "plugins"
 
-[server.constants]
+[const]
 data_root = "./data"
