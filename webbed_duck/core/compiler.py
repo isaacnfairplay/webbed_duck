@@ -49,9 +49,18 @@ BINDING_PATTERN = re.compile(r"\$(?P<name>[A-Za-z_][A-Za-z0-9_]*)")
 _FILTER_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 DIRECTIVE_PATTERN = re.compile(r"<!--\s*@(?P<name>[a-zA-Z0-9_.:-]+)(?P<body>.*?)-->", re.DOTALL)
 CONSTANT_PATTERN = re.compile(
-    r"\{\{\s*const(?:ant)?\.(?P<constant>[a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}",
+    r"\{\{\s*(?:"
+    r"const(?:ant)?|"
+    r"constants|"
+    r"server\.constants|"
+    r"server\.secrets|"
+    r"route\.constants|"
+    r"route\.secrets|"
+    r"secrets"
+    r")\.(?P<constant>[a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}",
     re.IGNORECASE,
 )
+
 
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
 

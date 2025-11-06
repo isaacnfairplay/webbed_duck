@@ -296,6 +296,50 @@ def test_compile_route_typed_constants(tmp_path: Path) -> None:
         "const_limit": decimal.Decimal("12.34"),
     }
 
+
+def test_compile_route_constant_prefix_aliases(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"constant_aliases\"\n"
+        "path = \"/constant_aliases\"\n"
+        "[constants]\n"
+        "local_value = \"route\"\n"
+        "+++\n\n"
+        "```sql\n"
+        "SELECT"
+        " {{constants.local_value}} AS route_const,"
+        " {{server.constants.shared}} AS server_const,"
+        " {{secrets.server_token}} AS secret_const\n"
+        "```\n"
+    )
+    route_path = write_route(tmp_path, route_text)
+    class DummyKeyring:
+        @staticmethod
+        def get_password(service: str, username: str) -> str | None:
+            if (service, username) == ("ops", "svc"):
+                return "svc-secret"
+            return None
+
+    original_keyring = getattr(compiler, "keyring", None)
+    compiler.keyring = DummyKeyring()
+    try:
+        definition = compile_route_file(
+            route_path,
+            server_constants={"shared": "server"},
+            server_secrets={"server_token": {"service": "ops", "username": "svc"}},
+        )
+    finally:
+        compiler.keyring = original_keyring
+    assert definition.prepared_sql == (
+        "SELECT $const_local_value AS route_const, $const_shared AS server_const, "
+        "$const_server_token AS secret_const"
+    )
+    assert definition.constant_params == {
+        "const_local_value": "route",
+        "const_shared": "server",
+        "const_server_token": "svc-secret",
+    }
+
 def test_compile_route_detects_constant_conflicts(tmp_path: Path) -> None:
     route_text = (
         "+++\n"

@@ -272,7 +272,8 @@ frontmatter. If two sources define the same constant name, compilation fails so 
 value constants are bound as named parameters (`$const_reporting_password` in the example above), while identifiers marked with
 `type = "identifier"` are validated against a conservative `[A-Za-z0-9_.]` pattern before being inlined. Secrets are resolved
 through the system keyring via `keyring.get_password`; missing credentials raise a compiler error to keep failures obvious during
-development.
+development. For readability, the compiler also accepts aliases such as `{{constants.NAME}}`, `{{server.constants.NAME}}`, or
+`{{secrets.NAME}}` in addition to the canonical `{{const.NAME}}` form.
 
 ### Binding DuckDB file paths safely
 
