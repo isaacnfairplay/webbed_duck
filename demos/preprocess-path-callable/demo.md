@@ -28,9 +28,9 @@ def derive_tag(
 
 ```toml
 [[preprocess]]
-callable_path = "demos/preprocess-path-callable/plugins/custom_stamp.py"
+callable_path = "preprocess-path-callable/plugins/custom_stamp.py"
 callable_name = "derive_tag"
-prefix = "local"
+kwargs = { prefix = "local" }
 ```
 
 ## Runtime check
@@ -38,6 +38,7 @@ prefix = "local"
 ```
 $ python - <<'PY'
 from webbed_duck.core.routes import RouteDefinition
+from webbed_duck.plugins.loader import PluginLoader
 from webbed_duck.server.preprocess import run_preprocessors
 
 route = RouteDefinition(
@@ -53,13 +54,20 @@ route = RouteDefinition(
 
 steps = [
     {
-        "callable_path": "demos/preprocess-path-callable/plugins/custom_stamp.py",
+        "callable_path": "preprocess-path-callable/plugins/custom_stamp.py",
         "callable_name": "derive_tag",
-        "prefix": "local",
+        "kwargs": {"prefix": "local"},
     }
 ]
 
-result = run_preprocessors(steps, {"name": "Ada"}, route=route, request=None)
+loader = PluginLoader("demos")
+result = run_preprocessors(
+    steps,
+    {"name": "Ada"},
+    route=route,
+    request=None,
+    loader=loader,
+)
 print(result)
 PY
 {'name': 'Ada', 'tag': 'local-Ada'}

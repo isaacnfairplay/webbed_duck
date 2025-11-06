@@ -18,6 +18,10 @@ _WINDOWS_ABSOLUTE_PATH = re.compile(r"^(?P<drive>[A-Za-z]):[\\/](?P<rest>.*)$")
 _WSL_MOUNT_ROOT: Path = Path("/mnt")
 
 
+def _default_plugins_dir() -> Path:
+    return Path(os.environ.get("WEBBED_DUCK_PLUGINS_DIR", "plugins"))
+
+
 class ConfigError(Exception):
     pass
 
@@ -32,6 +36,7 @@ class ServerConfig:
     """HTTP server configuration."""
 
     storage_root: Path = Path("storage")
+    plugins_dir: Path = field(default_factory=_default_plugins_dir)
     host: str = "127.0.0.1"
     port: int = 8000
     source_dir: Path | None = Path("routes_src")
@@ -44,6 +49,9 @@ class ServerConfig:
     _on_storage_root_change: Callable[[Path], None] | None = field(
         default=None, repr=False, compare=False
     )
+    _on_plugins_dir_change: Callable[[Path], None] | None = field(
+        default=None, repr=False, compare=False
+    )
 
     def __setattr__(self, name: str, value: Any) -> None:  # pragma: no cover - simple
         if name == "storage_root":
@@ -51,6 +59,16 @@ class ServerConfig:
             object.__setattr__(self, name, path)
             try:
                 callback = object.__getattribute__(self, "_on_storage_root_change")
+            except AttributeError:
+                callback = None
+            if callback is not None:
+                callback(path)
+            return
+        if name == "plugins_dir":
+            path = Path(value)
+            object.__setattr__(self, name, path)
+            try:
+                callback = object.__getattribute__(self, "_on_plugins_dir_change")
             except AttributeError:
                 callback = None
             if callback is not None:
@@ -146,6 +164,8 @@ class Config:
 
     def _install_server(self, server: ServerConfig) -> None:
         object.__setattr__(server, "_on_storage_root_change", self._sync_runtime_storage)
+        object.__setattr__(server, "_on_plugins_dir_change", self._sync_plugins_dir)
+        self._sync_plugins_dir(server.plugins_dir, server=server)
         self._sync_runtime_storage(server.storage_root, server=server)
 
     def _sync_runtime_storage(
@@ -155,6 +175,24 @@ class Config:
         target = server if server is not None else self.server
         object.__setattr__(target, "storage_root", resolved)
         object.__setattr__(self, "runtime", RuntimeConfig(storage=resolved))
+
+    def _sync_plugins_dir(
+        self, plugins_dir: Path, *, server: ServerConfig | None = None
+    ) -> None:
+        resolved = Path(plugins_dir).expanduser()
+        if not resolved.is_absolute():
+            resolved = (Path.cwd() / resolved).resolve(strict=False)
+        resolved.mkdir(parents=True, exist_ok=True)
+        if not resolved.is_dir():
+            raise ConfigError(f"server.plugins_dir must be a directory: {resolved}")
+        forbidden = next(resolved.rglob("__init__.py"), None)
+        if forbidden is not None:
+            rel = forbidden.relative_to(resolved)
+            raise ConfigError(
+                f"server.plugins_dir must not contain '__init__.py' (remove {rel})"
+            )
+        target = server if server is not None else self.server
+        object.__setattr__(target, "plugins_dir", resolved)
 
 
 def _is_wsl() -> bool:
@@ -311,6 +349,13 @@ def _parse_server(
     relative_to: Path | None = None,
 ) -> ServerConfig:
     overrides: MutableMapping[str, Any] = {}
+    if "plugins_dir" not in data:
+        raise ValueError("server.plugins_dir must be specified in configuration files")
+    plugins_value = data["plugins_dir"]
+    plugins_text = str(plugins_value)
+    if "\\" in plugins_text:
+        raise ValueError("server.plugins_dir must use forward slashes (/) only")
+    overrides["plugins_dir"] = _as_path(plugins_value, relative_to=relative_to)
     if "host" in data:
         overrides["host"] = str(data["host"])
     if "port" in data:

@@ -10,6 +10,7 @@ import re
 import sqlite3
 import sys
 import tempfile
+import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable
@@ -35,6 +36,7 @@ from webbed_duck.plugins import charts as charts_plugins
 from webbed_duck.server.app import create_app
 from webbed_duck.server.auth import resolve_auth_adapter
 from webbed_duck.server.email import load_email_sender
+from webbed_duck.plugins.loader import PluginLoader
 from webbed_duck.server.execution import RouteExecutor
 from webbed_duck.server.ui import layout as ui_layout_module
 from webbed_duck.static.chartjs import CHARTJS_FILENAME, CHARTJS_VERSION
@@ -349,12 +351,6 @@ class ReadmeContext:
     missing_secret_error: str | None
 
 
-def _inject_file_list_preprocessor(params, *, context, files):
-    updated = dict(params)
-    updated["files"] = list(files)
-    return updated
-
-
 def _install_email_adapter(records: list[tuple]) -> str:
     import types
     import sys
@@ -423,6 +419,40 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
     storage_root = tmp_path / "storage"
     src_dir.mkdir()
 
+    raw_plugins_dir = os.environ.get("WEBBED_DUCK_PLUGINS_DIR")
+    if raw_plugins_dir is None:
+        plugins_dir = tmp_path / "plugins"
+        plugins_dir.mkdir(parents=True, exist_ok=True)
+        os.environ["WEBBED_DUCK_PLUGINS_DIR"] = plugins_dir.as_posix()
+    else:
+        plugins_dir = Path(raw_plugins_dir)
+        plugins_dir.mkdir(parents=True, exist_ok=True)
+
+    plugin_loader = PluginLoader(plugins_dir)
+
+    readme_plugin = plugins_dir / "readme_preprocessors.py"
+    readme_plugin.write_text(
+        textwrap.dedent(
+            """
+            from __future__ import annotations
+
+            from typing import Mapping
+
+            from webbed_duck.server.preprocess import PreprocessContext
+
+
+            def inject_file_list(
+                params: Mapping[str, object], *, context: PreprocessContext, files: list[str]
+            ) -> Mapping[str, object]:
+                updated = dict(params)
+                updated["files"] = list(files)
+                return updated
+            """
+        ).strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
     write_sidecar_route(src_dir, "hello", ROUTE_PRIMARY)
     write_sidecar_route(src_dir, "by_date", ROUTE_INCREMENTAL)
     write_sidecar_route(src_dir, "cached_page", ROUTE_PAGED)
@@ -455,12 +485,14 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
         compile_routes(
             src_dir,
             build_dir,
+            plugins_dir=plugins_dir,
             server_constants=server_constants,
             server_secrets=server_secrets,
         )
         compile_routes(
             src_dir,
             rebuild_dir,
+            plugins_dir=plugins_dir,
             server_constants=server_constants,
             server_secrets=server_secrets,
         )
@@ -760,13 +792,19 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
                 metadata={},
                 preprocess=(
                     {
-                    "callable": "tests.test_readme_claims:_inject_file_list_preprocessor",
-                    "files": [str(sample_path)],
-                },
-            ),
+                        "callable_path": "readme_preprocessors.py",
+                        "callable_name": "inject_file_list",
+                        "kwargs": {"files": [str(sample_path)]},
+                    },
+                ),
             cache_mode="passthrough",
         )
-        executor = RouteExecutor({preprocessed_route.id: preprocessed_route}, cache_store=None, config=config)
+        executor = RouteExecutor(
+            {preprocessed_route.id: preprocessed_route},
+            cache_store=None,
+            config=config,
+            plugin_loader=PluginLoader(config.server.plugins_dir),
+        )
         result = executor.execute_relation(
             preprocessed_route,
             params={},
@@ -867,6 +905,7 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
         compile_route_text(
             """+++\nid = \"conflict\"\npath = \"/conflict\"\n[constants]\nshared = \"route\"\n+++\n\n```sql\nSELECT {{const.shared}}\n```\n""",
             source_path=src_dir / "conflict.toml",
+            plugin_loader=plugin_loader,
             server_constants={"shared": "server"},
         )
     except RouteCompilationError as exc:
@@ -885,6 +924,7 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
         compile_route_text(
             """+++\nid = \"missing_secret\"\npath = \"/missing-secret\"\n[secrets.secret]\nservice = \"app\"\nusername = \"robot\"\n+++\n\n```sql\nSELECT {{const.secret}}\n```\n""",
             source_path=src_dir / "missing_secret.toml",
+            plugin_loader=plugin_loader,
         )
     except RouteCompilationError as exc:
         missing_secret_error = str(exc)
@@ -1184,9 +1224,10 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
             s,
         )),
         (lambda s: s.startswith("- File watching relies on timestamp"), lambda s: _ensure(
-            hasattr(cli_module, "SourceFingerprint")
-            and hasattr(cli_module, "build_source_fingerprint")
-            and hasattr(cli_module.SourceFingerprint, "has_changed"),
+            hasattr(cli_module, "WatchSnapshot")
+            and hasattr(cli_module, "build_watch_snapshot")
+            and hasattr(cli_module.WatchSnapshot, "routes_changed")
+            and hasattr(cli_module.WatchSnapshot, "plugin_changes"),
             s,
         )),
         (lambda s: s.startswith("- The `webbed-duck perf` helper expects"), lambda s: _ensure(

@@ -244,7 +244,7 @@ def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
         version=str(route.get("version")) if route.get("version") is not None else None,
         default_format=str(route.get("default_format")) if route.get("default_format") is not None else None,
         allowed_formats=[str(item) for item in route.get("allowed_formats", [])],
-        preprocess=[dict(item) if isinstance(item, Mapping) else {"callable": str(item)} for item in route.get("preprocess", [])],
+        preprocess=[dict(item) for item in route.get("preprocess", []) if isinstance(item, Mapping)],
         postprocess=postprocess,
         charts=[dict(item) for item in route.get("charts", []) if isinstance(item, Mapping)],
         assets=assets,

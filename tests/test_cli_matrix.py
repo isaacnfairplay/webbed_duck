@@ -79,7 +79,7 @@ def test_perfstats_format_report(route_id: str, stats: cli.PerfStats) -> None:
         assert fragment in report
 
 
-FINGERPRINT_CASES = [
+WATCH_SNAPSHOT_CASES = [
     ({"a.sql": (1.0, 100)}, {"a.sql": (1.0, 100)}, False),
     ({"a.sql": (1.0, 100)}, {"a.sql": (2.0, 100)}, True),
     ({"a.sql": (1.0, 100)}, {"a.sql": (1.0, 200)}, True),
@@ -91,13 +91,22 @@ FINGERPRINT_CASES = [
 
 @pytest.mark.parametrize(
     ("left", "right", "expected"),
-    FINGERPRINT_CASES,
-    ids=[f"fingerprint-{index}" for index, _ in enumerate(FINGERPRINT_CASES, start=1)],
+    WATCH_SNAPSHOT_CASES,
+    ids=[f"watch-snapshot-{index}" for index, _ in enumerate(WATCH_SNAPSHOT_CASES, start=1)],
 )
-def test_source_fingerprint_has_changed(left: Mapping[str, tuple[float, int]], right: Mapping[str, tuple[float, int]], expected: bool) -> None:
-    """Confirm file fingerprints detect any metadata drift."""
+def test_watch_snapshot_routes_changed(
+    left: Mapping[str, tuple[float, int]],
+    right: Mapping[str, tuple[float, int]],
+    expected: bool,
+) -> None:
+    """Confirm watch snapshots detect any metadata drift across route files."""
 
-    assert cli.SourceFingerprint(left).has_changed(cli.SourceFingerprint(right)) is expected
+    assert (
+        cli.WatchSnapshot(routes=left, plugins={}).routes_changed(
+            cli.WatchSnapshot(routes=right, plugins={})
+        )
+        is expected
+    )
 
 
 PARAM_ASSIGNMENT_CASES = [

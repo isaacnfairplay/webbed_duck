@@ -9,6 +9,7 @@ import pytest
 
 from webbed_duck.config import Config
 from webbed_duck.core.routes import ParameterSpec, ParameterType, RouteDefinition, RouteUse
+from webbed_duck.plugins.loader import PluginLoader
 from webbed_duck.server.cache import CacheStore
 from webbed_duck.server.execution import RouteExecutionError, RouteExecutor
 
@@ -65,7 +66,13 @@ def _make_executor(routes: Mapping[str, RouteDefinition], storage_root) -> Route
     config = Config()
     config.server.storage_root = storage_root
     store = CacheStore(storage_root)
-    return RouteExecutor(routes, cache_store=store, config=config)
+    loader = PluginLoader(config.server.plugins_dir)
+    return RouteExecutor(
+        routes,
+        cache_store=store,
+        config=config,
+        plugin_loader=loader,
+    )
 
 
 @pytest.mark.duckdb

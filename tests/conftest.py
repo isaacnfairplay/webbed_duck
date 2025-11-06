@@ -52,6 +52,20 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 
+@pytest.fixture
+def plugins_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    root = tmp_path / "plugins"
+    root.mkdir()
+    monkeypatch.setenv("WEBBED_DUCK_PLUGINS_DIR", root.as_posix())
+    return root
+
+
+@pytest.fixture(autouse=True)
+def _auto_plugins_dir(plugins_dir: Path) -> None:
+    # Ensures every test has an isolated plugins directory configured via env var.
+    return None
+
+
 def pytest_addoption(parser: pytest.Parser) -> None:
     """Register custom command line options for the test suite."""
 

@@ -34,6 +34,7 @@ from .routes import (
     RouteDirective,
     RouteUse,
 )
+from ..plugins.loader import PluginLoader
 from ..server.preprocess import (
     PreprocessConfigurationError,
     load_preprocess_callable,
@@ -98,6 +99,14 @@ except ModuleNotFoundError:  # pragma: no cover - fallback for older interpreter
     import tomli as tomllib  # type: ignore
 
 
+def _ensure_plugin_loader(
+    loader: PluginLoader | None, plugins_dir: str | Path | None
+) -> PluginLoader:
+    if loader is not None:
+        return loader
+    return PluginLoader(plugins_dir)
+
+
 @dataclass(slots=True)
 class _RouteSections:
     route_id: str
@@ -127,6 +136,7 @@ def compile_routes(
     source_dir: str | Path,
     build_dir: str | Path,
     *,
+    plugins_dir: str | Path | None = None,
     server_constants: Mapping[str, object] | None = None,
     server_secrets: Mapping[str, Mapping[str, str]] | None = None,
 ) -> List[RouteDefinition]:
@@ -138,12 +148,15 @@ def compile_routes(
         raise FileNotFoundError(f"Route source directory not found: {src}")
     dest.mkdir(parents=True, exist_ok=True)
 
+    loader = PluginLoader(plugins_dir)
+
     compiled: List[RouteDefinition] = []
     for source in _iter_route_sources(src):
         text = _compose_route_text(source)
         definition = compile_route_text(
             text,
             source_path=source.toml_path,
+            plugin_loader=loader,
             server_constants=server_constants,
             server_secrets=server_secrets,
         )
@@ -155,6 +168,8 @@ def compile_routes(
 def compile_route_file(
     path: str | Path,
     *,
+    plugins_dir: str | Path | None = None,
+    plugin_loader: PluginLoader | None = None,
     server_constants: Mapping[str, object] | None = None,
     server_secrets: Mapping[str, Mapping[str, str]] | None = None,
 ) -> RouteDefinition:
@@ -183,6 +198,7 @@ def compile_route_file(
     return compile_route_text(
         text,
         source_path=toml_path,
+        plugin_loader=_ensure_plugin_loader(plugin_loader, plugins_dir),
         server_constants=server_constants,
         server_secrets=server_secrets,
     )
@@ -192,10 +208,14 @@ def compile_route_text(
     text: str,
     *,
     source_path: Path,
+    plugins_dir: str | Path | None = None,
+    plugin_loader: PluginLoader | None = None,
     server_constants: Mapping[str, object] | None = None,
     server_secrets: Mapping[str, Mapping[str, str]] | None = None,
 ) -> RouteDefinition:
     """Compile ``text`` into a :class:`RouteDefinition`."""
+
+    loader = _ensure_plugin_loader(plugin_loader, plugins_dir)
 
     frontmatter, body = _split_frontmatter(text)
     metadata_raw = dict(_parse_frontmatter(frontmatter))
@@ -206,7 +226,12 @@ def compile_route_text(
     _warn_unexpected_frontmatter(metadata_raw, source_path)
     directives = _extract_directives(body)
     metadata = _extract_metadata(metadata_raw)
-    sections = _interpret_sections(metadata_raw, directives, metadata)
+    sections = _interpret_sections(
+        metadata_raw,
+        directives,
+        metadata,
+        plugin_loader=loader,
+    )
 
     sql = _extract_sql(body)
     requested_constants = {
@@ -686,6 +711,8 @@ def _interpret_sections(
     metadata_raw: Mapping[str, Any],
     directives: Sequence[RouteDirective],
     metadata: MutableMapping[str, Any],
+    *,
+    plugin_loader: PluginLoader,
 ) -> _RouteSections:
     meta_section: dict[str, Any] = {}
     base_meta = metadata_raw.get("meta")
@@ -717,7 +744,7 @@ def _interpret_sections(
     for payload in _collect_directive_payloads(directives, "params"):
         _merge_param_payload(params_map, payload)
 
-    preprocess = _build_preprocess(metadata, directives)
+    preprocess = _build_preprocess(metadata, directives, loader=plugin_loader)
     postprocess = _build_postprocess(metadata, directives)
     charts = _build_charts(metadata, directives)
     assets = _build_assets(metadata, directives)
@@ -826,67 +853,56 @@ def _merge_param_payload(target: MutableMapping[str, dict[str, object]], payload
 
 
 def _build_preprocess(
-    metadata: Mapping[str, Any], directives: Sequence[RouteDirective]
+    metadata: Mapping[str, Any],
+    directives: Sequence[RouteDirective],
+    *,
+    loader: PluginLoader,
 ) -> list[Mapping[str, object]]:
     steps: list[Mapping[str, object]] = []
     base = metadata.get("preprocess")
-    steps.extend(_normalize_preprocess_entries(base))
+    steps.extend(_normalize_preprocess_entries(base, loader=loader))
     for payload in _collect_directive_payloads(directives, "preprocess"):
-        steps.extend(_normalize_preprocess_entries(payload))
+        steps.extend(_normalize_preprocess_entries(payload, loader=loader))
     return steps
 
 
-def _normalize_preprocess_entries(data: object) -> list[Mapping[str, object]]:
+def _normalize_preprocess_entries(
+    data: object, *, loader: PluginLoader
+) -> list[Mapping[str, object]]:
     entries: list[Mapping[str, object]] = []
 
+    if data is None:
+        return entries
+
     if isinstance(data, Mapping):
-        if any(
-            key in data
-            for key in ("callable", "callable_module", "callable_path", "callable_name", "path", "name")
-        ):
-            entries.append(_normalize_preprocess_mapping(dict(data)))
-        else:
-            for name, options in data.items():
-                entry: dict[str, object] = {"callable": str(name)}
-                if isinstance(options, Mapping):
-                    entry.update(options)
-                entries.append(_normalize_preprocess_mapping(entry))
-    elif isinstance(data, Sequence) and not isinstance(data, (str, bytes)):
+        entries.append(_normalize_preprocess_mapping(dict(data), loader=loader))
+        return entries
+
+    if isinstance(data, Sequence) and not isinstance(data, (str, bytes)):
         for item in data:
-            if isinstance(item, Mapping):
-                entries.append(_normalize_preprocess_mapping(dict(item)))
-            else:
-                entries.append(_normalize_preprocess_mapping({"callable": str(item)}))
-    elif isinstance(data, str):
-        entries.append(_normalize_preprocess_mapping({"callable": data}))
-    return entries
+            entries.extend(_normalize_preprocess_entries(item, loader=loader))
+        return entries
+
+    raise RouteCompilationError(
+        "Preprocess entries must be tables with 'callable_path' and 'callable_name'."
+    )
 
 
-def _normalize_preprocess_mapping(payload: Mapping[str, object]) -> Mapping[str, object]:
-    normalized: dict[str, object] = dict(payload)
-
-    if "callable" in normalized:
-        normalized["callable"] = str(normalized["callable"])
-    if "callable_module" in normalized:
-        normalized["callable_module"] = str(normalized["callable_module"])
-    if "callable_path" in normalized:
-        normalized["callable_path"] = str(normalized["callable_path"])
-    if "callable_name" in normalized:
-        normalized["callable_name"] = str(normalized["callable_name"])
-
-    if "callable" not in normalized:
-        if "name" in normalized and "callable_name" not in normalized:
-            normalized["callable"] = str(normalized.pop("name"))
-        elif "path" in normalized and "callable_path" not in normalized:
-            normalized["callable"] = str(normalized.pop("path"))
+def _normalize_preprocess_mapping(
+    payload: Mapping[str, object], *, loader: PluginLoader
+) -> Mapping[str, object]:
+    normalized: dict[str, object] = {str(k): v for k, v in payload.items()}
 
     try:
         reference = resolve_callable_reference(normalized)
     except PreprocessConfigurationError as exc:
         raise RouteCompilationError(str(exc)) from exc
 
+    if "kwargs" in normalized and not isinstance(normalized["kwargs"], Mapping):
+        raise RouteCompilationError("'kwargs' must be a table of arguments")
+
     try:
-        load_preprocess_callable(reference)
+        load_preprocess_callable(reference, loader)
     except ModuleNotFoundError as exc:
         raise RouteCompilationError(
             f"Preprocess {reference.describe()} could not be imported: {exc}"
@@ -894,17 +910,24 @@ def _normalize_preprocess_mapping(payload: Mapping[str, object]) -> Mapping[str,
     except PreprocessConfigurationError as exc:
         raise RouteCompilationError(str(exc)) from exc
 
-    normalized["callable_name"] = reference.attribute
-    if reference.source == "module":
-        normalized["callable_module"] = reference.display
-        normalized.pop("callable_path", None)
-    else:
-        normalized["callable_path"] = reference.display
-        normalized.pop("callable_module", None)
+    options: dict[str, object] = {}
+    raw_kwargs = normalized.pop("kwargs", None)
+    if isinstance(raw_kwargs, Mapping):
+        options.update({str(k): v for k, v in raw_kwargs.items()})
+    elif raw_kwargs is not None:
+        raise RouteCompilationError("'kwargs' must be a table of arguments")
 
-    normalized["callable"] = f"{reference.display}:{reference.attribute}"
-    normalized.pop("path", None)
-    normalized.pop("name", None)
+    for key in list(normalized.keys()):
+        if key in {"callable_path", "callable_name"}:
+            continue
+        options[key] = normalized.pop(key)
+
+    normalized["callable_path"] = reference.path
+    normalized["callable_name"] = reference.name
+    if options:
+        normalized["kwargs"] = options
+    else:
+        normalized.pop("kwargs", None)
     return normalized
 
 
