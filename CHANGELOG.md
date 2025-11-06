@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Restored support for referencing server- and route-defined constants using
+  legacy `{{server.constants.NAME}}` / `{{constants.NAME}}` syntax so existing
+  routes compile without renaming placeholders. The compiler now normalizes all
+  constant templates before parameter binding and documents the aliases in the
+  README.
+
 - Locked preprocess plugins to a configured `server.plugins_dir` so every
   `[[preprocess]]` block references a single `.py` file via
   `callable_path`/`callable_name` and optional `kwargs`. The compiler now loads

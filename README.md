@@ -268,7 +268,8 @@ WHERE password = {{const.reporting_password}}
 ```
 
 Server-wide values can live in `config.toml` under `[server.constants]` or `[server.secrets]` and are merged with the route
-frontmatter. If two sources define the same constant name, compilation fails so collisions never reach runtime. Secrets and other
+frontmatter. If two sources define the same constant name, compilation fails so collisions never reach runtime. Reference them with
+`{{const.NAME}}`, `{{constants.NAME}}`, or the explicit server aliases `{{server.constants.NAME}}` / `{{server.secrets.NAME}}`. Secrets and other
 value constants are bound as named parameters (`$const_reporting_password` in the example above), while identifiers marked with
 `type = "identifier"` are validated against a conservative `[A-Za-z0-9_.]` pattern before being inlined. Secrets are resolved
 through the system keyring via `keyring.get_password`; missing credentials raise a compiler error to keep failures obvious during
