@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Normalised preprocess configuration so routes declare `callable_module` or
+  `callable_path` alongside `callable_name`; the compiler now resolves the
+  callable during `webbed-duck compile` and raises a descriptive
+  `RouteCompilationError` if the module, file, or attribute is missing. Added
+  module- and filesystem-based demos plus example plugins under
+  `webbed_duck/demos` to document the new workflow.
+
 - Allow routes to interpolate `{{const.NAME}}` tokens with values sourced from
   TOML `[constants]`, server-level constants, or keyring-backed `[secrets]`
   entries. Constants now bind as DuckDB named parameters (with identifier

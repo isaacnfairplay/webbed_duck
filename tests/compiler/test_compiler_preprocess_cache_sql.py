@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -22,25 +23,61 @@ from webbed_duck.core.compiler import (
 from webbed_duck.core.routes import ParameterSpec, ParameterType
 
 
+_FAKE_PREPROCESSOR_PATH = str(Path(__file__).resolve().parents[1] / "fake_preprocessors.py")
+
+
 @pytest.mark.parametrize(
     "input_data, expected",
     [
         (
-            {"loader": {"callable": "pkg.fn", "arg": 1}},
-            [{"callable": "pkg.fn", "arg": 1}],
+            {
+                "loader": {
+                    "callable_module": "tests.fake_preprocessors",
+                    "callable_name": "add_prefix",
+                    "arg": 1,
+                }
+            },
+            [
+                {
+                    "callable": "tests.fake_preprocessors:add_prefix",
+                    "callable_module": "tests.fake_preprocessors",
+                    "callable_name": "add_prefix",
+                    "arg": 1,
+                }
+            ],
         ),
         (
-            {"pkg.fn": {"arg": 1}},
-            [{"callable": "pkg.fn", "arg": 1}],
+            {"tests.fake_preprocessors.add_suffix": {"suffix": "!"}},
+            [
+                {
+                    "callable": "tests.fake_preprocessors:add_suffix",
+                    "callable_module": "tests.fake_preprocessors",
+                    "callable_name": "add_suffix",
+                    "suffix": "!",
+                }
+            ],
         ),
         (
             [
-                {"name": "pkg.fn"},
-                {"path": "pkg.alt", "param": "value"},
+                {"name": "tests.fake_preprocessors:return_none"},
+                {
+                    "callable_path": _FAKE_PREPROCESSOR_PATH,
+                    "callable_name": "add_prefix",
+                    "param": "value",
+                },
             ],
             [
-                {"callable": "pkg.fn"},
-                {"callable": "pkg.alt", "param": "value"},
+                {
+                    "callable": "tests.fake_preprocessors:return_none",
+                    "callable_module": "tests.fake_preprocessors",
+                    "callable_name": "return_none",
+                },
+                {
+                    "callable": f"{_FAKE_PREPROCESSOR_PATH}:add_prefix",
+                    "callable_path": _FAKE_PREPROCESSOR_PATH,
+                    "callable_name": "add_prefix",
+                    "param": "value",
+                },
             ],
         ),
     ],
@@ -63,8 +100,20 @@ def test_normalize_preprocess_entries_rejects_missing_callable(bad_input):
 
 @st.composite
 def preprocess_strategy(draw) -> Any:
-    callable_name = draw(st.text(min_size=1, max_size=6))
-    entry = {"callable": callable_name}
+    variant = draw(st.sampled_from(["module", "path", "legacy"]))
+    function_name = draw(st.sampled_from(["add_prefix", "add_suffix", "return_none"]))
+    if variant == "module":
+        entry = {
+            "callable_module": "tests.fake_preprocessors",
+            "callable_name": function_name,
+        }
+    elif variant == "path":
+        entry = {
+            "callable_path": _FAKE_PREPROCESSOR_PATH,
+            "callable_name": function_name,
+        }
+    else:
+        entry = {"callable": f"tests.fake_preprocessors:{function_name}"}
     extra = draw(
         st.dictionaries(
             keys=st.text(min_size=1, max_size=5),
@@ -72,6 +121,8 @@ def preprocess_strategy(draw) -> Any:
             max_size=3,
         )
     )
+    for reserved in ("callable", "callable_module", "callable_name", "callable_path"):
+        extra.pop(reserved, None)
     entry.update(extra)
     if draw(st.booleans()):
         return entry
@@ -83,7 +134,13 @@ def test_normalize_preprocess_entries_property(chunks):
     flattened: list[dict[str, object]] = []
     for chunk in chunks:
         flattened.extend(_normalize_preprocess_entries(chunk))
-    assert all("callable" in entry and isinstance(entry["callable"], str) for entry in flattened)
+    assert all(
+        "callable" in entry and isinstance(entry["callable"], str) for entry in flattened
+    )
+    assert all("callable_name" in entry for entry in flattened)
+    assert all(
+        ("callable_module" in entry) ^ ("callable_path" in entry) for entry in flattened
+    )
 
 
 @pytest.mark.parametrize(
