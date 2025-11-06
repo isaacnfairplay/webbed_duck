@@ -376,7 +376,26 @@ Common keys inside `<stem>.toml` include:
 - `returns`: Default return style for internal callers (`relation`, `parquet`, or `error_frame`).
 - `[[uses]]`: Declarative route dependencies with optional `[uses.args]` tables that map or override parameters when invoking the upstream route.
 - Presentation metadata (`[html_t]`, `[html_c]`, `[feed]`, `[overrides]`, `[append]`, `[charts]`, `[assets]`) configuring built-in renderers and workflows.
-- `[[preprocess]]` entries that call into trusted Python helpers before SQL execution.
+- `[[preprocess]]` entries that call into trusted Python helpers before SQL execution. Each step declares a `callable_name` and
+  either `callable_module` (dotted import path) or `callable_path` (filesystem path to a Python module or package). The
+  compiler resolves and imports these references at build time, normalizing paths and surfacing descriptive errors if the
+  callable cannot be loaded.
+
+  ```toml
+  [[preprocess]]
+  callable_module = "inventory.plugins.dates"
+  callable_name = "shift_to_plant_tz"
+  target = "plant_day"
+
+  [[preprocess]]
+  callable_path = "./web/plugins/formatters.py"
+  callable_name = "format_mm_dd_yy"
+  source = "plant_day"
+  target = "plant_day_display"
+  ```
+
+  When using filesystem paths, provide either a Python file or a package directory with an `__init__.py`; relative paths are
+  resolved from the current working directory during compilation and stored as absolute paths in the compiled route metadata.
 - Unexpected keys trigger compile-time warnings so you can catch typos early.
 
 > Legacy HTML comment directives (e.g., `<!-- @postprocess ... -->`) still parse for backwards compatibility, but new routes should express the same metadata directly in TOML. Mixing the styles makes diffs harder to audit and can hide typos that TOML validation would otherwise catch.

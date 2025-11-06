@@ -26,6 +26,30 @@ class PreprocessContext:
     options: Mapping[str, Any]
 
 
+@dataclass(frozen=True, slots=True)
+class CallableSpec:
+    """Normalized reference to a preprocess callable."""
+
+    name: str
+    module: str | None
+    path: str | None
+    module_alias_consumed: bool = False
+    path_alias_consumed: bool = False
+
+    @property
+    def cache_key(self) -> str:
+        module_part = self.module or ""
+        path_part = self.path or ""
+        return f"module:{module_part}|path:{path_part}|name:{self.name}"
+
+    def describe(self) -> str:
+        if self.path:
+            return f"{self.path}:{self.name}"
+        if self.module:
+            return f"{self.module}:{self.name}"
+        return self.name
+
+
 _CACHE: dict[str, Callable[..., Mapping[str, Any] | None]] = {}
 
 
@@ -40,21 +64,31 @@ def run_preprocessors(
 
     current: dict[str, Any] = dict(params)
     for step in steps:
-        callable_path = str(step.get("callable") or "").strip()
-        if not callable_path:
-            raise RuntimeError("Preprocess step is missing a callable reference")
+        spec = extract_callable_spec(step)
         options_obj = step.get("options") if isinstance(step.get("options"), Mapping) else None
-        options = {k: v for k, v in step.items() if k not in {"callable", "options", "name", "path"}}
+        excluded_keys = {
+            "callable",
+            "callable_module",
+            "callable_name",
+            "callable_path",
+            "name",
+            "options",
+        }
+        if spec.module_alias_consumed:
+            excluded_keys.add("module")
+        if spec.path_alias_consumed:
+            excluded_keys.add("path")
+        options = {k: v for k, v in step.items() if k not in excluded_keys}
         if options_obj:
             options.update(dict(options_obj))
-        func = _load_callable(callable_path)
+        func = _load_callable(spec)
         context = PreprocessContext(route=route, request=request, options=options)
         updated = _invoke(func, current, context, options)
         if updated is None:
             continue
         if not isinstance(updated, Mapping):
             raise TypeError(
-                f"Preprocessor '{callable_path}' must return a mapping or None, received {type(updated)!r}"
+                f"Preprocessor '{spec.describe()}' must return a mapping or None, received {type(updated)!r}"
             )
         current = dict(updated)
     return current
@@ -79,11 +113,12 @@ def _invoke(
                 raise final_error from first_error
 
 
-def _load_callable(path: str) -> Callable[..., Mapping[str, Any] | None]:
-    if path in _CACHE:
-        return _CACHE[path]
-    module_name, attr = _split_target(path)
-    module = _import_callable_module(module_name)
+def _load_callable(spec: CallableSpec) -> Callable[..., Mapping[str, Any] | None]:
+    cache_key = spec.cache_key
+    if cache_key in _CACHE:
+        return _CACHE[cache_key]
+    module = _import_callable_module(spec)
+    attr = spec.name
     try:
         target = getattr(module, attr)
     except AttributeError as error:
@@ -91,43 +126,21 @@ def _load_callable(path: str) -> Callable[..., Mapping[str, Any] | None]:
         if target is None:
             raise error
     if not callable(target):
-        raise TypeError(f"Preprocessor '{path}' is not callable")
-    _CACHE[path] = target
+        raise TypeError(f"Preprocessor '{spec.describe()}' is not callable")
+    _CACHE[cache_key] = target
     return target
 
 
-def _split_target(path: str) -> tuple[str, str]:
-    module_name, sep, attr = path.rpartition(":")
-    if sep:
-        attr = attr.strip()
-        if not attr:
-            raise RuntimeError(f"Preprocessor '{path}' is missing a callable attribute")
-        return module_name, attr
-    if "." in path:
-        module_name, attr = path.rsplit(".", 1)
-        if not attr:
-            raise RuntimeError(f"Preprocessor '{path}' is missing a callable attribute")
-        return module_name, attr
-    raise RuntimeError(
-        "Preprocess callable references must include a module and attribute separated by ':' or '.'"
-    )
-
-
-def _import_callable_module(module_reference: str) -> ModuleType:
-    module_path = Path(module_reference)
-    if (
-        module_path.suffix == ".py"
-        or module_path.is_absolute()
-        or any(sep in module_reference for sep in ("/", "\\"))
-    ):
-        return _load_module_from_path(module_reference)
-    return import_module(module_reference)
+def _import_callable_module(spec: CallableSpec) -> ModuleType:
+    if spec.path:
+        return _load_module_from_path(spec.path)
+    if spec.module:
+        return import_module(spec.module)
+    raise RuntimeError("Preprocess callable is missing a module or path reference")
 
 
 def _load_module_from_path(module_reference: str) -> ModuleType:
-    file_path = Path(module_reference).expanduser()
-    if not file_path.is_absolute():
-        file_path = (Path.cwd() / file_path).resolve()
+    file_path = Path(module_reference)
     if not file_path.exists():
         raise ModuleNotFoundError(f"Preprocessor module '{module_reference}' was not found")
 
@@ -198,4 +211,126 @@ def _load_attribute_from_package(
     return None
 
 
-__all__ = ["PreprocessContext", "run_preprocessors"]
+def extract_callable_spec(step: Mapping[str, Any]) -> CallableSpec:
+    """Normalize ``step`` into a :class:`CallableSpec`.
+
+    Accepts both the new ``callable_*`` fields and legacy ``callable``/``name``/``path``
+    spellings. Raises :class:`RuntimeError` for malformed entries.
+    """
+
+    if not isinstance(step, Mapping):
+        raise RuntimeError("Preprocess step configuration must be a mapping")
+
+    raw_name = _string_or_none(step.get("callable_name"))
+    raw_module = _string_or_none(step.get("callable_module"))
+    raw_path = _string_or_none(step.get("callable_path"))
+
+    module_alias = _string_or_none(step.get("module"))
+    path_alias = _string_or_none(step.get("path"))
+
+    legacy_name = _string_or_none(step.get("name"))
+    legacy_callable = _string_or_none(step.get("callable"))
+
+    module_alias_consumed = False
+    path_alias_consumed = False
+
+    if path_alias:
+        if _looks_like_filesystem_reference(path_alias):
+            if not raw_path:
+                raw_path = path_alias
+                path_alias_consumed = True
+        else:
+            legacy_callable = legacy_callable or path_alias
+    if legacy_name and not raw_name and not legacy_callable:
+        legacy_callable = legacy_callable or legacy_name
+
+    if legacy_callable:
+        module_ref, attr = _split_legacy_reference(legacy_callable)
+        raw_name = raw_name or attr
+        if not raw_module and not raw_path:
+            if _looks_like_filesystem_reference(module_ref):
+                raw_path = module_ref
+            else:
+                raw_module = module_ref
+    elif not raw_module and not raw_path and module_alias:
+        raw_module = module_alias
+        module_alias_consumed = True
+
+    if not raw_name:
+        raise RuntimeError("Preprocess step is missing 'callable_name'")
+
+    if raw_module and raw_path:
+        raise RuntimeError(
+            "Preprocess step must specify only one of 'callable_module' or 'callable_path'"
+        )
+
+    if not raw_module and not raw_path:
+        raise RuntimeError(
+            "Preprocess step must provide either 'callable_module' or 'callable_path'"
+        )
+
+    normalized_path: str | None = None
+    if raw_path:
+        path_value = Path(raw_path).expanduser()
+        if not path_value.is_absolute():
+            path_value = (Path.cwd() / path_value).resolve()
+        normalized_path = str(path_value)
+
+    return CallableSpec(
+        name=raw_name,
+        module=raw_module,
+        path=normalized_path,
+        module_alias_consumed=module_alias_consumed,
+        path_alias_consumed=path_alias_consumed,
+    )
+
+
+def validate_preprocess_step(step: Mapping[str, Any] | CallableSpec) -> CallableSpec:
+    """Ensure that ``step`` references a loadable callable."""
+
+    if isinstance(step, CallableSpec):
+        spec = step
+    else:
+        spec = extract_callable_spec(step)
+    _load_callable(spec)
+    return spec
+
+
+def _string_or_none(value: object) -> str | None:
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    return None
+
+
+def _split_legacy_reference(value: str) -> tuple[str, str]:
+    module_name, sep, attr = value.rpartition(":")
+    if sep:
+        if not attr.strip():
+            raise RuntimeError(
+                f"Preprocess reference '{value}' is missing a callable attribute"
+            )
+        return module_name, attr.strip()
+    if "." in value:
+        module_name, attr = value.rsplit(".", 1)
+        if not attr.strip():
+            raise RuntimeError(
+                f"Preprocess reference '{value}' is missing a callable attribute"
+            )
+        return module_name, attr.strip()
+    raise RuntimeError(
+        "Legacy preprocess references must include ':' or '.' to separate module and attribute"
+    )
+
+
+def _looks_like_filesystem_reference(value: str) -> bool:
+    return value.endswith(".py") or any(sep in value for sep in ("/", "\\"))
+
+
+__all__ = [
+    "CallableSpec",
+    "PreprocessContext",
+    "extract_callable_spec",
+    "run_preprocessors",
+    "validate_preprocess_step",
+]

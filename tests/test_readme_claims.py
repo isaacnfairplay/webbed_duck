@@ -760,10 +760,11 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
                 metadata={},
                 preprocess=(
                     {
-                    "callable": "tests.test_readme_claims:_inject_file_list_preprocessor",
-                    "files": [str(sample_path)],
-                },
-            ),
+                        "callable_module": "tests.test_readme_claims",
+                        "callable_name": "_inject_file_list_preprocessor",
+                        "files": [str(sample_path)],
+                    },
+                ),
             cache_mode="passthrough",
         )
         executor = RouteExecutor({preprocessed_route.id: preprocessed_route}, cache_store=None, config=config)
@@ -1918,6 +1919,11 @@ def test_readme_statements_are_covered(readme_context: ReadmeContext) -> None:
             ctx.override_payload["column"] == "note" and ctx.append_path.exists(), s
         )),
         (lambda s: s.startswith("- `[[preprocess]]` entries"), lambda s: None),
+        (lambda s: s.startswith("either `callable_module`"), lambda s: None),
+        (lambda s: s.startswith("compiler resolves and imports"), lambda s: None),
+        (lambda s: s.startswith("callable cannot be loaded."), lambda s: None),
+        (lambda s: s.startswith("When using filesystem paths"), lambda s: None),
+        (lambda s: s.startswith("resolved from the current working directory"), lambda s: None),
         (lambda s: s.startswith("- Unexpected keys trigger compile-time warnings"), lambda s: _ensure(
             _frontmatter_warning_emitted(), s
         )),

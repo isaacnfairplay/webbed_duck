@@ -1,0 +1,25 @@
+id = "preprocess_module_demo"
+path = "/demos/preprocess/module"
+title = "Module-based preprocess demo"
+description = "Shows how to call a packaged preprocessor during compilation and execution."
+default_format = "json"
+allowed_formats = ["json", "csv"]
+
+[params]
+[params.input]
+type = "str"
+required = false
+default = "mallard"
+description = "User-provided value"
+
+[params.processed]
+type = "str"
+required = false
+description = "Value enriched by the module-based preprocessor"
+
+[[preprocess]]
+callable_module = "webbed_duck.demos.preprocess_plugins"
+callable_name = "append_suffix"
+source = "input"
+target = "processed"
+suffix = "-module"
