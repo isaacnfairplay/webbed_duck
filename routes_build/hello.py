@@ -9,6 +9,32 @@ ROUTE = {'allowed_formats': [],
  'description': 'Return a greeting using DuckDB',
  'directives': [],
  'id': 'hello_world',
+ 'interpolation': {'segments': ["SELECT\n  'Hello, ' || ",
+                                " || '!' AS greeting,\n"
+                                "  'Personalized greeting rendered by DuckDB' AS "
+                                'note,\n'
+                                "  LENGTH('Hello, ' || ",
+                                " || '!')::INT AS greeting_length,\n"
+                                '  CURRENT_TIMESTAMP AS created_at;'],
+                   'slots': [{'column': 16,
+                              'expr': 'name',
+                              'filters': [],
+                              'line': 2,
+                              'name': 'name',
+                              'requires_path_guard': False},
+                             {'column': 23,
+                              'expr': 'name',
+                              'filters': [],
+                              'line': 4,
+                              'name': 'name',
+                              'requires_path_guard': False}],
+                   'template_sql': 'SELECT\n'
+                                   "  'Hello, ' || __wd_slot_0__ || '!' AS greeting,\n"
+                                   "  'Personalized greeting rendered by DuckDB' AS "
+                                   'note,\n'
+                                   "  LENGTH('Hello, ' || __wd_slot_1__ || '!')::INT "
+                                   'AS greeting_length,\n'
+                                   '  CURRENT_TIMESTAMP AS created_at;'},
  'metadata': {'append': {'columns': ['greeting', 'note', 'created_at'],
                          'destination': 'hello_appends.csv'},
               'cache': {'invariant_filters': [{'column': 'greeting_length',
@@ -29,7 +55,7 @@ ROUTE = {'allowed_formats': [],
               'html_t': {'show_params': ['name', 'greeting_length']},
               'overrides': {'allowed': ['note'], 'key_columns': ['greeting']}},
  'methods': ['GET'],
- 'param_order': ['name', 'name'],
+ 'param_order': [],
  'params': [{'default': 'world',
              'description': 'Name to greet',
              'extra': {'ui_control': 'input',
@@ -38,6 +64,7 @@ ROUTE = {'allowed_formats': [],
                        'ui_placeholder': 'Your teammate'},
              'name': 'name',
              'required': False,
+             'template_only': True,
              'type': 'str'}],
  'path': '/hello',
  'postprocess': {'feed': {'summary_col': 'note',
@@ -48,9 +75,10 @@ ROUTE = {'allowed_formats': [],
                             'title_col': 'greeting'},
                  'html_t': {'show_params': ['name', 'greeting_length']}},
  'prepared_sql': 'SELECT\n'
-                 "  'Hello, ' || $name || '!' AS greeting,\n"
+                 "  'Hello, ' || __wd_slot_0__ || '!' AS greeting,\n"
                  "  'Personalized greeting rendered by DuckDB' AS note,\n"
-                 "  LENGTH('Hello, ' || $name || '!')::INT AS greeting_length,\n"
+                 "  LENGTH('Hello, ' || __wd_slot_1__ || '!')::INT AS "
+                 'greeting_length,\n'
                  '  CURRENT_TIMESTAMP AS created_at;',
  'preprocess': [],
  'raw_sql': 'SELECT\n'

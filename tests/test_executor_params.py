@@ -61,6 +61,185 @@ def _write_pair(base: Path, stem: str, toml: str, sql: str) -> None:
     (base / f"{stem}.sql").write_text(sql, encoding="utf-8")
 
 
+def test_executor_interpolates_template_only_params(tmp_path: Path) -> None:
+    source = tmp_path / "src"
+    build = tmp_path / "build"
+    source.mkdir()
+
+    _write_pair(
+        source,
+        "templated_exec",
+        """
+id = "templated_exec"
+path = "/templated_exec"
+cache_mode = "passthrough"
+
+[params.schema]
+type = "str"
+template_only = true
+[params.schema.template]
+policy = "literal"
+
+[params.id]
+type = "int"
+required = true
+""".strip(),
+        """
+SELECT
+    {{schema}} AS schema_name,
+    $id AS value
+""".strip(),
+    )
+
+    compile_routes(source, build)
+    route = next(item for item in load_compiled_routes(build) if item.id == "templated_exec")
+
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+
+    executor = RouteExecutor(
+        {route.id: route},
+        cache_store=None,
+        config=config,
+        plugin_loader=PluginLoader(config.server.plugins_dir),
+    )
+
+    params = {"schema": "foo", "id": "5"}
+    prepared = executor._prepare(route, params, ordered=None, preprocessed=False)
+    expected_sql = "SELECT\n    'foo' AS schema_name,\n    $id AS value"
+    assert prepared.sql.strip() == expected_sql
+    assert "schema" not in prepared.bindings
+
+    result = executor.execute_relation(route, params, offset=0, limit=None)
+    table = result.table
+    assert table.to_pydict()["schema_name"] == ["foo"]
+    assert table.to_pydict()["value"] == [5]
+
+
+def test_executor_ignores_unreferenced_params(tmp_path: Path) -> None:
+    source = tmp_path / "src"
+    build = tmp_path / "build"
+    source.mkdir()
+
+    _write_pair(
+        source,
+        "unused_param",
+        """
+id = "unused_param"
+path = "/unused_param"
+cache_mode = "passthrough"
+
+[params.used]
+type = "int"
+required = true
+
+[params.unused]
+type = "int"
+required = false
+""".strip(),
+        "SELECT $used AS value",
+    )
+
+    compile_routes(source, build)
+    route = next(item for item in load_compiled_routes(build) if item.id == "unused_param")
+
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+
+    executor = RouteExecutor(
+        {route.id: route},
+        cache_store=None,
+        config=config,
+        plugin_loader=PluginLoader(config.server.plugins_dir),
+    )
+
+    prepared = executor._prepare(route, {"used": 10, "unused": 99}, ordered=None, preprocessed=False)
+    assert prepared.bindings == {"used": 10}
+
+
+def test_executor_rejects_db_params_in_file_functions(tmp_path: Path) -> None:
+    source = tmp_path / "src"
+    build = tmp_path / "build"
+    source.mkdir()
+
+    _write_pair(
+        source,
+        "file_param",
+        """
+id = "file_param"
+path = "/file_param"
+cache_mode = "passthrough"
+
+[params.path]
+type = "str"
+required = true
+""".strip(),
+        "SELECT count(*) FROM read_csv($path)",
+    )
+
+    compile_routes(source, build)
+    route = next(item for item in load_compiled_routes(build) if item.id == "file_param")
+
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+
+    executor = RouteExecutor(
+        {route.id: route},
+        cache_store=None,
+        config=config,
+        plugin_loader=PluginLoader(config.server.plugins_dir),
+    )
+
+    with pytest.raises(RouteExecutionError):
+        executor.execute_relation(route, {"path": "data.csv"}, offset=0, limit=None)
+
+
+def test_executor_allows_templated_file_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "src"
+    build = tmp_path / "build"
+    source.mkdir()
+
+    csv_path = tmp_path / "data.csv"
+    csv_path.write_text("value\n1\n", encoding="utf-8")
+
+    _write_pair(
+        source,
+        "file_template",
+        """
+id = "file_template"
+path = "/file_template"
+cache_mode = "passthrough"
+
+[params.path]
+type = "str"
+template_only = true
+[params.path.guard]
+mode = "path"
+""".strip(),
+        "SELECT count(*) AS total FROM read_csv({{path}})",
+    )
+
+    compile_routes(source, build)
+    route = next(item for item in load_compiled_routes(build) if item.id == "file_template")
+
+    config = load_config(None)
+    config.server.storage_root = tmp_path / "storage"
+
+    executor = RouteExecutor(
+        {route.id: route},
+        cache_store=None,
+        config=config,
+        plugin_loader=PluginLoader(config.server.plugins_dir),
+    )
+
+    monkeypatch.chdir(tmp_path)
+    params = {"path": "data.csv"}
+    result = executor.execute_relation(route, params, offset=0, limit=None)
+    table = result.table
+    assert table.to_pydict()["total"] == [1]
+
 def test_executor_coerces_parameter_types_and_repeat_params(tmp_path: Path) -> None:
     source = tmp_path / "src"
     build = tmp_path / "build"
@@ -256,6 +435,7 @@ required = true
         *,
         route,
         request,
+        loader,
     ):
         captured["params"] = dict(params)
         return dict(params)
@@ -413,7 +593,7 @@ def test_prepare_respects_values_added_by_preprocessors(
         preprocess=({"callable": "tests.fake_preprocessors:add_suffix", "suffix": ""},),
     )
 
-    def _fake_preprocessors(steps, params, *, route, request):  # type: ignore[override]
+    def _fake_preprocessors(steps, params, *, route, request, loader):  # type: ignore[override]
         assert steps == route.preprocess
         assert params == {"cursor": None, "optional": None}
         updated = dict(params)
@@ -490,7 +670,7 @@ CROSS JOIN multi_source;
     routes = load_compiled_routes(build)
     route = next(item for item in routes if item.id == "duckdb_paths")
 
-    def _inject_file_list(steps, params, *, route, request):  # type: ignore[override]
+    def _inject_file_list(steps, params, *, route, request, loader):  # type: ignore[override]
         assert steps == route.preprocess
         assert params["single_path"] == str(single_path)
         assert params.get("multi_paths") is None

@@ -8,7 +8,16 @@ from pathlib import Path
 from types import ModuleType
 import datetime as _dt
 import decimal
-from typing import Any, List, Mapping, Sequence
+from typing import Any, List, Mapping, Sequence, TYPE_CHECKING
+
+if TYPE_CHECKING:  # pragma: no cover - for type checking only
+    from .interpolation import InterpolationProgram
+
+
+def _deserialize_program(data: Mapping[str, object] | None):
+    from .interpolation import deserialize_program
+
+    return deserialize_program(data)
 
 
 class ParameterType(str, Enum):
@@ -116,6 +125,7 @@ class RouteDefinition:
     constant_params: Mapping[str, object] = field(default_factory=dict)
     constant_types: Mapping[str, str] = field(default_factory=dict)
     constant_param_types: Mapping[str, str] = field(default_factory=dict)
+    interpolation: 'InterpolationProgram | None' = None
 
     def find_param(self, name: str) -> ParameterSpec | None:
         for param in self.params:
@@ -271,6 +281,7 @@ def _route_from_mapping(route: Mapping[str, Any]) -> RouteDefinition:
         constant_params=constant_params,
         constant_types=constant_types,
         constant_param_types=constant_param_types,
+        interpolation=_deserialize_program(route.get("interpolation")),
     )
 
 

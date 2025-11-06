@@ -27,6 +27,11 @@ try:  # pragma: no cover - module import guard
 except ModuleNotFoundError:  # pragma: no cover - handled at runtime when secrets are used
     keyring = None  # type: ignore[assignment]
 
+from .interpolation import (
+    InterpolationProgram,
+    build_interpolation_program,
+    serialize_program,
+)
 from .routes import (
     ParameterSpec,
     ParameterType,
@@ -43,9 +48,6 @@ from ..server.preprocess import (
 
 FRONTMATTER_DELIMITER = "+++"
 SQL_BLOCK_PATTERN = re.compile(r"```sql\s*(?P<sql>.*?)```", re.DOTALL | re.IGNORECASE)
-PLACEHOLDER_PATTERN = re.compile(
-    r"\{\{\s*(?P<brace>[a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}|\$(?P<dollar>[a-zA-Z_][a-zA-Z0-9_]*)"
-)
 DIRECTIVE_PATTERN = re.compile(r"<!--\s*@(?P<name>[a-zA-Z0-9_.:-]+)(?P<body>.*?)-->", re.DOTALL)
 CONSTANT_PATTERN = re.compile(
     r"\{\{\s*const(?:ant)?\.(?P<constant>[a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}",
@@ -53,6 +55,7 @@ CONSTANT_PATTERN = re.compile(
 )
 
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
+_DB_PARAM_PATTERN = re.compile(r"\$(?P<name>[A-Za-z_][A-Za-z0-9_]*)")
 
 _KNOWN_FRONTMATTER_KEYS = {
     "append",
@@ -249,7 +252,7 @@ def compile_route_text(
     )
     sql, constant_param_map = _inject_constant_placeholders(sql, constant_bindings, source_path)
     params = _parse_params(sections.params)
-    param_order, prepared_sql, used_constant_params = _prepare_sql(
+    program, param_order, used_constant_params = _prepare_sql(
         sql,
         params,
         constant_param_map,
@@ -294,7 +297,7 @@ def compile_route_text(
         path=sections.path,
         methods=list(methods),
         raw_sql=sql,
-        prepared_sql=prepared_sql,
+        prepared_sql=program.template_sql,
         param_order=param_order,
         params=params,
         title=metadata_raw.get("title"),
@@ -315,6 +318,7 @@ def compile_route_text(
         constant_params=constant_param_values,
         constant_types=constant_types,
         constant_param_types=constant_param_types,
+        interpolation=program,
     )
 
 
@@ -653,27 +657,38 @@ def _prepare_sql(
     constant_params: Mapping[str, str],
     *,
     source_path: Path,
-) -> tuple[List[str], str, set[str]]:
-    param_names = {p.name for p in params}
-    order: List[str] = []
-    used_constants: set[str] = set()
+) -> tuple[InterpolationProgram, List[str], set[str]]:
+    program = build_interpolation_program(
+        sql,
+        params,
+        source_path=source_path,
+    )
 
-    def replace(match: re.Match[str]) -> str:
-        name = match.group("brace") or match.group("dollar")
-        if name is None:
-            return match.group(0)
+    param_map = {spec.name: spec for spec in params}
+    param_order: list[str] = []
+    used_constants: set[str] = set()
+    seen: set[str] = set()
+
+    for match in _DB_PARAM_PATTERN.finditer(program.template_sql):
+        name = match.group("name")
         if name in constant_params:
             used_constants.add(name)
-            return f"${name}"
-        if name in param_names:
-            order.append(name)
-            return f"${name}"
-        raise RouteCompilationError(
-            f"Placeholder '{name}' used in SQL but not declared or defined in {source_path}"
-        )
+            continue
+        spec = param_map.get(name)
+        if spec is None:
+            raise RouteCompilationError(
+                f"Placeholder '{name}' used in SQL but not declared in {source_path}"
+            )
+        if spec.template_only:
+            raise RouteCompilationError(
+                f"Template-only parameter '{name}' must be used with '{{{{ }}}}' in {source_path}"
+            )
+        if name in seen:
+            continue
+        seen.add(name)
+        param_order.append(name)
 
-    prepared_sql = PLACEHOLDER_PATTERN.sub(replace, sql)
-    return order, prepared_sql, used_constants
+    return program, param_order, used_constants
 
 
 def _extract_metadata(metadata: Mapping[str, object]) -> Mapping[str, object]:
@@ -1193,6 +1208,7 @@ def _write_route_module(definition: RouteDefinition, source_path: Path, src_root
         "constant_params": _serialize_constant_table(
             definition.constant_params, definition.constant_param_types
         ),
+        "interpolation": serialize_program(definition.interpolation),
     }
 
     module_content = (
