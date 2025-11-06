@@ -40,3 +40,5 @@
   bumps, and commit the refreshed history alongside the version files so mainline complexity metrics evolve with each release.
 - Seeded the history with the current baseline (average cyclomatic complexity **B / 5.565**), documenting the outstanding
   high-complexity blocks called out by the grading tool for future refactors.
+- Ensured Matplotlib ships with the UV dev dependency group so the chart renderer is present when `uv run` executes the
+  complexity history script in automation.
