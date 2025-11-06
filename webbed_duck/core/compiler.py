@@ -34,6 +34,11 @@ from .routes import (
     RouteDirective,
     RouteUse,
 )
+from ..server.preprocess import (
+    PreprocessConfigurationError,
+    load_preprocess_callable,
+    resolve_callable_reference,
+)
 
 FRONTMATTER_DELIMITER = "+++"
 SQL_BLOCK_PATTERN = re.compile(r"```sql\s*(?P<sql>.*?)```", re.DOTALL | re.IGNORECASE)
@@ -833,44 +838,74 @@ def _build_preprocess(
 
 def _normalize_preprocess_entries(data: object) -> list[Mapping[str, object]]:
     entries: list[Mapping[str, object]] = []
+
     if isinstance(data, Mapping):
-        if any(key in data for key in ("callable", "path", "name")):
-            normalized = dict(data)
-            if "callable" not in normalized:
-                if "name" in normalized:
-                    normalized["callable"] = str(normalized.pop("name"))
-                elif "path" in normalized:
-                    normalized["callable"] = str(normalized.pop("path"))
-            if "callable" not in normalized:
-                raise RouteCompilationError("Preprocess directives must specify a callable name")
-            normalized["callable"] = str(normalized["callable"])
-            entries.append(normalized)
+        if any(
+            key in data
+            for key in ("callable", "callable_module", "callable_path", "callable_name", "path", "name")
+        ):
+            entries.append(_normalize_preprocess_mapping(dict(data)))
         else:
             for name, options in data.items():
                 entry: dict[str, object] = {"callable": str(name)}
                 if isinstance(options, Mapping):
                     entry.update(options)
-                entries.append(entry)
+                entries.append(_normalize_preprocess_mapping(entry))
     elif isinstance(data, Sequence) and not isinstance(data, (str, bytes)):
         for item in data:
             if isinstance(item, Mapping):
-                normalized = dict(item)
-                if "callable" not in normalized:
-                    if "name" in normalized:
-                        normalized["callable"] = str(normalized.pop("name"))
-                    elif "path" in normalized:
-                        normalized["callable"] = str(normalized.pop("path"))
-                if "callable" not in normalized:
-                    raise RouteCompilationError(
-                        "Preprocess directives must specify a callable name"
-                    )
-                normalized["callable"] = str(normalized["callable"])
-                entries.append(normalized)
+                entries.append(_normalize_preprocess_mapping(dict(item)))
             else:
-                entries.append({"callable": str(item)})
+                entries.append(_normalize_preprocess_mapping({"callable": str(item)}))
     elif isinstance(data, str):
-        entries.append({"callable": data})
+        entries.append(_normalize_preprocess_mapping({"callable": data}))
     return entries
+
+
+def _normalize_preprocess_mapping(payload: Mapping[str, object]) -> Mapping[str, object]:
+    normalized: dict[str, object] = dict(payload)
+
+    if "callable" in normalized:
+        normalized["callable"] = str(normalized["callable"])
+    if "callable_module" in normalized:
+        normalized["callable_module"] = str(normalized["callable_module"])
+    if "callable_path" in normalized:
+        normalized["callable_path"] = str(normalized["callable_path"])
+    if "callable_name" in normalized:
+        normalized["callable_name"] = str(normalized["callable_name"])
+
+    if "callable" not in normalized:
+        if "name" in normalized and "callable_name" not in normalized:
+            normalized["callable"] = str(normalized.pop("name"))
+        elif "path" in normalized and "callable_path" not in normalized:
+            normalized["callable"] = str(normalized.pop("path"))
+
+    try:
+        reference = resolve_callable_reference(normalized)
+    except PreprocessConfigurationError as exc:
+        raise RouteCompilationError(str(exc)) from exc
+
+    try:
+        load_preprocess_callable(reference)
+    except ModuleNotFoundError as exc:
+        raise RouteCompilationError(
+            f"Preprocess {reference.describe()} could not be imported: {exc}"
+        ) from exc
+    except PreprocessConfigurationError as exc:
+        raise RouteCompilationError(str(exc)) from exc
+
+    normalized["callable_name"] = reference.attribute
+    if reference.source == "module":
+        normalized["callable_module"] = reference.display
+        normalized.pop("callable_path", None)
+    else:
+        normalized["callable_path"] = reference.display
+        normalized.pop("callable_module", None)
+
+    normalized["callable"] = f"{reference.display}:{reference.attribute}"
+    normalized.pop("path", None)
+    normalized.pop("name", None)
+    return normalized
 
 
 def _build_postprocess(
