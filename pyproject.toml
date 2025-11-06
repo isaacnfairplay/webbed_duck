@@ -1,6 +1,6 @@
 [project]
 name = "webbed-duck"
-version = "0.31.1"
+version = "0.32.0"
 description = "A parameterized SQL web server for DuckDB routes compiled from Markdown"
 authors = [
   { name = "Isaac Moore" }
