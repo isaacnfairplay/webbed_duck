@@ -112,6 +112,40 @@ def test_compile_route(tmp_path: Path) -> None:
     assert loaded[0].id == "sample"
 
 
+def test_compile_route_preserves_template_metadata(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"templated\"\n"
+        "path = \"/templated\"\n"
+        "[params.search]\n"
+        "type = \"str\"\n"
+        "template_only = true\n"
+        "[params.search.template]\n"
+        "policy = \"literal\"\n"
+        "scope = \"user\"\n"
+        "[params.search.guard]\n"
+        "mode = \"role\"\n"
+        "role = \"admin\"\n"
+        "+++\n\n"
+        "```sql\nSELECT 1\n```\n"
+    )
+    route_path = write_route(tmp_path, route_text)
+    definition = compile_route_file(route_path)
+    assert definition.params
+    spec = definition.params[0]
+    assert spec.template_only is True
+    assert spec.template == {"policy": "literal", "scope": "user"}
+    assert spec.guard == {"mode": "role", "role": "admin"}
+
+    build_dir = tmp_path / "build"
+    compile_routes(tmp_path, build_dir)
+    loaded = load_compiled_routes(build_dir)
+    loaded_spec = loaded[0].params[0]
+    assert loaded_spec.template_only is True
+    assert loaded_spec.template == {"policy": "literal", "scope": "user"}
+    assert loaded_spec.guard == {"mode": "role", "role": "admin"}
+
+
 def test_compile_route_applies_constants(tmp_path: Path) -> None:
     route_text = (
         "+++\n"
