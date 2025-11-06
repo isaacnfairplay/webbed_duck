@@ -27,6 +27,9 @@ jobs:
         with:
           python-version: '3.x'
 
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+
       - name: Bump project version
         id: bump
         run: |
@@ -90,6 +93,12 @@ jobs:
               fh.write(f'version={new_version}\n')
           PY
 
+      - name: Update complexity history
+        env:
+          NEW_VERSION: ${{ steps.bump.outputs.version }}
+        run: |
+          python scripts/update_complexity_history.py --version "${NEW_VERSION}"
+
       - name: Commit version bump
         id: commit
         run: |
@@ -99,7 +108,7 @@ jobs:
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pyproject.toml webbed_duck/__init__.py
+          git add pyproject.toml webbed_duck/__init__.py docs/complexity_history.md
           git commit -m "chore: bump version after merge"
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
