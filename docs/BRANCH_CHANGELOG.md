@@ -26,3 +26,12 @@
 - Restore wheel-building prerequisites (ensure `pip` is available inside the managed venv) to unblock packaging tests.
 - Introduce typing backfills or protocol wrappers for pyarrow-heavy paths to clear the strict MyPy gate.
 - Align README tooling guarantees with the actual dependency set to keep documentation and enforcement in sync.
+
+## Complexity automation scaffolding (current branch)
+- Added `scripts/update_complexity_history.py` to snapshot Radon complexity output via `uvx` and regenerate a Mermaid-backed
+  history markdown (`docs/complexity_history.md`) with grade distributions, hotspot tables, and diff commentary for the tracked
+  widgets modules.
+- Extended `.github/workflows/version-bump.yml` to install `uv`, execute the complexity snapshotter during automated version
+  bumps, and commit the refreshed history alongside the version files so mainline complexity metrics evolve with each release.
+- Seeded the history with the current baseline (average cyclomatic complexity **B / 5.565**), documenting the outstanding
+  high-complexity blocks called out by the grading tool for future refactors.
