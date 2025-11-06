@@ -6,6 +6,7 @@ import os
 import re
 import sys
 import textwrap
+import warnings
 from datetime import timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Iterator
@@ -14,6 +15,12 @@ if TYPE_CHECKING:
     from starlette.testclient import TestClient
 
 import pytest
+
+warnings.filterwarnings(
+    "default",
+    category=DeprecationWarning,
+    module=r"^webbed_duck\.core",
+)
 
 try:
     from hypothesis import HealthCheck, settings
@@ -84,6 +91,21 @@ def pytest_addoption(parser: pytest.Parser) -> None:
 
 def pytest_configure(config: pytest.Config) -> None:
     """Declare pytest markers and configure Hypothesis defaults."""
+
+    warnings.filterwarnings(
+        "default",
+        category=DeprecationWarning,
+        module=r"^webbed_duck\.core",
+    )
+
+    config.addinivalue_line(
+        "filterwarnings",
+        "default::DeprecationWarning:webbed_duck\\.core",
+    )
+    config.addinivalue_line(
+        "filterwarnings",
+        "default::DeprecationWarning:webbed_duck\\.core.*",
+    )
 
     for marker, description in [
         ("duckdb", "Tests that interact with DuckDB connections or files."),
