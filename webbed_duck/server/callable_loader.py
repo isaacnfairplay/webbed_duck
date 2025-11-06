@@ -78,7 +78,16 @@ def resolve_descriptor(
 def load_callable(descriptor: CallableDescriptor) -> Callable[..., object]:
     """Load the callable described by ``descriptor``."""
 
-    module = _load_module_from_path(descriptor.resolved_path)
+    if descriptor.source_type == "module":
+        assert descriptor.module_name is not None
+        try:
+            module = import_module(descriptor.module_name)
+        except ModuleNotFoundError as error:
+            raise CallableResolutionError(
+                f"Module '{descriptor.module_name}' could not be imported"
+            ) from error
+    else:
+        module = _load_module_from_path(descriptor.resolved_path)
     try:
         target = getattr(module, descriptor.name)
     except AttributeError as error:
