@@ -34,6 +34,12 @@ from .routes import (
     RouteDirective,
     RouteUse,
 )
+from ..server.callable_loader import (
+    CallableResolutionError,
+    descriptor_from_legacy_reference,
+    load_callable,
+    resolve_descriptor,
+)
 
 FRONTMATTER_DELIMITER = "+++"
 SQL_BLOCK_PATTERN = re.compile(r"```sql\s*(?P<sql>.*?)```", re.DOTALL | re.IGNORECASE)
@@ -201,7 +207,9 @@ def compile_route_text(
     _warn_unexpected_frontmatter(metadata_raw, source_path)
     directives = _extract_directives(body)
     metadata = _extract_metadata(metadata_raw)
-    sections = _interpret_sections(metadata_raw, directives, metadata)
+    sections = _interpret_sections(
+        metadata_raw, directives, metadata, source_path=source_path
+    )
 
     sql = _extract_sql(body)
     requested_constants = {
@@ -681,6 +689,8 @@ def _interpret_sections(
     metadata_raw: Mapping[str, Any],
     directives: Sequence[RouteDirective],
     metadata: MutableMapping[str, Any],
+    *,
+    source_path: Path,
 ) -> _RouteSections:
     meta_section: dict[str, Any] = {}
     base_meta = metadata_raw.get("meta")
@@ -712,7 +722,7 @@ def _interpret_sections(
     for payload in _collect_directive_payloads(directives, "params"):
         _merge_param_payload(params_map, payload)
 
-    preprocess = _build_preprocess(metadata, directives)
+    preprocess = _build_preprocess(metadata, directives, source_path=source_path)
     postprocess = _build_postprocess(metadata, directives)
     charts = _build_charts(metadata, directives)
     assets = _build_assets(metadata, directives)
@@ -821,56 +831,143 @@ def _merge_param_payload(target: MutableMapping[str, dict[str, object]], payload
 
 
 def _build_preprocess(
-    metadata: Mapping[str, Any], directives: Sequence[RouteDirective]
+    metadata: Mapping[str, Any],
+    directives: Sequence[RouteDirective],
+    *,
+    source_path: Path,
 ) -> list[Mapping[str, object]]:
     steps: list[Mapping[str, object]] = []
     base = metadata.get("preprocess")
-    steps.extend(_normalize_preprocess_entries(base))
+    steps.extend(_normalize_preprocess_entries(base, source_path=source_path))
     for payload in _collect_directive_payloads(directives, "preprocess"):
-        steps.extend(_normalize_preprocess_entries(payload))
+        steps.extend(_normalize_preprocess_entries(payload, source_path=source_path))
     return steps
 
 
-def _normalize_preprocess_entries(data: object) -> list[Mapping[str, object]]:
+def _normalize_preprocess_entries(
+    data: object, *, source_path: Path
+) -> list[Mapping[str, object]]:
     entries: list[Mapping[str, object]] = []
     if isinstance(data, Mapping):
-        if any(key in data for key in ("callable", "path", "name")):
-            normalized = dict(data)
-            if "callable" not in normalized:
-                if "name" in normalized:
-                    normalized["callable"] = str(normalized.pop("name"))
-                elif "path" in normalized:
-                    normalized["callable"] = str(normalized.pop("path"))
-            if "callable" not in normalized:
-                raise RouteCompilationError("Preprocess directives must specify a callable name")
-            normalized["callable"] = str(normalized["callable"])
-            entries.append(normalized)
+        if _mapping_is_single_preprocess(data):
+            entries.append(_finalize_preprocess_entry(dict(data), source_path=source_path))
         else:
             for name, options in data.items():
                 entry: dict[str, object] = {"callable": str(name)}
                 if isinstance(options, Mapping):
                     entry.update(options)
-                entries.append(entry)
+                entries.append(_finalize_preprocess_entry(entry, source_path=source_path))
     elif isinstance(data, Sequence) and not isinstance(data, (str, bytes)):
         for item in data:
             if isinstance(item, Mapping):
-                normalized = dict(item)
-                if "callable" not in normalized:
-                    if "name" in normalized:
-                        normalized["callable"] = str(normalized.pop("name"))
-                    elif "path" in normalized:
-                        normalized["callable"] = str(normalized.pop("path"))
-                if "callable" not in normalized:
-                    raise RouteCompilationError(
-                        "Preprocess directives must specify a callable name"
-                    )
-                normalized["callable"] = str(normalized["callable"])
-                entries.append(normalized)
+                entries.append(_finalize_preprocess_entry(dict(item), source_path=source_path))
             else:
-                entries.append({"callable": str(item)})
+                entries.append(
+                    _finalize_preprocess_entry({"callable": str(item)}, source_path=source_path)
+                )
     elif isinstance(data, str):
-        entries.append({"callable": data})
+        entries.append(
+            _finalize_preprocess_entry({"callable": data}, source_path=source_path)
+        )
     return entries
+
+
+def _mapping_is_single_preprocess(payload: Mapping[str, Any]) -> bool:
+    keys = {str(key) for key in payload.keys()}
+    return bool(
+        keys
+        & {
+            "callable",
+            "callable_name",
+            "callable_module",
+            "callable_path",
+            "callable_source",
+        }
+    )
+
+
+def _finalize_preprocess_entry(
+    data: Mapping[str, Any], *, source_path: Path
+) -> Mapping[str, object]:
+    entry = dict(data)
+
+    callable_name = entry.get("callable_name")
+    if callable_name is not None:
+        callable_name = str(callable_name).strip()
+    callable_module = entry.get("callable_module")
+    if callable_module is not None:
+        callable_module = str(callable_module).strip()
+    callable_path = entry.get("callable_path")
+    if callable_path is not None:
+        callable_path = str(callable_path).strip()
+
+    legacy_reference = entry.get("callable") or entry.get("name") or entry.get("path")
+    legacy_reference = str(legacy_reference).strip() if legacy_reference else ""
+
+    descriptor = None
+    if callable_name and (callable_module or callable_path):
+        try:
+            descriptor = resolve_descriptor(
+                callable_name=callable_name,
+                callable_module=callable_module,
+                callable_path=callable_path,
+                base_dir=source_path.parent,
+            )
+        except CallableResolutionError as error:
+            raise RouteCompilationError(f"{error} in {source_path}") from error
+        if descriptor.source_type == "module":
+            callable_module = descriptor.source_value
+            callable_path = None
+        else:
+            callable_path = descriptor.source_value
+            callable_module = None
+    elif legacy_reference:
+        try:
+            descriptor = descriptor_from_legacy_reference(
+                legacy_reference, base_dir=source_path.parent
+            )
+        except CallableResolutionError as error:
+            raise RouteCompilationError(f"{error} in {source_path}") from error
+        callable_name = descriptor.name
+        if descriptor.source_type == "module":
+            callable_module = descriptor.source_value
+            callable_path = None
+        else:
+            callable_path = descriptor.source_value
+            callable_module = None
+
+    if descriptor is None:
+        if not callable_name:
+            raise RouteCompilationError(
+                f"Preprocess directives must specify callable_name in {source_path}"
+            )
+        raise RouteCompilationError(
+            f"Preprocess directives must supply callable_module or callable_path for '{callable_name}' in {source_path}"
+        )
+
+    try:
+        load_callable(descriptor)
+    except (ModuleNotFoundError, AttributeError, TypeError) as error:
+        raise RouteCompilationError(
+            f"Failed to load preprocess callable '{descriptor.name}' from {descriptor.source_value} in {source_path}: {error}"
+        ) from error
+
+    normalized: dict[str, object] = {
+        k: v
+        for k, v in entry.items()
+        if k not in {"callable", "name", "path"}
+    }
+    normalized["callable_name"] = descriptor.name
+    normalized["callable_source_type"] = descriptor.source_type
+    normalized["callable_source"] = descriptor.source_value
+    normalized["callable_resolved_path"] = str(descriptor.resolved_path)
+    if descriptor.source_type == "module":
+        normalized["callable_module"] = descriptor.source_value
+        normalized.pop("callable_path", None)
+    else:
+        normalized["callable_path"] = callable_path or descriptor.source_value
+        normalized.pop("callable_module", None)
+    return normalized
 
 
 def _build_postprocess(

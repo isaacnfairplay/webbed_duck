@@ -552,7 +552,28 @@ MVP 0.4 is the first release we expect to hand to an ops lead with no extra scaf
 
 ## Extending webbed_duck
 
-- **Preprocessors:** Register callables (e.g., `myapp.preprocess.resolve_shift_window`) and reference them in TOML metadata to derive or validate parameters before the SQL runs.
+- **Preprocessors:** Register callables (e.g., `myapp.preprocess.resolve_shift_window`) and reference them in TOML metadata to derive or validate parameters before the SQL runs. Use the explicit `[[preprocess]]` schema with
+  `callable_name` plus either `callable_module` **or** `callable_path` so the compiler can locate the helper during `webbed-duck compile`:
+
+  ```toml
+  [[preprocess]]
+  callable_module = "myapp.preprocess.date_helpers"
+  callable_name = "derive_shift_window"
+  target_param = "shift_start"
+  ```
+
+  ```toml
+  [[preprocess]]
+  callable_path = "../plugins/derive_shift_window.py"
+  callable_name = "derive_shift_window"
+  target_param = "shift_start"
+  ```
+
+  - Module references resolve through Python's import machinery; the compiler materialises the module to confirm the callable exists and raises a descriptive error if the attribute is missing or not callable.
+  - Path references are resolved relative to the TOML file when possible (or as absolute paths) and must point at a `.py` file or package directory containing `__init__.py`. The compiler verifies the file is present and will fail fast when the path is wrong.
+  - The legacy `module:callable` string syntax still works for existing routes, but new contracts should prefer the explicit fields so the intent is clear and build-time validation stays reliable.
+
+  Compiled routes capture the resolved filesystem location so the runtime can import the helper without needing it installed as a package—perfect for intranet deployments that mount a shared plugin folder alongside the routes.
 - **Postprocessors and presentation:** Use `[html_t]`, `[html_c]`, `[feed]`, and `[[charts]]` to pass configuration into the built-in renderers. Custom renderers can be registered via the plugin registries in `webbed_duck.plugins.*`.
 - **Assets and overlays:** `[assets]` metadata controls how related images are resolved; use `base_path = "media"` (or similar) to prefix relative card thumbnails before they flow through the configured `image_getter`. `[overrides]` enables per-cell overrides with audit trails managed by the overlay store.
 - **Local execution:** `webbed_duck.core.local.LocalRouteRunner` reuses the cache and overlay stores to execute compiled routes in-process. Call `runner.run("route_id", params={...}, format="arrow", offset=0, limit=None)` for repeated jobs, or keep using the convenience `run_route` wrapper for one-off invocations. The helper accepts the same pagination knobs as the HTTP surface and refreshes overlay snapshots on every execution so overrides written by other processes are picked up without rebuilding the helper.
