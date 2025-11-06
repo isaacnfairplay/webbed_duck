@@ -123,7 +123,7 @@ ROUTE_CONSTANTS = """+++
 id = "constant_demo"
 path = "/constant-demo"
 
-[constants.sales_table]
+[const.sales_table]
 type = "identifier"
 value = "warehouse.daily_sales"
 
@@ -925,7 +925,7 @@ def readme_context(tmp_path_factory: pytest.TempPathFactory) -> ReadmeContext:
     constant_conflict_error: str | None = None
     try:
         compile_route_text(
-            """+++\nid = \"conflict\"\npath = \"/conflict\"\n[constants]\nshared = \"route\"\n+++\n\n```sql\nSELECT {{const.shared}}\n```\n""",
+            """+++\nid = \"conflict\"\npath = \"/conflict\"\n[const]\nshared = \"route\"\n+++\n\n```sql\nSELECT {{const.shared}}\n```\n""",
             source_path=src_dir / "conflict.toml",
             plugin_loader=plugin_loader,
             server_constants={"shared": "server"},

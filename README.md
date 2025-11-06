@@ -247,13 +247,13 @@ If a value is fixed in TOML (for example `plant = "US01"` in `[uses.args]`), kee
 WHERE plant = 'US01'
 ```
 
-To keep table names, glob patterns, or other identifiers manageable, define them once in TOML under `[constants]` and reference
+To keep table names, glob patterns, or other identifiers manageable, define them once in TOML under `[const]` and reference
 them with `{{const.NAME}}` inside SQL. Constants become DuckDB named parameters prefixed with `const_`, so they participate in
 plan caching just like request parameters. When a constant represents an identifier (for example, a table name), declare it with
 `type = "identifier"` to inline a validated literal while keeping everything else bound safely:
 
 ```toml
-[constants.sales_table]
+[const.sales_table]
 type = "identifier"
 value = "warehouse.daily_sales"
 
@@ -267,13 +267,13 @@ SELECT * FROM {{const.sales_table}}
 WHERE password = {{const.reporting_password}}
 ```
 
-Server-wide values can live in `config.toml` under `[server.constants]` or `[server.secrets]` and are merged with the route
-frontmatter. If two sources define the same constant name, compilation fails so collisions never reach runtime. Secrets and other
-value constants are bound as named parameters (`$const_reporting_password` in the example above), while identifiers marked with
-`type = "identifier"` are validated against a conservative `[A-Za-z0-9_.]` pattern before being inlined. Secrets are resolved
-through the system keyring via `keyring.get_password`; missing credentials raise a compiler error to keep failures obvious during
-development. For readability, the compiler also accepts aliases such as `{{constants.NAME}}`, `{{server.constants.NAME}}`, or
-`{{secrets.NAME}}` in addition to the canonical `{{const.NAME}}` form.
+Server-wide values can live in `config.toml` under a top-level `[const]` or `[secrets]` block (or within `[server.const]` /
+`[server.secrets]` for compatibility) and are merged with the route frontmatter. If two sources define the same constant name,
+compilation fails so collisions never reach runtime. Secrets and other value constants are bound as named parameters
+(`$const_reporting_password` in the example above), while identifiers marked with `type = "identifier"` are validated against a
+conservative `[A-Za-z0-9_.]` pattern before being inlined. Secrets are resolved through the system keyring via
+`keyring.get_password`; missing credentials raise a compiler error to keep failures obvious during development. Prefer the
+canonical `{{const.NAME}}` and `{{secrets.NAME}}` forms in SQL so the contract stays easy to read.
 
 ### Binding DuckDB file paths safely
 

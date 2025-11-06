@@ -33,7 +33,7 @@
 
 ## Route constants and keyring secrets (current branch)
 
-- Extend the compiler to expand `{{const.NAME}}` markers from route `[constants]`,
+- Extend the compiler to expand `{{const.NAME}}` markers from route `[const]`,
   server-level constants, and keyring-backed `[secrets]`, resolving only the
   constants referenced by each SQL file.
 - Reject conflicting constant names across server and route scopes during

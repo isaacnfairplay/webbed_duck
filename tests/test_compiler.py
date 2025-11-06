@@ -218,7 +218,7 @@ def test_compile_route_applies_constants(tmp_path: Path) -> None:
         "[params.user_id]\n"
         "type = \"int\"\n"
         "required = true\n"
-        "[constants.customer_table]\n"
+        "[const.customer_table]\n"
         "type = \"identifier\"\n"
         "value = \"mart.customers\"\n"
         "+++\n\n"
@@ -273,7 +273,7 @@ def test_compile_route_typed_constants(tmp_path: Path) -> None:
         "+++\n"
         "id = \"typed\"\n"
         "path = \"/typed\"\n"
-        "[constants]\n"
+        "[const]\n"
         "today = 2024-02-29\n"
         "enabled = true\n"
         "limit = { type = \"decimal\", value = \"12.34\" }\n"
@@ -297,18 +297,19 @@ def test_compile_route_typed_constants(tmp_path: Path) -> None:
     }
 
 
-def test_compile_route_constant_prefix_aliases(tmp_path: Path) -> None:
+def test_compile_route_const_blocks_merge(tmp_path: Path) -> None:
     route_text = (
         "+++\n"
         "id = \"constant_aliases\"\n"
         "path = \"/constant_aliases\"\n"
-        "[constants]\n"
+        "[const]\n"
         "local_value = \"route\"\n"
         "+++\n\n"
         "```sql\n"
         "SELECT"
-        " {{constants.local_value}} AS route_const,"
-        " {{server.constants.shared}} AS server_const,"
+        " {{const.local_value}} AS route_const,"
+        " {{const.shared}} AS server_const,"
+        " {{const.shared}} AS server_const_alias,"
         " {{secrets.server_token}} AS secret_const\n"
         "```\n"
     )
@@ -332,7 +333,7 @@ def test_compile_route_constant_prefix_aliases(tmp_path: Path) -> None:
         compiler.keyring = original_keyring
     assert definition.prepared_sql == (
         "SELECT $const_local_value AS route_const, $const_shared AS server_const, "
-        "$const_server_token AS secret_const"
+        "$const_shared AS server_const_alias, $const_server_token AS secret_const"
     )
     assert definition.constant_params == {
         "const_local_value": "route",
@@ -345,7 +346,7 @@ def test_compile_route_detects_constant_conflicts(tmp_path: Path) -> None:
         "+++\n"
         "id = \"conflict\"\n"
         "path = \"/conflict\"\n"
-        "[constants]\n"
+        "[const]\n"
         "shared = \"route\"\n"
         "+++\n\n"
         "```sql\nSELECT '{{const.shared}}'\n```\n"
@@ -364,7 +365,7 @@ def test_identifier_constant_rejects_invalid(tmp_path: Path) -> None:
         "+++\n"
         "id = \"invalid_ident\"\n"
         "path = \"/invalid_ident\"\n"
-        "[constants.table]\n"
+        "[const.table]\n"
         "type = \"identifier\"\n"
         "value = \"mart.customers;DROP\"\n"
         "+++\n\n"

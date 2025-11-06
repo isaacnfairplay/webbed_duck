@@ -283,3 +283,78 @@ storage = "E:/web_storage"
     assert config.server.storage_root == expected
     assert config.runtime.storage == expected
 
+
+def test_load_config_merges_const_and_secret_blocks(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path,
+        """
+[server]
+watch = false
+
+[server.const]
+shared = "server"
+
+[server.secrets.api]
+service = "svc"
+username = "ops"
+
+[const]
+shared_root = "root"
+
+[secrets.robot]
+service = "svc"
+username = "robot"
+""".strip(),
+    )
+
+    config = load_config(path)
+
+    assert config.server.constants == {
+        "shared": "server",
+        "shared_root": "root",
+    }
+    assert config.server.secrets == {
+        "api": {"service": "svc", "username": "ops"},
+        "robot": {"service": "svc", "username": "robot"},
+    }
+
+
+def test_load_config_detects_const_conflicts(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path,
+        """
+[server]
+watch = false
+
+[server.const]
+shared = "server"
+
+[const]
+shared = "root"
+""".strip(),
+    )
+
+    with pytest.raises(ConfigError, match="Constant 'shared' defined"):
+        load_config(path)
+
+
+def test_load_config_detects_secret_conflicts(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path,
+        """
+[server]
+watch = false
+
+[server.secrets.api]
+service = "svc"
+username = "ops"
+
+[secrets.api]
+service = "svc"
+username = "robot"
+""".strip(),
+    )
+
+    with pytest.raises(ConfigError, match="Secret 'api' defined"):
+        load_config(path)
+
