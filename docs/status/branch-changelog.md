@@ -1,3 +1,25 @@
+## Repository-wide architecture audit (work branch)
+
+- Captured a detailed essay on every subsystem—config, compiler, server, cache,
+  plugins, demos, tests, and docs—to ground the 1.0 rewrite discussion in the
+  current state of the codebase.
+- Highlighted dictionary-centric compilation, implicit global state, cache
+  ergonomics, plugin friction, and documentation debt, and paired each issue
+  with rewrite opportunities in `docs/proposals/rewrite-review-essay.md`.
+
+## Rewrite change matrix (current branch)
+
+- Added a 1,000-line, phase-structured roadmap in
+  `docs/proposals/rewrite-change-matrix.md` so every rewrite initiative tracks
+  architecture hooks, migration steps, adaptation triggers, and GPT-5 High
+  research prompts in a consistent format.
+- Organized the matrix around foundation, config, compiler, execution, plugin,
+  caching, UI, routing, security, and operational themes, each with explicit
+  focus areas covering route chaining, chart parity, folder configs, secrets,
+  pagination, HTML views, dashboard composition, and SQL safety.
+- Reserved appendix lines to absorb future discoveries without disrupting the
+  numbering scheme, ensuring the plan evolves alongside refactor milestones.
+
 # Branch-level Changelog
 
 ## Windows Python 3.13 Uvicorn fallback (current branch)
@@ -31,6 +53,26 @@
 - Document the binding semantics in the README (no more manual quoting) and
   cover typed constants, identifier validation, and quote-heavy secrets in the
   regression suite.
+
+## Architecture rewrite blueprint (current branch)
+
+- Capture the target `1.0` rewrite that replaces dictionary-style compiled
+  routes with class-based Python modules using Template Method hooks for
+  preprocess, query, and postprocess steps so behaviours stay explicit and
+  testable.
+- Establish a layered package structure (core/services, infrastructure,
+  runtime, compiler, ui) that enforces SOLID boundaries and leans on
+  dependency-inversion-friendly service interfaces.
+- Simplify plugin ergonomics with decorator-based registries and build-time
+  validation so chart renderers, preprocessors, and UI components are easy to
+  register while keeping runtime wiring predictable.
+- Describe configuration precedence (server, folder, route) with folder-level
+  TOML shared metadata, keyring-backed secrets, and adaptive cache planning that
+  clarifies how constants, preprocess scripts, and cache settings flow into each
+  compiled route.
+- Outline roadmap items for dashboard composition, adaptive pagination
+  heuristics, and FastAPI-first hosting so the rewrite maintains feature parity
+  while reducing ambiguity.
 
 ## Demo HTML embedding refresh (current branch)
 
