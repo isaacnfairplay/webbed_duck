@@ -33,6 +33,8 @@ class CallableSpec:
     name: str
     module: str | None
     path: str | None
+    module_alias_consumed: bool = False
+    path_alias_consumed: bool = False
 
     @property
     def cache_key(self) -> str:
@@ -64,21 +66,19 @@ def run_preprocessors(
     for step in steps:
         spec = extract_callable_spec(step)
         options_obj = step.get("options") if isinstance(step.get("options"), Mapping) else None
-        options = {
-            k: v
-            for k, v in step.items()
-            if k
-            not in {
-                "callable",
-                "callable_module",
-                "callable_name",
-                "callable_path",
-                "module",
-                "name",
-                "options",
-                "path",
-            }
+        excluded_keys = {
+            "callable",
+            "callable_module",
+            "callable_name",
+            "callable_path",
+            "name",
+            "options",
         }
+        if spec.module_alias_consumed:
+            excluded_keys.add("module")
+        if spec.path_alias_consumed:
+            excluded_keys.add("path")
+        options = {k: v for k, v in step.items() if k not in excluded_keys}
         if options_obj:
             options.update(dict(options_obj))
         func = _load_callable(spec)
@@ -222,20 +222,27 @@ def extract_callable_spec(step: Mapping[str, Any]) -> CallableSpec:
         raise RuntimeError("Preprocess step configuration must be a mapping")
 
     raw_name = _string_or_none(step.get("callable_name"))
-    raw_module = _string_or_none(step.get("callable_module") or step.get("module"))
+    raw_module = _string_or_none(step.get("callable_module"))
     raw_path = _string_or_none(step.get("callable_path"))
 
-    legacy_path = _string_or_none(step.get("path"))
+    module_alias = _string_or_none(step.get("module"))
+    path_alias = _string_or_none(step.get("path"))
+
     legacy_name = _string_or_none(step.get("name"))
     legacy_callable = _string_or_none(step.get("callable"))
 
-    if legacy_path:
-        if _looks_like_filesystem_reference(legacy_path):
-            raw_path = raw_path or legacy_path
+    module_alias_consumed = False
+    path_alias_consumed = False
+
+    if path_alias:
+        if _looks_like_filesystem_reference(path_alias):
+            if not raw_path:
+                raw_path = path_alias
+                path_alias_consumed = True
         else:
-            legacy_callable = legacy_callable or legacy_path
+            legacy_callable = legacy_callable or path_alias
     if legacy_name and not raw_name and not legacy_callable:
-        legacy_callable = legacy_name
+        legacy_callable = legacy_callable or legacy_name
 
     if legacy_callable:
         module_ref, attr = _split_legacy_reference(legacy_callable)
@@ -245,6 +252,9 @@ def extract_callable_spec(step: Mapping[str, Any]) -> CallableSpec:
                 raw_path = module_ref
             else:
                 raw_module = module_ref
+    elif not raw_module and not raw_path and module_alias:
+        raw_module = module_alias
+        module_alias_consumed = True
 
     if not raw_name:
         raise RuntimeError("Preprocess step is missing 'callable_name'")
@@ -266,7 +276,13 @@ def extract_callable_spec(step: Mapping[str, Any]) -> CallableSpec:
             path_value = (Path.cwd() / path_value).resolve()
         normalized_path = str(path_value)
 
-    return CallableSpec(name=raw_name, module=raw_module, path=normalized_path)
+    return CallableSpec(
+        name=raw_name,
+        module=raw_module,
+        path=normalized_path,
+        module_alias_consumed=module_alias_consumed,
+        path_alias_consumed=path_alias_consumed,
+    )
 
 
 def validate_preprocess_step(step: Mapping[str, Any] | CallableSpec) -> CallableSpec:
