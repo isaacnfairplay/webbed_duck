@@ -61,5 +61,6 @@ print_blob = true
 
 [dependency-groups]
 dev = [
+    "matplotlib>=3.9",
     "pytest>=8.4.2",
 ]
