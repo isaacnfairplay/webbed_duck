@@ -6,7 +6,7 @@ version bump workflow.
 
 
 ```mermaid
-xyChart
+xychart-beta
     title: Webbed Duck Cyclomatic Complexity
     xType: category
     xLabel: Version
