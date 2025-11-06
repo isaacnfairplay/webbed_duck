@@ -315,6 +315,29 @@ def test_compile_route_detects_constant_conflicts(tmp_path: Path) -> None:
         )
 
 
+def test_server_constants_are_honored_in_sql(tmp_path: Path) -> None:
+    route_text = (
+        "+++\n"
+        "id = \"server_const\"\n"
+        "path = \"/server_const\"\n"
+        "+++\n\n"
+        "```sql\nSELECT {{server.constants.data_root}} AS data_root, {{server.constants.region}} AS region\n```\n"
+    )
+    definition = compile_route_file(
+        write_route(tmp_path, route_text),
+        server_constants={"data_root": "/warehouse", "region": "us-east-1"},
+    )
+    assert definition.prepared_sql == (
+        "SELECT $const_data_root AS data_root, $const_region AS region"
+    )
+    assert definition.constant_params == {
+        "const_data_root": "/warehouse",
+        "const_region": "us-east-1",
+    }
+    assert definition.constants["data_root"] == "/warehouse"
+    assert definition.constants["region"] == "us-east-1"
+
+
 def test_identifier_constant_rejects_invalid(tmp_path: Path) -> None:
     route_text = (
         "+++\n"

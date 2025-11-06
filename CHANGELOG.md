@@ -14,6 +14,11 @@
   constants validated and inlined via `type = "identifier"`), compilation still
   fails on conflicting names, and secrets resolve via `keyring.get_password`
   before SQL execution.
+- Restore compatibility for referencing server-level constants directly via
+  `{{server.constants.NAME}}` in SQL templates so existing deployments using
+  that prefix keep compiling without edits. These references now bind to the
+  same DuckDB named parameters as `{{const.NAME}}`, including identifier
+  validation and conflict checks.
 
 - Auto-generated documentation index now surfaces a GitHub-linked inventory of
   Python, SQL, and JavaScript source files so reviewers can jump straight to

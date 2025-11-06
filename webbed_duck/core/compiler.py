@@ -49,8 +49,17 @@ BINDING_PATTERN = re.compile(r"\$(?P<name>[A-Za-z_][A-Za-z0-9_]*)")
 _FILTER_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 DIRECTIVE_PATTERN = re.compile(r"<!--\s*@(?P<name>[a-zA-Z0-9_.:-]+)(?P<body>.*?)-->", re.DOTALL)
 CONSTANT_PATTERN = re.compile(
-    r"\{\{\s*const(?:ant)?\.(?P<constant>[a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}",
+    r"\{\{\s*(?P<namespace>const(?:ant)?|constants|server\.constants|secrets|server\.secrets)\.(?P<constant>[a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}",
     re.IGNORECASE,
+)
+
+_CONSTANT_REF_PREFIXES = (
+    "const.",
+    "constant.",
+    "constants.",
+    "server.constants.",
+    "secrets.",
+    "server.secrets.",
 )
 
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
@@ -444,11 +453,15 @@ def _inject_constant_placeholders(
 
     def replace(match: re.Match[str]) -> str:
         name = match.group("constant")
+        namespace = match.group("namespace")
         if name is None:
             return match.group(0)
         if name not in constants:
+            prefix = namespace or "const"
+            if prefix.lower() == "constant":
+                prefix = "const"
             raise RouteCompilationError(
-                f"Constant 'const.{name}' referenced in SQL but not defined in {source_path}"
+                f"Constant '{prefix}.{name}' referenced in SQL but not defined in {source_path}"
             )
         binding = constants[name]
         if binding.duckdb_type == "IDENTIFIER":
@@ -674,7 +687,8 @@ def _prepare_sql(
                 f"Template expression {placeholder!r} missing parameter name in {source_path}"
             )
         name = parts[0]
-        if name.startswith("const."):
+        lowered = name.lower()
+        if any(lowered.startswith(prefix) for prefix in _CONSTANT_REF_PREFIXES):
             # constants are handled earlier
             return placeholder
         if not _IDENTIFIER_PATTERN.match(name):
