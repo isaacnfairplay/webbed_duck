@@ -48,10 +48,32 @@ TEMPLATE_PATTERN = re.compile(r"\{\{\s*(?P<body>[^{}]+?)\s*\}\}")
 BINDING_PATTERN = re.compile(r"\$(?P<name>[A-Za-z_][A-Za-z0-9_]*)")
 _FILTER_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 DIRECTIVE_PATTERN = re.compile(r"<!--\s*@(?P<name>[a-zA-Z0-9_.:-]+)(?P<body>.*?)-->", re.DOTALL)
+_CONSTANT_PREFIX_PATTERN = (
+    r"(?P<prefix>"
+    r"(?:const|constant|constants|secrets)"
+    r"|server\.(?:constants|secrets)"
+    r"|route\.(?:constants|secrets)"
+    r")"
+)
+
 CONSTANT_PATTERN = re.compile(
-    r"\{\{\s*const(?:ant)?\.(?P<constant>[a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}",
+    r"\{\{\s*"
+    + _CONSTANT_PREFIX_PATTERN
+    + r"\.(?P<constant>[a-zA-Z_][a-zA-Z0-9_]*)\s*\}\}",
     re.IGNORECASE,
 )
+
+
+def _normalize_constant_reference(reference: str) -> str | None:
+    parts = reference.split(".")
+    lowered = [part.lower() for part in parts]
+    if not parts:
+        return None
+    if lowered[0] in {"const", "constant", "constants", "secrets"} and len(parts) == 2:
+        return parts[1]
+    if lowered[0] in {"server", "route"} and len(parts) == 3 and lowered[1] in {"constants", "secrets"}:
+        return parts[2]
+    return None
 
 _IDENTIFIER_PATTERN = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
 
@@ -443,12 +465,13 @@ def _inject_constant_placeholders(
     placeholder_map: Dict[str, str] = {}
 
     def replace(match: re.Match[str]) -> str:
+        prefix = match.group("prefix") or "const"
         name = match.group("constant")
         if name is None:
             return match.group(0)
         if name not in constants:
             raise RouteCompilationError(
-                f"Constant 'const.{name}' referenced in SQL but not defined in {source_path}"
+                f"Constant '{prefix}.{name}' referenced in SQL but not defined in {source_path}"
             )
         binding = constants[name]
         if binding.duckdb_type == "IDENTIFIER":
@@ -674,7 +697,7 @@ def _prepare_sql(
                 f"Template expression {placeholder!r} missing parameter name in {source_path}"
             )
         name = parts[0]
-        if name.startswith("const."):
+        if _normalize_constant_reference(name) is not None:
             # constants are handled earlier
             return placeholder
         if not _IDENTIFIER_PATTERN.match(name):
