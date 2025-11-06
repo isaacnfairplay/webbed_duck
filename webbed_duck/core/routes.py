@@ -1,4 +1,4 @@
-"""Route definitions and helpers."""
+"""Deprecated route definitions and helpers from the legacy runtime."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -9,6 +9,10 @@ from types import ModuleType
 import datetime as _dt
 import decimal
 from typing import Any, List, Mapping, Sequence
+
+from ._deprecation import warn_legacy_entrypoint, warn_legacy_module
+
+warn_legacy_module(__name__)
 
 
 class ParameterType(str, Enum):
@@ -134,6 +138,8 @@ class RouteDefinition:
 
 def load_compiled_routes(build_dir: str | Path) -> List[RouteDefinition]:
     """Load compiled route manifests from ``build_dir``."""
+
+    warn_legacy_entrypoint("webbed_duck.core.routes.load_compiled_routes")
 
     path = Path(build_dir)
     if not path.exists():

@@ -1,4 +1,4 @@
-"""Compiler for Markdown + SQL routes."""
+"""Deprecated compiler for legacy Markdown and SQL route definitions."""
 from __future__ import annotations
 
 import datetime as _dt
@@ -31,6 +31,9 @@ from ..server.preprocess import (
     load_preprocess_callable,
     resolve_callable_reference,
 )
+from ._deprecation import warn_legacy_entrypoint, warn_legacy_module
+
+warn_legacy_module(__name__)
 
 FRONTMATTER_DELIMITER = "+++"
 SQL_BLOCK_PATTERN = re.compile(r"```sql\s*(?P<sql>.*?)```", re.DOTALL | re.IGNORECASE)
@@ -145,6 +148,8 @@ def compile_routes(
 ) -> List[RouteDefinition]:
     """Compile all route source files from ``source_dir`` into ``build_dir``."""
 
+    warn_legacy_entrypoint("webbed_duck.core.compiler.compile_routes")
+
     src = Path(source_dir)
     dest = Path(build_dir)
     if not src.exists():
@@ -177,6 +182,8 @@ def compile_route_file(
     server_secrets: Mapping[str, Mapping[str, str]] | None = None,
 ) -> RouteDefinition:
     """Compile a single TOML/SQL sidecar into a :class:`RouteDefinition`."""
+
+    warn_legacy_entrypoint("webbed_duck.core.compiler.compile_route_file")
 
     toml_path = Path(path)
     if toml_path.suffix != ".toml":
@@ -217,6 +224,8 @@ def compile_route_text(
     server_secrets: Mapping[str, Mapping[str, str]] | None = None,
 ) -> RouteDefinition:
     """Compile ``text`` into a :class:`RouteDefinition`."""
+
+    warn_legacy_entrypoint("webbed_duck.core.compiler.compile_route_text")
 
     loader = _ensure_plugin_loader(plugin_loader, plugins_dir)
 

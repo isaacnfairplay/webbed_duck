@@ -1,3 +1,4 @@
+"""Deprecated helpers for running legacy routes without HTTP transport."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -11,6 +12,9 @@ from ..server.execution import RouteExecutionError, RouteExecutor
 from ..server.overlay import OverlayStore, apply_overrides
 from ..server.postprocess import table_to_records
 from .routes import RouteDefinition, load_compiled_routes
+from ._deprecation import warn_legacy_entrypoint, warn_legacy_module
+
+warn_legacy_module(__name__)
 
 
 class RouteNotFoundError(KeyError):
@@ -27,6 +31,8 @@ class LocalRouteRunner:
         build_dir: str | Path = "routes_build",
         config: Config | None = None,
     ) -> None:
+        warn_legacy_entrypoint("webbed_duck.core.local.LocalRouteRunner")
+
         if routes is None:
             routes = load_compiled_routes(build_dir)
         self._routes = {route.id: route for route in routes}
@@ -104,6 +110,8 @@ def run_route(
     limit: int | None = None,
 ) -> object:
     """Execute ``route_id`` directly without HTTP transport."""
+
+    warn_legacy_entrypoint("webbed_duck.core.local.run_route")
 
     runner = LocalRouteRunner(routes=routes, build_dir=build_dir, config=config)
     return runner.run(route_id, params=params, format=format, offset=offset, limit=limit)

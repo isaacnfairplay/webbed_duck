@@ -1,4 +1,4 @@
-"""Run routes incrementally with DuckDB-backed checkpoints."""
+"""Deprecated incremental execution helpers built on the legacy core runtime."""
 from __future__ import annotations
 
 import datetime as dt
@@ -11,6 +11,9 @@ import duckdb
 from ..config import Config, load_config
 from ..runtime.paths import get_storage
 from .local import run_route
+from ._deprecation import warn_legacy_entrypoint, warn_legacy_module
+
+warn_legacy_module(__name__)
 
 
 @dataclass(slots=True)
@@ -32,6 +35,8 @@ def run_incremental(
     runner: Callable[..., object] = run_route,
 ) -> list[IncrementalResult]:
     """Run ``route_id`` for each day in ``[start, end]`` inclusive."""
+
+    warn_legacy_entrypoint("webbed_duck.core.incremental.run_incremental")
 
     if config is None:
         config = load_config(None)
