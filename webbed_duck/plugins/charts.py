@@ -66,13 +66,10 @@ def _render_line(table: pa.Table, spec: Mapping[str, object]) -> str:
         span = 1.0
 
     step = (width - 2 * padding) / max(1, len(numbers) - 1)
-    points = []
-    for idx, value in enumerate(numbers):
-        x = padding + idx * step
-        y = height - padding - ((value - min_y) / span) * (height - 2 * padding)
-        points.append(f"{x:.1f},{y:.1f}")
-
-    polyline = " ".join(points)
+    polyline = " ".join(
+        f"{padding + idx * step:.1f},{height - padding - ((value - min_y) / span) * (height - 2 * padding):.1f}"
+        for idx, value in enumerate(numbers)
+    )
     return (
         "<svg viewBox='0 0 400 160' role='img' aria-label='Line chart'>"
         "<polyline fill='none' stroke='#3b82f6' stroke-width='2' points='"
