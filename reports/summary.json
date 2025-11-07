@@ -1,0 +1,117 @@
+{
+  "before": {
+    "cyclomatic": {
+      "blocks": 892,
+      "average": 5.010089686098655,
+      "total": 4469.0
+    },
+    "maintainability": {
+      "average": 58.46155737704918
+    },
+    "halstead": {
+      "bugs": 24.260577050841462,
+      "length": 10330.0
+    },
+    "lizard": {
+      "nloc": 22124,
+      "avg_nloc": 15.1,
+      "avg_ccn": 4.7,
+      "avg_token": 167.9,
+      "function_count": 1276
+    }
+  },
+  "after": {
+    "cyclomatic": {
+      "blocks": 894,
+      "average": 4.995525727069351,
+      "total": 4466.0
+    },
+    "maintainability": {
+      "average": 58.50317073170732
+    },
+    "halstead": {
+      "bugs": 24.176654373476833,
+      "length": 10306.0
+    },
+    "lizard": {
+      "nloc": 22111,
+      "avg_nloc": 15.1,
+      "avg_ccn": 4.7,
+      "avg_token": 167.5,
+      "function_count": 1278
+    }
+  },
+  "modules": {
+    "webbed_duck/server/ui/layout.py": {
+      "maintainability": {
+        "before": 33.4,
+        "after": 39.11,
+        "delta": 5.710000000000001
+      },
+      "halstead_bugs": {
+        "before": 0.3247424740976436,
+        "after": 0.2574578392071631,
+        "delta": -0.06728463489048053
+      }
+    },
+    "webbed_duck/server/ui/widgets/params.py": {
+      "maintainability": {
+        "before": 9.22,
+        "after": 10.2,
+        "delta": 0.9799999999999986
+      },
+      "halstead_bugs": {
+        "before": 0.8066228500381617,
+        "after": 0.7816093809086871,
+        "delta": -0.025013469129474553
+      }
+    },
+    "webbed_duck/server/execution.py": {
+      "maintainability": {
+        "before": 30.93,
+        "after": 31.44,
+        "delta": 0.5100000000000016
+      },
+      "halstead_bugs": {
+        "before": 0.11503610501928023,
+        "after": 0.1089368907605677,
+        "delta": -0.006099214258712529
+      }
+    },
+    "webbed_duck/core/compiler.py": {
+      "maintainability": {
+        "before": 0.0,
+        "after": 0.0,
+        "delta": 0.0
+      },
+      "halstead_bugs": {
+        "before": 1.3622321087387321,
+        "after": 1.3559501599409454,
+        "delta": -0.006281948797786763
+      }
+    },
+    "webbed_duck/plugins/charts.py": {
+      "maintainability": {
+        "before": 46.95,
+        "after": 47.73,
+        "delta": 0.779999999999994
+      },
+      "halstead_bugs": {
+        "before": 0.1111350051334176,
+        "after": 0.1111350051334176,
+        "delta": 0.0
+      }
+    }
+  },
+  "delta": {
+    "cyclomatic": {
+      "total": -3.0,
+      "average": -0.014563959029303852
+    },
+    "maintainability": 0.0416133546581392,
+    "halstead_bugs": -0.08392267736462955,
+    "halstead_length": -24.0,
+    "nloc": -13,
+    "function_count": 2
+  }
+}

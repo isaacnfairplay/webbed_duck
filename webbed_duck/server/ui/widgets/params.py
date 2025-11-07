@@ -9,6 +9,7 @@ import pyarrow as pa
 
 from ....core.routes import ParameterSpec, ParameterType
 from ....server.cache import InvariantFilterSetting
+from ....utils.collections import extend_unique, unique_everseen
 from ....utils.datetime import isoformat_datetime
 from ..invariants import (
     coerce_page_set,
@@ -290,13 +291,8 @@ def _merge_option_lists(
     dynamic: list[tuple[str, str]],
     static: list[tuple[str, str]],
 ) -> list[tuple[str, str]]:
-    seen = {value for value, _ in dynamic}
     merged = list(dynamic)
-    for value, label in static:
-        if value in seen:
-            continue
-        merged.append((value, label))
-        seen.add(value)
+    extend_unique(merged, ((value, label) for value, label in static), key=lambda item: item[0])
     return merged
 
 
@@ -352,8 +348,7 @@ def _unique_invariant_options(
     if allowed_pages is not None and len(allowed_pages) == 0:
         return [("", "")]
 
-    options: list[tuple[str, str]] = []
-    seen: set[str] = set()
+    candidates: list[tuple[str, str]] = []
     for token, entry in param_index.items():
         if not isinstance(entry, Mapping):
             continue
@@ -362,11 +357,9 @@ def _unique_invariant_options(
             if not entry_pages & allowed_pages:
                 continue
         value = token_to_option_value(token, entry)
-        if value in seen:
-            continue
         label = token_to_option_label(token, entry)
-        options.append((value, label))
-        seen.add(value)
+        candidates.append((value, label))
+    options = list(unique_everseen(candidates, key=lambda item: item[0]))
     options = _filter_options_by_table_values(spec, options, current_table)
     options.sort(key=lambda item: item[1].lower())
     if not any(value == "" for value, _ in options):
@@ -392,23 +385,24 @@ def _unique_options_from_table(
     if column_name is None:
         return []
     column = table.column(column_name)
-    seen: set[str] = set()
-    options: list[tuple[str, str]] = []
-    for value in column.to_pylist():
-        option_value = _stringify_param_value(value)
-        if option_value in seen:
-            continue
-        label = "" if option_value == "" else str(value)
-        options.append((option_value, label))
-        seen.add(option_value)
+    options = list(
+        unique_everseen(
+            (
+                (option_value := _stringify_param_value(value), "" if option_value == "" else str(value))
+                for value in column.to_pylist()
+            ),
+            key=lambda item: item[0],
+        )
+    )
     options.sort(key=lambda item: item[1].lower())
-    if "" not in seen:
+    seen_values = {value for value, _ in options}
+    if "" not in seen_values:
         options.insert(0, ("", ""))
-        seen.add("")
+        seen_values.add("")
     for current_value in _normalize_selected_values(current_values.get(spec.name)):
-        if current_value and current_value not in seen:
+        if current_value and current_value not in seen_values:
             options.append((current_value, current_value))
-            seen.add(current_value)
+            seen_values.add(current_value)
     return options
 
 

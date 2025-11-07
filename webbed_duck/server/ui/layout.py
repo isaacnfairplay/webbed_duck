@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Iterable, Iterator, Mapping, Sequence
 
 from ... import __version__ as PACKAGE_VERSION
+from ...utils.collections import extend_unique, unique_everseen
 
 
 _ASSET_BASE = "/assets/wd"
@@ -195,53 +196,33 @@ def render_layout(
 
 
 def _style_links(style_names: Iterable[str]) -> list[str]:
-    tags: list[str] = []
-    seen: set[str] = set()
-    for name in style_names:
-        if name in seen:
-            continue
-        seen.add(name)
-        path = _STYLE_PATHS.get(name)
-        if not path:
-            continue
-        tags.append(
-            "<link rel='stylesheet' href='"
-            + f"{_ASSET_BASE}/{path}?v={PACKAGE_VERSION}"
-            + "'>"
-        )
-    return tags
+    return [
+        "<link rel='stylesheet' href='"
+        + f"{_ASSET_BASE}/{path}?v={PACKAGE_VERSION}"
+        + "'>"
+        for name in unique_everseen(style_names)
+        if (path := _STYLE_PATHS.get(name))
+    ]
 
 
 def _script_preloads(script_names: Iterable[str]) -> list[str]:
-    tags: list[str] = []
-    for name in script_names:
-        if name not in _SCRIPT_PATHS:
-            continue
-        path = _SCRIPT_PATHS[name]
-        tags.append(
-            "<link rel='modulepreload' href='"
-            + f"{_ASSET_BASE}/{path}?v={PACKAGE_VERSION}"
-            + "'>"
-        )
-    return tags
+    return [
+        "<link rel='modulepreload' href='"
+        + f"{_ASSET_BASE}/{path}?v={PACKAGE_VERSION}"
+        + "'>"
+        for name in unique_everseen(script_names)
+        if (path := _SCRIPT_PATHS.get(name))
+    ]
 
 
 def _script_tags(script_names: Iterable[str]) -> list[str]:
-    tags: list[str] = []
-    seen: set[str] = set()
-    for name in script_names:
-        if name in seen:
-            continue
-        seen.add(name)
-        path = _SCRIPT_PATHS.get(name)
-        if not path:
-            continue
-        tags.append(
-            "<script type='module' src='"
-            + f"{_ASSET_BASE}/{path}?v={PACKAGE_VERSION}"
-            + "'></script>"
-        )
-    return tags
+    return [
+        "<script type='module' src='"
+        + f"{_ASSET_BASE}/{path}?v={PACKAGE_VERSION}"
+        + "'></script>"
+        for name in unique_everseen(script_names)
+        if (path := _SCRIPT_PATHS.get(name))
+    ]
 
 
 def _iter_metadata(raw: object) -> Iterator[str]:
@@ -276,27 +257,11 @@ def _ordered_union(
                 continue
             yield str(raw)
 
-    metadata_order: list[str] = []
-    metadata_seen: set[str] = set()
-    for item in _normalize(metadata):
-        if item in metadata_seen:
-            continue
-        metadata_seen.add(item)
-        metadata_order.append(item)
-
-    seen_all: set[str] = set()
-    all_items: list[str] = []
-    for item in metadata_order:
-        if item in seen_all:
-            continue
-        seen_all.add(item)
-        all_items.append(item)
+    metadata_order = list(unique_everseen(_normalize(metadata)))
+    all_items = list(metadata_order)
+    seen_all: set[str] = set(all_items)
     for source in sources:
-        for item in _normalize(source):
-            if item in seen_all:
-                continue
-            seen_all.add(item)
-            all_items.append(item)
+        extend_unique(all_items, _normalize(source), seen=seen_all)
 
     if not canonical_order:
         return tuple(all_items)
@@ -337,15 +302,12 @@ def _ordered_union(
         ordered.extend(after_map.get(name, ()))
 
     if trailing_custom:
-        for item in trailing_custom:
-            if item not in ordered:
-                ordered.append(item)
+        extend_unique(ordered, trailing_custom)
 
-    for item in all_items:
-        if item in canonical_set or item in used_custom:
-            continue
-        if item not in ordered:
-            ordered.append(item)
+    extend_unique(
+        ordered,
+        (item for item in all_items if item not in canonical_set and item not in used_custom),
+    )
 
     return tuple(ordered)
 

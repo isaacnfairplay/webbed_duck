@@ -18,6 +18,7 @@ from ..config import Config
 from ..core.interpolation import TemplateInterpolationError, render_sql
 from ..core.routes import ParameterSpec, RouteDefinition, RouteUse
 from ..plugins.loader import PluginLoader
+from ..utils.collections import unique_everseen
 from .cache import (
     CacheQueryResult,
     CacheStore,
@@ -211,11 +212,7 @@ class RouteExecutor:
         self, route: RouteDefinition, processed: Mapping[str, object]
     ) -> Mapping[str, object]:
         bindings: dict[str, object] = {}
-        seen: set[str] = set()
-        for name in route.param_order:
-            if name in seen:
-                continue
-            seen.add(name)
+        for name in unique_everseen(route.param_order):
             if name in processed:
                 bindings[name] = processed[name]
                 continue

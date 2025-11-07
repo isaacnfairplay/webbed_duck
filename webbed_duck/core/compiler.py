@@ -1180,7 +1180,6 @@ def _normalize_order_by(raw: object) -> list[str]:
 
 def _iter_route_sources(root: Path) -> list[_RouteSource]:
     sources: list[_RouteSource] = []
-    seen: set[Path] = set()
     for toml_path in sorted(root.rglob("*.toml")):
         if not toml_path.is_file():
             continue
@@ -1188,25 +1187,28 @@ def _iter_route_sources(root: Path) -> list[_RouteSource]:
         if not sql_path.exists():
             continue
         doc_path = toml_path.with_suffix(".md")
-        if not doc_path.exists():
-            doc_path = None
-        sources.append(_RouteSource(toml_path=toml_path, sql_path=sql_path, doc_path=doc_path))
-        seen.add(sql_path.resolve())
+        sources.append(
+            _RouteSource(
+                toml_path=toml_path,
+                sql_path=sql_path,
+                doc_path=doc_path if doc_path.exists() else None,
+            )
+        )
+
+    seen_sql = {source.sql_path.resolve() for source in sources}
 
     unmatched: list[Path] = []
     for sql_path in sorted(root.rglob("*.sql")):
         if not sql_path.is_file():
             continue
-        if sql_path.resolve() in seen:
+        if sql_path.resolve() in seen_sql:
             continue
-        toml_candidate = sql_path.with_suffix(".toml")
-        if toml_candidate.exists():
+        if sql_path.with_suffix(".toml").exists():
             continue
         try:
-            relative = sql_path.relative_to(root)
+            unmatched.append(sql_path.relative_to(root))
         except ValueError:
             continue
-        unmatched.append(relative)
     if unmatched:
         missing = ", ".join(str(path) for path in unmatched)
         raise RouteCompilationError(f"Found SQL files without matching TOML: {missing}")
